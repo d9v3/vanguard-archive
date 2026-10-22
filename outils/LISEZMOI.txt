@@ -15,12 +15,12 @@ Cette clé contient le programme pour Linux, Windows et macOS, sa base de donné
   macOS/vanguard        macOS 12 et plus récents (Apple Silicon et Intel) : double-cliquer « Lancer Vanguard.command »
                         à la racine (le Terminal s'ouvre).
   autorun.sh            Linux : GNOME propose de le lancer au branchement ; sinon, double-clic ou ./autorun.sh
-  donnees/              Base des appareils (un carnet par réseau : chez soi, chez chaque ami) et dernier
-                        rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Vanguard qui voit la clé branchée l'utilise. Sur un autre
+  donnees/              Base des appareils (un carnet par réseau : celui du propriétaire, celui de chaque ami)
+                        et dernier rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Vanguard qui voit la clé branchée l'utilise. Sur un autre
                         ordinateur, la clé est protégée : la base y est lue, et ce qui est ajouté reste sur cet ordinateur.
   traces/               Traces collectées après une infection (vanguard traces), un dossier daté par collecte ;
-                        en clair, avec des données personnelles. Ailleurs que chez le propriétaire, la clé est
-                        protégée : elles restent sur l'ordinateur.
+                        en clair, avec des données personnelles. Hors de l'ordinateur du propriétaire, la clé est
+                        protégée : elles restent sur cet ordinateur.
   source/               Code source complet (Rust) avec son historique git.
   ISO/                  En développement, absent de certaines clés : images qui démarrent un ordinateur, par le
                         menu de Ventoy (Omarchy, Arch Linux, Debian, Fedora, SystemRescue et Windows 11).
@@ -75,14 +75,14 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Audit du réseau : six notes (exposition à Internet, Wi-Fi, séparation des appareils, DNS et certificats,
          objets connectés, ordinateurs), sans rien attaquer ; fait aussi par le bilan complet (vanguard audit-reseau)
        Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
-       Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box,
+       Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation du routeur,
          empoisonneur de noms, programme arrivé dans Téléchargements)
        Tableau de bord de la surveillance : alertes jour par jour, nouveaux appareils (page locale)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé aux mesures habituelles
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après accord)
-       Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur la box)
+       Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur le routeur)
        Type de NAT pour le jeu (ouvert, modéré ou strict) · Caméras cachées ? (location, chez quelqu'un)
-       Box et objets connectés : modèle de la box, caméras, imprimantes, NAS… et leur mot de passe d'origine
+       Box et objets connectés : modèle du routeur, caméras, imprimantes, NAS… et leur mot de passe d'origine
          (d'après le dernier scan, rien n'est sondé)
   6  Antivirus et protection ›
        Analyse rapide · Analyse complète du dossier personnel

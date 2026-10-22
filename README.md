@@ -90,9 +90,9 @@ vie privée.
 | Menace ou domaine | Ce que fait Vanguard |
 |---|---|
 | **Le bilan** | Une note de A à F sur tout ce qui suit, et aussi : pare-feu, mises à jour et failles connues, chiffrement, comptes, SSH, partages ouverts à tous, heure, fin de support, comptes oubliés, santé des disques… Chaque problème est expliqué, avec sa correction, appliquée après accord. |
-| **Exposition vers Internet** | L'audit du réseau en six notes (exposition, Wi-Fi, séparation des appareils, DNS et certificats, objets connectés, ordinateurs) ; les ports que la box ouvre vers Internet (UPnP), les ports ouverts et le pare-feu de cet ordinateur, l'adresse de la maison sur liste noire, la page d'administration de la box en HTTP seul. |
+| **Exposition vers Internet** | L'audit du réseau en six notes (exposition, Wi-Fi, séparation des appareils, DNS et certificats, objets connectés, ordinateurs) ; les ports que le routeur ouvre vers Internet (UPnP), les ports ouverts et le pare-feu de cet ordinateur, l'adresse Internet publique sur liste noire, la page d'administration du routeur en HTTP seul. |
 | **Intrus sur le Wi-Fi** | Chaque appareil du réseau, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés toutes les heures, avec un tableau de bord dans le navigateur ; la protection du Wi-Fi (WEP, WPA2, WPA3), le faux point d'accès qui copie son nom, les appareils Bluetooth appairés depuis peu. |
-| **Objets connectés** | La box et les objets du réseau (caméras, imprimantes, NAS, télés, domotique…) reconnus, avec leur mot de passe d'origine à changer ; les caméras cachées, dans une location ou chez quelqu'un. |
+| **Objets connectés** | Le routeur et les objets du réseau (caméras, imprimantes, NAS, télés, domotique…) reconnus, avec leur mot de passe d'origine à changer ; les caméras cachées, dans une location ou chez quelqu'un. |
 | **Poste infecté** | Antivirus, 308 règles YARA et les empreintes de logiciels malveillants connus de MalwareBazaar (clé abuse.ch gratuite), la mémoire des programmes qui tournent (à la demande), la chasse aux menaces en direct (mot de passe deviné, programmes en marche suspects), le blocage des menaces, d'un clic ou tout seul pour ce qui ne fait aucun doute (protection active), fichiers-pièges contre les rançongiciels, blocages de Windows Defender, ce qui se lance en cachette, portes dérobées, portes cachées de Windows et pilotes vulnérables, signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, agents d'IA trop permissifs, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer, avec la chronologie de l'incident. |
 | **DNS et certificats détournés** | Le DNS réellement utilisé (et les réponses inventées), les certificats racine ajoutés (interception du HTTPS), le proxy imposé et les sites redirigés par le fichier hosts, la recherche automatique du proxy (WPAD), les extensions de navigateur qui lisent tous les sites. |
 | **Arnaques et prise de contrôle** | Faux technicien (logiciels de prise de contrôle à distance), liens dangereux examinés sans les ouvrir, fichiers téléchargés vérifiés, mots de passe et adresses courriel fuités, compte piraté, bac à sable pour un programme inconnu. |
@@ -108,7 +108,7 @@ vie privée.
 - Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
   verrouillage de l'écran, comptes (et leur blocage après des mots de passe faux, longueur minimale : Linux, Windows),
   recherche automatique du proxy (WPAD : Windows, macOS), SSH (et ses tentatives de connexion ratées, venues
-  d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs ; les ports renvoyés ouverts au réseau,
+  d'Internet ou du réseau local, et le client qui ne vérifie pas les serveurs ; les ports renvoyés ouverts au réseau,
   l'affichage X11 renvoyé, trop d'essais de mot de passe ; les algorithmes cassés, SHA-1, CBC, 3DES, MD5 ou DSA,
   rouverts dans sshd, retirés après `sshd -t` sans couper aucune connexion), sudo, groupes qui valent root (docker,
   lxd, libvirt, disk), dossiers de commandes que d'autres comptes peuvent modifier, durcissement du noyau (sous
@@ -147,18 +147,18 @@ vie privée.
 #### Exposition vers Internet et réseau local
 
 **Audit du réseau, domaine par domaine** (`vanguard audit-reseau`, menu Réseau et Internet › 2, et à la suite du
-bilan complet) — six notes : exposition à Internet (les ports que la box ouvre, demandés à la box elle-même, l'IPv6
-publique sans pare-feu), Wi-Fi (chiffrement, WPS, faux point d'accès, lus dans les balises), séparation des appareils
-(objets connectés sur le réseau des ordinateurs, serveur DHCP qui n'est pas la box, intégrité ARP), DNS et
-certificats, objets connectés, ordinateurs. Rien n'est attaqué. Ce qui n'a pas pu être vérifié est dit et ne compte
+bilan complet) — six notes : exposition à Internet (les ports que le routeur ouvre, demandés au routeur lui-même,
+l'IPv6 publique sans pare-feu), Wi-Fi (chiffrement, WPS, faux point d'accès, lus dans les balises), séparation des
+appareils (objets connectés sur le réseau des ordinateurs, serveur DHCP qui n'est pas le routeur, intégrité ARP), DNS
+et certificats, objets connectés, ordinateurs. Rien n'est attaqué. Ce qui n'a pas pu être vérifié est dit et ne compte
 jamais comme sain : sans assez de vérifications, pas de note.
 
 **Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts (TCP, et UDP : SNMP, NetBIOS, UPnP, DNS,
-mDNS) et leurs risques ; les nouveaux venus signalés, un carnet par réseau (chez soi, chez chaque ami), des surnoms
-(« imprimante HP ») ; les ports que des appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, par un
-client UPnP écrit en Rust ; en secours, miniupnpc sous Linux et macOS, l'interface UPnP de Windows sous Windows).
-Après accord, l'adresse Internet de la maison est cherchée dans quatre listes noires (Spamhaus, SpamCop, DroneBL,
-PSBL) : listée pour pourriel ou attaques, un appareil est sans doute infecté.
+mDNS) et leurs risques ; les nouveaux venus signalés, un carnet par réseau (celui du propriétaire, celui de chaque
+ami), des surnoms (« imprimante HP ») ; les ports que des appareils ont ouverts vers Internet sur le routeur par UPnP
+(lecture seule, par un client UPnP écrit en Rust ; en secours, miniupnpc sous Linux et macOS, l'interface UPnP de
+Windows sous Windows). Après accord, l'adresse Internet publique est cherchée dans quatre listes noires (Spamhaus,
+SpamCop, DroneBL, PSBL) : listée pour pourriel ou attaques, un appareil est sans doute infecté.
 Pendant le scan, Vanguard demande aussi un nom qui n'existe pas (LLMNR, NetBIOS, mDNS) : personne de légitime n'y
 répond, et l'appareil qui le fait est un empoisonneur comme Responder, qui vole les mots de passe Windows du réseau ;
 la surveillance horaire le signale aussi.
@@ -170,7 +170,7 @@ la surveillance horaire le signale aussi.
 - Bluetooth : ordinateur visible en permanence, et appareils appairés depuis moins d'une semaine (un clavier
   appairé par quelqu'un d'autre tape ce qu'il veut).
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
-  la machine baisse, si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP), ou si un
+  la machine baisse, si le routeur semble usurpé (adresse MAC partagée ou changée : usurpation ARP), ou si un
   programme ou un fichier déguisé arrive dans Téléchargements (à vérifier avant de l'ouvrir ; avec la protection
   active, celui dont l'empreinte est dans MalwareBazaar est mis en quarantaine tout seul).
   Son tableau de bord, une page locale ouverte dans le navigateur : son état, les alertes jour par jour (gardées
@@ -180,9 +180,9 @@ la surveillance horaire le signale aussi.
 #### Objets connectés
 
 **Box et objets connectés** — après le scan, ou plus tard d'après le dernier scan gardé (`vanguard objets`), ce
-que la box dit d'elle-même (souvent son modèle et la version de son logiciel), une page d'administration en HTTP
+que le routeur dit de lui-même (souvent son modèle et la version de son logiciel), une page d'administration en HTTP
 seul, et les caméras, imprimantes, NAS, télés, enceintes, consoles et objets de domotique, reconnus à leur
-fabricant, à leur nom, à leurs ports et à leurs annonces. Pour la box, les caméras, les imprimantes et les NAS, le
+fabricant, à leur nom, à leurs ports et à leurs annonces. Pour le routeur, les caméras, les imprimantes et les NAS, le
 conseil de changer le mot de passe d'origine : rien n'est sondé en plus et aucun mot de passe n'est essayé. Une
 seule exception, annoncée au scan : une demande SNMP « décris-toi » avec le mot de passe de lecture d'usine
 « public », en lecture seule, qui donne le modèle des imprimantes et des NAS ; un appareil qui y répond est signalé,
@@ -325,8 +325,8 @@ fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
 #### Vie privée et secrets
 
 **Protéger les données de la clé** — le carnet des appareils de la clé (noms, adresses MAC, surnoms) chiffré par une
-phrase (XChaCha20-Poly1305, phrase dérivée par Argon2id), contre une clé perdue ou prêtée. Chez soi, rien ne change :
-la clé de données est gardée sur l'ordinateur du propriétaire. Ailleurs, Vanguard demande la phrase, ou continue sans
+phrase (XChaCha20-Poly1305, phrase dérivée par Argon2id), contre une clé perdue ou prêtée. Sur l'ordinateur du
+propriétaire, rien ne change : la clé de données y est gardée. Ailleurs, Vanguard demande la phrase, ou continue sans
 le carnet. Le rapport et le diagnostic ne s'écrivent plus sur la clé. Sur demande, réversible, avec une sauvegarde
 proposée avant ; le bilan signale un carnet resté en clair.
 
@@ -374,7 +374,7 @@ paniques du noyau et rapports de plantage sous macOS), avec une copie texte enre
 
 **Dépanner pas à pas** — les pannes de tous les jours, prises comme le ferait quelqu'un qui s'y connaît : pas
 d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante qui ne marche pas, disque plein. Deux ou trois
-questions, puis Vanguard vérifie lui-même (adresse, box, Internet, DNS ; signal Wi-Fi ; service du son et sortie
+questions, puis Vanguard vérifie lui-même (adresse, routeur, Internet, DNS ; signal Wi-Fi ; service du son et sortie
 choisie ; file d'impression et imprimante sur le réseau ; place des disques) et propose la bonne réparation ou le bon
 outil, toujours après accord. Et trois parcours pour les grands moments : **après une infection** (les traces gardées
 d'abord, puis ce qui presse selon le signe, le bilan de ce qui a pu s'installer, les analyses dans l'ordre, puis les
@@ -426,7 +426,7 @@ dit ce qui a vraiment été gagné.
 verdict critère par critère et des conseils.
 
 **Wi-Fi, NAT et DNS** — le Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre à
-régler sur la box ; le type de NAT pour le jeu (ouvert, modéré ou strict, comme sur les consoles), double NAT et
+régler sur le routeur ; le type de NAT pour le jeu (ouvert, modéré ou strict, comme sur les consoles), double NAT et
 adresse partagée par le fournisseur compris ; le DNS le plus rapide, mesuré ici, proposé seulement s'il ne remplace
 pas un DNS qui protège (NextDNS, chiffré, filtrant) et annulable.
 
@@ -571,7 +571,7 @@ réseau, ou sur un réseau qu'on a le droit d'auditer.
   </tr>
 </table>
 
-<sub>Captures refaites à chaque version, sur une copie des données ; les adresses et les noms de la maison y sont
+<sub>Captures refaites à chaque version, sur une copie des données ; les adresses et les noms du réseau local y sont
 masqués.</sub>
 
 ## Systèmes pris en charge
@@ -629,11 +629,11 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard memoire` | analyse YARA de la mémoire des programmes qui tournent (malware sans fichier), à la demande ; LSASS et processus protégés : leur mémoire n'est jamais lue |
 | `vanguard pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
 | `vanguard durcir` | blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux dossiers ; chacun après accord, annulable (Windows) |
-| `vanguard listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
+| `vanguard listes-noires` | l'adresse Internet publique sur liste noire ? (après accord) |
 | `vanguard canaux` | Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre |
 | `vanguard nat` | type de NAT pour le jeu : ouvert, modéré ou strict |
 | `vanguard cameras` | caméras cachées sur le réseau (location, chez quelqu'un) |
-| `vanguard objets` | box et objets connectés d'après le dernier scan gardé : modèle de la box, caméras, imprimantes, NAS… et leur mot de passe d'origine (rien n'est sondé) |
+| `vanguard objets` | routeur et objets connectés d'après le dernier scan gardé : modèle du routeur, caméras, imprimantes, NAS… et leur mot de passe d'origine (rien n'est sondé) |
 | `vanguard dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
 | `vanguard appris` | ce que Vanguard a appris : les habitudes et les choix notés, et les oublier |
 | `vanguard motdepasse` | mots de passe fuités |
@@ -647,7 +647,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard quarantaine` | les fichiers isolés, à remettre à leur place ou à supprimer |
 | `vanguard secrets` | secrets oubliés dans l'historique des projets git (et gitleaks, s'il est installé ; lecture seule) |
 | `vanguard conteneurs` | failles connues des images Docker ou Podman (trivy, s'il est installé ; lecture seule) |
-| `vanguard distance` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
+| `vanguard distance` | quelqu'un contrôle mon ordinateur ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
 | `vanguard lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
 | `vanguard verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |
 | `vanguard integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |

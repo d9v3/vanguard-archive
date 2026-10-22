@@ -82,7 +82,7 @@ Wi-Fi, a vulnerable connected device, an infected computer, a hijacked DNS or ce
 | Threat or area | What Vanguard does |
 |---|---|
 | **The check** | A grade from A to F on everything below, and also: firewall, updates and known vulnerabilities, encryption, accounts, SSH, shares open to everyone, clock, end of support, forgotten accounts, disk health… Each problem is explained, with its fix, applied after consent. |
-| **Exposure to the Internet** | The network audit in six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers); the ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the home's address on a blocklist, the router's admin page over HTTP only. |
+| **Exposure to the Internet** | The network audit in six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers); the ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the public Internet address on a blocklist, the router's admin page over HTTP only. |
 | **Intruders on the Wi-Fi** | Every device on the network, its manufacturer, its open ports and its risks; newcomers flagged every hour, with a dashboard in the browser; the Wi-Fi's protection (WEP, WPA2, WPA3), the fake access point copying its name, Bluetooth devices paired recently. |
 | **Connected devices** | The router and the devices on the network (cameras, printers, NAS, TVs, smart home…) recognized, with their default password to change; hidden cameras, in a rental or at someone's place. |
 | **Infected computer** | Antivirus, 308 YARA rules and the fingerprints of known malware from MalwareBazaar (free abuse.ch key), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), threat blocking, with one click or by itself for clear-cut threats (active protection), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
@@ -99,13 +99,13 @@ Wi-Fi, a vulnerable connected device, an infected computer, a hijacked DNS or ce
 
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
   accounts (and their lockout after wrong passwords, minimum length: Linux, Windows), automatic proxy discovery
-  (WPAD: Windows, macOS), SSH (and its failed login attempts, from the Internet or from home, and a client that does
-  not check servers; forwarded ports open to the network, forwarded X11 display, too many password attempts; broken
-  algorithms, SHA-1, CBC, 3DES, MD5 or DSA, reopened in sshd, removed after `sshd -t` without cutting any
-  connection), sudo, groups worth root (docker, lxd, libvirt, disk), command folders other accounts can change,
-  kernel hardening (on Linux: ICMP redirects in IPv4 and IPv6, impossible source addresses, user namespaces open to
-  all; on macOS: sealed system volume, enforced code signing, library validation, added extensions), badly protected
-  secret files, backups, file shares open to everyone (Samba, NFS, Windows shares, macOS File Sharing: the
+  (WPAD: Windows, macOS), SSH (and its failed login attempts, from the Internet or from the local network, and a
+  client that does not check servers; forwarded ports open to the network, forwarded X11 display, too many password
+  attempts; broken algorithms, SHA-1, CBC, 3DES, MD5 or DSA, reopened in sshd, removed after `sshd -t` without
+  cutting any connection), sudo, groups worth root (docker, lxd, libvirt, disk), command folders other accounts can
+  change, kernel hardening (on Linux: ICMP redirects in IPv4 and IPv6, impossible source addresses, user namespaces
+  open to all; on macOS: sealed system volume, enforced code signing, library validation, added extensions), badly
+  protected secret files, backups, file shares open to everyone (Samba, NFS, Windows shares, macOS File Sharing: the
   password-less access is closed after your consent, named accounts keep theirs).
 - Clock set automatically; end of support: Windows 10 and the Windows 11 or macOS versions that no longer get fixes,
   programs abandoned by their publisher (Flash, Java 7, Office 2016…), browsers that no longer update; forgotten
@@ -140,11 +140,11 @@ devices on the computers' network, a DHCP server that is not the router, ARP int
 connected devices, computers. Nothing is attacked. What could not be checked is said and never counts as safe:
 without enough checks, no grade.
 
-**Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS)
-and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
-the ports that devices opened to the Internet on the router through UPnP (read-only, by a UPnP client written in
-Rust; as a fallback, miniupnpc on Linux and macOS, the Windows UPnP interface on Windows).
-After your consent, the home's Internet address is looked up in four blocklists (Spamhaus, SpamCop, DroneBL, PSBL):
+**Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS) and
+its risks; newcomers flagged, one notebook per network (the owner's, each friend's), nicknames ("HP printer"); the
+ports that devices opened to the Internet on the router through UPnP (read-only, by a UPnP client written in Rust; as
+a fallback, miniupnpc on Linux and macOS, the Windows UPnP interface on Windows).
+After your consent, the public Internet address is looked up in four blocklists (Spamhaus, SpamCop, DroneBL, PSBL):
 listed for spam or attacks, a device is probably infected. During the scan, Vanguard also asks for a name that does
 not exist (LLMNR, NetBIOS, mDNS): nobody legitimate answers, and the device that does is a poisoner like Responder,
 which steals the network's Windows passwords; the hourly monitoring flags it too.
@@ -301,8 +301,8 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
 #### Privacy and secrets
 
 **Protect the key's data** — the key's device record (names, MAC addresses, nicknames) encrypted by a passphrase
-(XChaCha20-Poly1305, passphrase derived by Argon2id), against a lost or lent key. At home, nothing changes: the data
-key is kept on the owner's computer. Elsewhere, Vanguard asks for the passphrase, or goes on without the record. The
+(XChaCha20-Poly1305, passphrase derived by Argon2id), against a lost or lent key. On the owner's computer, nothing
+changes: the data key is kept there. Elsewhere, Vanguard asks for the passphrase, or goes on without the record. The
 report and the diagnostic are no longer written to the key. On request, reversible, with a backup offered first; the
 check reports a record left in clear.
 
@@ -533,7 +533,8 @@ you are allowed to audit.
   </tr>
 </table>
 
-<sub>Screenshots retaken at each version, on a copy of the data; the home's addresses and names are masked.</sub>
+<sub>Screenshots retaken at each version, on a copy of the data; the local network's addresses and names are
+masked.</sub>
 
 ## Supported systems
 
@@ -590,7 +591,7 @@ Each menu entry is also a command.
 | `vanguard memory` | YARA scan of the memory of running programs (fileless malware), on demand; LSASS and protected processes: their memory is never read |
 | `vanguard decoys [--remove]` | decoy files against ransomware: place them, check them, remove them |
 | `vanguard harden` | Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access; each after your consent, undoable (Windows) |
-| `vanguard blocklists` | the home's Internet address on a blocklist? (after your consent) |
+| `vanguard blocklists` | the public Internet address on a blocklist? (after your consent) |
 | `vanguard channels` | crowded Wi-Fi: nearby networks by channel, and the freest channel |
 | `vanguard nat` | NAT type for gaming: open, moderate or strict |
 | `vanguard cameras` | hidden cameras on the network (rental, someone else's place) |
@@ -608,7 +609,7 @@ Each menu entry is also a command.
 | `vanguard quarantine` | the isolated files, to put back in their place or to delete |
 | `vanguard secrets` | secrets forgotten in the history of git projects (and gitleaks, if installed; read-only) |
 | `vanguard containers` | known flaws in Docker or Podman images (trivy, if installed; read-only) |
-| `vanguard remote-access` | is someone controlling my PC? remote control tools (tech-support scam), removed after consent |
+| `vanguard remote-access` | is someone controlling my computer? remote control tools (tech-support scam), removed after consent |
 | `vanguard link <address>` | is this link dangerous? (checked without opening it; online after your consent) |
 | `vanguard check-file <file> [checksum]` | check a downloaded file: checksum, name and content, YARA, antivirus |
 | `vanguard integrity [--accept] [--live]` | integrity of critical files (BLAKE3 fingerprints), live if wanted |

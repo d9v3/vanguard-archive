@@ -24,7 +24,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   quand Vanguard dit les empreintes de MalwareBazaar non vérifiées faute de clé, et la reconnaissance par empreinte
   exacte s'essaie sur une copie posée pour l'essai, puis retirée : plus rien ne dépend des listes fermées le 21 octobre.
 - **Présentation.** Vanguard se présente comme la cyberdéfense portable des postes et des réseaux (README, page des
-  fonctions, description du dépôt, fichiers de la clé). La page des fonctions de GitHub Pages est de nouveau refaite à
+  fonctions, description du dépôt, fichiers de la clé), dans un vocabulaire professionnel : le routeur, le réseau
+  local, l'adresse Internet publique. La page des fonctions de GitHub Pages est de nouveau refaite à
   chaque publication : elle en était restée à la 0.82, le programme lancé par un chemin relatif depuis un autre
   dossier.
 

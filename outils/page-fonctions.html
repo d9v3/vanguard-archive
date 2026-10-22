@@ -2,7 +2,7 @@
      version) et sur claude.ai (skill /livrer). Les {{…}} sont remplis par outils/page-fonctions.py (version, date,
      nombres de règles, de commandes et de tests, liste des commandes) ; les fonctions et les nouveautés se tiennent à
      la main, comme la liste des fonctions des README, rangées par menace comme eux : la défense d'abord, puis « En
-     plus » (dépannage, optimisation, données, suivi). Rien de personnel : ni nom, ni réseau, ni adresse de la maison. -->
+     plus » (dépannage, optimisation, données, suivi). Rien de personnel : ni nom, ni réseau, ni adresse Internet publique. -->
 <title>Vanguard {{VERSION_COURTE}}</title>
 <meta name="description" content="Vanguard : cyberdéfense portable des postes et des réseaux, depuis une clé USB. Durcissement, détection, blocage et réponse aux incidents pour Windows, Linux et macOS ; le dépannage en plus. Fonctions, fiche technique et commandes.">
 <meta name="theme-color" content="#0b1220">
@@ -269,13 +269,13 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
     3  <a href="#bilan">Rapport détaillé dans le navigateur</a>
   <span class="filet">OUTILS</span>
     4  <a href="#depannage">Cette machine ›</a>                      <span class="g">audit, mises à jour, réparer…</span>
-    5  <a href="#audit">Réseau et Internet ›</a>                 <span class="g">audit du réseau, appareils, box</span>
+    5  <a href="#audit">Réseau et Internet ›</a>                 <span class="g">appareils, surveillance, débit</span>
     6  <a href="#infection">Antivirus et protection ›</a>            <span class="g">analyses, clé USB, fuites…</span>
     7  <a href="#optimiser">Installer et jouer ›</a>                 <span class="g">logiciels libres, gaming</span>
     8  <a href="#optimiser">Optimiser ›</a>                          <span class="g">nettoyer, confidentialité…</span>
     9  <a href="#donnees">Données ›</a>                            <span class="g">sauvegarder, copier mes fichiers</span>
    10  <a href="#suivi">Guide des commandes ›</a>                <span class="g">Linux, Windows, macOS, pas à pas</span>
-   11  <a href="#depannage">Dépanner pas à pas ›</a>                 <span class="g">Internet, son, un proche…</span>
+   11  <a href="#depannage">Dépanner pas à pas ›</a>                 <span class="g">Internet, son, imprimante…</span>
    12  <a href="#suivi">Extensions ›</a>                         <span class="g">plugins et labo, hors Vanguard</span>
     q  Quitter                              <span class="g">s : paramètres</span></pre>
         <ul class="menu-court">
@@ -326,23 +326,23 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
       <article class="domaine" id="exposition">
         <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg></span><div><h3>Exposition vers Internet</h3><span class="touche">vanguard audit-reseau · reseau</span></div></header>
         <ul>
-          <li><b>Les ports que la box ouvre vers Internet</b>, demandés à la box elle-même (UPnP) : une caméra ou un bureau à distance joignable de n'importe où, c'est critique.</li>
-          <li><b>UPnP actif</b> : n'importe quel programme de la maison peut ouvrir un port ; CGNAT ou double NAT reconnus.</li>
-          <li><b>IPv6 publique</b> de l'ordinateur sans pare-feu, services d'administration de la box côté réseau, adresse de la maison sur liste noire.</li>
+          <li><b>Les ports que le routeur ouvre vers Internet</b>, demandés au routeur lui-même (UPnP) : une caméra ou un bureau à distance joignable de n'importe où, c'est critique.</li>
+          <li><b>UPnP actif</b> : n'importe quel programme du réseau local peut ouvrir un port ; CGNAT ou double NAT reconnus.</li>
+          <li><b>IPv6 publique</b> de l'ordinateur sans pare-feu, services d'administration du routeur côté réseau, adresse Internet publique sur liste noire.</li>
         </ul>
       </article>
       <article class="domaine" id="wifi">
         <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M6 12.5a9 9 0 0 1 12 0M9.5 16a4 4 0 0 1 5 0"/><circle cx="12" cy="19.5" r="1"/></svg></span><div><h3>Intrus sur le Wi-Fi</h3><span class="touche">vanguard audit-reseau · surveillance · tableau</span></div></header>
         <ul>
           <li><b>Chaque appareil du réseau</b> : fabricant, ports ouverts, risques ; les nouveaux venus signalés toutes les heures, avec un tableau de bord dans le navigateur.</li>
-          <li><b>La protection du Wi-Fi</b> lue dans les balises de la box : WEP ou TKIP, WPS allumé (le code PIN cassable), plusieurs émetteurs pour le même nom (faux point d'accès).</li>
+          <li><b>La protection du Wi-Fi</b> lue dans les balises du routeur : WEP ou TKIP, WPS allumé (le code PIN cassable), plusieurs émetteurs pour le même nom (faux point d'accès).</li>
           <li><b>Les réseaux ouverts</b> qui se reconnectent seuls, les appareils Bluetooth appairés depuis peu.</li>
         </ul>
       </article>
       <article class="domaine" id="objets">
         <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4M7 9h4M7 13h2"/></svg></span><div><h3>Objets connectés</h3><span class="touche">vanguard objets · cameras</span></div></header>
         <ul>
-          <li><b>La box et les objets reconnus</b> : caméras, imprimantes, NAS, télés, enceintes, consoles, domotique, avec ce que la box annonce (modèle, logiciel).</li>
+          <li><b>Le routeur et les objets reconnus</b> : caméras, imprimantes, NAS, télés, enceintes, consoles, domotique, avec ce que le routeur annonce (modèle, logiciel).</li>
           <li><b>Mot de passe d'origine à changer</b>, administration en HTTP seul ou en telnet : un conseil clair, jamais un essai de mot de passe.</li>
           <li><b>Caméras cachées</b> dans une location ou chez quelqu'un ; objets et ordinateurs sur le même réseau (conseil du réseau invité).</li>
         </ul>
@@ -363,7 +363,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
       <article class="domaine" id="dns">
         <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M9.5 12.5l2 2 3.5-4"/></svg></span><div><h3>DNS et certificats détournés</h3><span class="touche">vanguard audit-reseau · dns-rapide</span></div></header>
         <ul>
-          <li><b>Le DNS que la box distribue</b> à toute la maison comparé à celui de l'ordinateur ; réponses comparées à deux résolveurs publics ; DNSSEC ; DNS chiffré.</li>
+          <li><b>Le DNS que le routeur distribue</b> à tous les appareils du réseau comparé à celui de l'ordinateur ; réponses comparées à deux résolveurs publics ; DNSSEC ; DNS chiffré.</li>
           <li><b>HTTPS intercepté en acte</b> : le certificat présenté par un site connu, les racines ajoutées, les exceptions gardées par Firefox.</li>
           <li><b>Proxy imposé</b>, sites redirigés par le fichier hosts, WPAD, extensions de navigateur qui lisent tous les sites.</li>
         </ul>
@@ -437,14 +437,14 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
       <p><code>vanguard audit-reseau</code>, ou menu Réseau et Internet › 2, enchaîné au bilan complet : chaque domaine est noté de 100 vers 0 selon ce qui a été trouvé. Ce qui n'a pas pu être vérifié est dit, exclu de la note, et jamais compté comme sain.</p>
     </div>
     <div class="audit">
-      <div><b>Exposition</b><span>Redirections de la box, UPnP, adresse publique, IPv6, administration de la box.</span><span class="k">COM-EXP-001 à 004</span></div>
+      <div><b>Exposition</b><span>Redirections du routeur, UPnP, adresse publique, IPv6, administration du routeur.</span><span class="k">COM-EXP-001 à 004</span></div>
       <div><b>Wi-Fi</b><span>Chiffrement faible, WPS, faux point d'accès, réseaux ouverts, appareils inconnus.</span><span class="k">COM-WIF-001 à 005</span></div>
-      <div><b>Segmentation</b><span>Objets et ordinateurs mêlés, isolation, DHCP qui n'est pas la box, deux routeurs IPv6, box usurpée.</span><span class="k">COM-SEG · COM-ARP</span></div>
-      <div><b>DNS et TLS</b><span>DNS de la box, chiffré, divergent, DNSSEC ; HTTPS intercepté, exceptions de certificat.</span><span class="k">COM-DNS · COM-TLS</span></div>
+      <div><b>Segmentation</b><span>Objets et ordinateurs mêlés, isolation, DHCP qui n'est pas le routeur, deux routeurs IPv6, routeur usurpé.</span><span class="k">COM-SEG · COM-ARP</span></div>
+      <div><b>DNS et TLS</b><span>DNS du routeur, chiffré, divergent, DNSSEC ; HTTPS intercepté, exceptions de certificat.</span><span class="k">COM-DNS · COM-TLS</span></div>
       <div><b>Appareils</b><span>Objet joignable d'Internet, administrations ouvertes, mots de passe d'origine, caméras.</span><span class="k">COM-APP-001 à 005</span></div>
       <div><b>Postes</b><span>Cet ordinateur vu du réseau, les autres ordinateurs, empoisonneur, botnets, liste noire.</span><span class="k">COM-PST-001 à 003</span></div>
     </div>
-    <p class="note">Règles écrites d'après les guides de la NSA, du Centre canadien pour la cybersécurité, de l'ANSSI, du NIST et de l'ETSI pour les objets connectés. La surveillance horaire alerte au changement : redirection nouvelle, DNS de la box changé, Wi-Fi qui descend, IPv6 nouvelle.</p>
+    <p class="note">Règles écrites d'après les guides de la NSA, du Centre canadien pour la cybersécurité, de l'ANSSI, du NIST et de l'ETSI pour les objets connectés. La surveillance horaire alerte au changement : redirection nouvelle, DNS du routeur changé, Wi-Fi qui descend, IPv6 nouvelle.</p>
   </section>
 
   <section id="technique">
@@ -510,7 +510,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
         </ul>
       </article>
       <article>
-        <h4>La box</h4>
+        <h4>Le routeur</h4>
         <ul>
           <li><b>Client UPnP IGD en Rust</b> : SSDP, description, SOAP en lecture seule ; les redirections de ports jusqu'au bout de la liste, l'adresse publique, le modèle et le logiciel.</li>
           <li><b>Rien d'autre n'est envoyé</b> : aucun mot de passe essayé. Seule exception, annoncée : une demande SNMP « décris-toi » avec le mot de passe de lecture d'usine « public », en lecture seule ; un appareil qui y répond est signalé.</li>
@@ -533,7 +533,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
       <div class="source"><b>ThreatFox · Feodo Tracker</b><span>Serveurs de commande de botnets, comparés aux connexions de chaque programme et à la mémoire DNS.</span><span class="k">abuse.ch · clé gratuite pour ThreatFox</span></div>
       <div class="source"><b>URLhaus · Spamhaus DBL · SURBL</b><span>Liens dangereux ; le domaine seulement sort, jamais le lien entier. Âge du domaine par RDAP.</span><span class="k">après accord · clé abuse.ch pour URLhaus</span></div>
       <div class="source"><b>Have I Been Pwned</b><span>Mots de passe fuités par k-anonymat : seuls 5 caractères de l'empreinte SHA-1 partent.</span><span class="k">après accord</span></div>
-      <div class="source"><b>Spamhaus · SpamCop · DroneBL · PSBL</b><span>L'adresse Internet de la maison sur une liste noire : signe d'un appareil infecté.</span><span class="k">après accord</span></div>
+      <div class="source"><b>Spamhaus · SpamCop · DroneBL · PSBL</b><span>L'adresse Internet publique sur une liste noire : signe d'un appareil infecté.</span><span class="k">après accord</span></div>
       <div class="source"><b>Résolveurs publics</b><span>Les réponses du DNS utilisé comparées à celles de deux résolveurs publics sur des noms stables ; le Bouclier canadien de l'ACEI reconnu comme DNS qui protège.</span><span class="k">audit du réseau</span></div>
     </div>
 

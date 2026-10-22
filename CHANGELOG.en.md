@@ -24,7 +24,8 @@ delivered just before it. Only the latest version has its download page; every v
   Vanguard reports the MalwareBazaar fingerprints as not checked for lack of a key, and the exact-fingerprint match is
   tried on a copy laid down for the test, then removed: nothing depends any more on the lists closed on October 21.
 - **Presentation.** Vanguard now presents itself as portable cyber defense for endpoints and networks (README,
-  features page, repository description, files on the key). The GitHub Pages features page is rebuilt at each release
+  features page, repository description, files on the key), in professional wording: the router, the local network,
+  the public Internet address. The GitHub Pages features page is rebuilt at each release
   again: it had stayed at 0.82, the program being launched by a relative path from another folder.
 
 ## October 21, 2026, evening: version 0.84
