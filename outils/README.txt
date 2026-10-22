@@ -77,6 +77,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Hourly monitoring (unknown device, problem on this machine, router impersonation,
          name poisoner, program landing in Downloads)
        Monitoring dashboard: alerts day by day, new devices (local page)
+       Watcher (Linux): programs started and connections closed seen as they happen, off by default
+         (vanguard watcher on)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)

@@ -229,6 +229,13 @@ on Linux, Remote Desktop on Windows): the sign of a guessed password. And suspic
 offensive tool (mimikatz, xmrig…), a command line that downloads or hides what it runs (encoded PowerShell, mshta,
 certutil, curl piped to a shell), a program started from Downloads, a temporary folder or the recycle bin.
 
+**The watcher** (Linux 6.6 and later, off by default, `vanguard watcher on`) — between two monitoring runs, each program
+started, even one of a few milliseconds, and each TCP or UDP connection as it closes. Programs are judged as in the
+check, connections against the botnet command servers already downloaded; what is serious goes to the dashboard
+and as a notification. Without root or code loaded into the kernel, it stops nothing. A program gone before it
+could be read is counted as such, never judged safe, and the program of a closed connection is not known (the
+kernel does not give it).
+
 **Windows' hidden doors and kernel drivers** — the DLLs Windows loads by itself, often with system rights: LSA
 packages (a password filter receives every new password in clear text), AppCertDlls, print monitors, time providers,
 the Winsock catalog. And kernel drivers stored where nothing installed puts one, or known to be vulnerable (the
@@ -622,6 +629,7 @@ Each menu entry is also a command.
 | `vanguard update` | updates |
 | `vanguard repair` | repairs and cleaning |
 | `vanguard monitor on\|off` | hourly monitoring |
+| `vanguard watcher [on\|off]` | watcher (Linux 6.6 and later): programs started and connections closed, seen as they happen; off by default |
 | `vanguard dashboard [--no-open]` | monitoring dashboard: a local page opened in the browser; `--no-open` only writes it |
 | `vanguard maintenance [on\|off]` | monthly check-up; without an argument: what it would say now |
 | `vanguard name <ip\|mac> <nickname>` | name a device |

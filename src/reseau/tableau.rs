@@ -43,11 +43,13 @@ pub(crate) enum Genre {
     WiFi,
     /// Une menace bloquée par la protection active, ou qu'elle n'a pas pu bloquer (protection/blocage).
     Blocage,
+    /// Un programme ou une connexion brève vus par le veilleur (Linux), entre deux passes de la surveillance.
+    Veilleur,
     Autre,
 }
 
 impl Genre {
-    const TOUS: [Genre; 11] = [
+    const TOUS: [Genre; 12] = [
         Genre::Machine,
         Genre::Fichiers,
         Genre::Telechargement,
@@ -58,6 +60,7 @@ impl Genre {
         Genre::Port,
         Genre::WiFi,
         Genre::Blocage,
+        Genre::Veilleur,
         Genre::Autre,
     ];
 
@@ -74,6 +77,7 @@ impl Genre {
             Genre::Port => "port",
             Genre::WiFi => "wifi",
             Genre::Blocage => "blocage",
+            Genre::Veilleur => "veilleur",
             Genre::Autre => "autre",
         }
     }
@@ -95,6 +99,7 @@ impl Genre {
             Genre::Port => tr!("PORT", "PORT"),
             Genre::WiFi => tr!("WI-FI", "WI-FI"),
             Genre::Blocage => tr!("BLOCAGE", "BLOCKING"),
+            Genre::Veilleur => tr!("VEILLEUR", "WATCHER"),
             Genre::Autre => tr!("AUTRE", "OTHER"),
         }
     }
@@ -103,7 +108,7 @@ impl Genre {
     fn classe(self) -> &'static str {
         match self {
             Genre::Botnet | Genre::Passerelle | Genre::Empoisonneur | Genre::Blocage => "critique",
-            Genre::Appareil | Genre::Port | Genre::Fichiers | Genre::WiFi => "eleve",
+            Genre::Appareil | Genre::Port | Genre::Fichiers | Genre::WiFi | Genre::Veilleur => "eleve",
             Genre::Machine | Genre::Telechargement => "moyen",
             Genre::Autre => "info",
         }
