@@ -34,6 +34,13 @@ delivered just before it. Only the latest version has its download page; every v
   runs five minutes after sign-in; on Linux, it catches up on wake-up the hour missed during sleep and runs five
   minutes after sign-in; on macOS, right at sign-in. Monitoring already in place is not changed silently: the
   check-up says it is "from an earlier version", and `vanguard monitor on` updates it.
+- **Enforced anti-phishing protection turned off, seen.** A Chrome, Chromium, Brave, Edge or Firefox policy (a file
+  in /etc on Linux, the registry on Windows, policies.json) that turns off Safe Browsing or SmartScreen overrides
+  Settings, which can no longer turn it back on: unwanted software uses this. The check-up says so, with where to
+  remove it. Unreadable browser settings no longer pass for protection turned on.
+- **A DNS that does not block dangerous sites is said.** The check-up reports it (information) and points to "Fastest
+  DNS", where CIRA's Canadian Shield "Protected" or Quad9 is set in one choice, undoable. Nothing is said when a DNS
+  already protects, or when nothing can tell (NextDNS, Pi-hole).
 - **Frozen Feodo Tracker list, said.** abuse.ch has not updated its botnet server list since March 4, 2026 (a single
   address). Without ThreatFox (no abuse.ch key), it was the only list read, and nothing said it was frozen: "Who talks
   to the Internet?", the check-up, blocking and the watcher now say so among what could not be checked. Its addresses

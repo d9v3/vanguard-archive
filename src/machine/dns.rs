@@ -472,6 +472,37 @@ fn constat_serveurs(s: &Serveurs) -> Constat {
     ok(CAT, trf!("DNS : {noms}{chiffrement}.", "DNS: {noms}{chiffrement}."))
 }
 
+/// Un DNS qui ne bloque pas les sites dangereux : une information, et l'outil qui en pose un, annulable. Rien quand
+/// il en bloque déjà, ou quand rien ne permet de le savoir (NextDNS, Pi-hole).
+fn sans_blocage(s: &Serveurs) -> Option<Constat> {
+    let a = Actuel {
+        serveurs: s.liste.clone(),
+        chiffre: s.chiffre,
+        resolveur_local: s.resolveur_local,
+    };
+    let passerelle = crate::reseau::scan::passerelle().map(IpAddr::V4);
+    if s.liste.is_empty() || crate::dns_rapide::bloque_les_dangereux(&a, passerelle) != Some(false) {
+        return None;
+    }
+    Some(
+        alerte(
+            CAT,
+            Niveau::Info,
+            tr!(
+                "Ton DNS ne bloque pas les sites dangereux (hameçonnage, logiciels malveillants). Un DNS qui protège les arrête avant même la connexion : le Bouclier canadien « Protégé » de l'ACEI (gratuit, sans profilage) ou Quad9.",
+                "Your DNS does not block dangerous sites (phishing, malware). A protective DNS stops them before the connection even starts: CIRA's Canadian Shield “Protected” (free, no profiling) or Quad9."
+            ),
+        )
+        .manuel(
+            tr!(
+                "En poser un : « vanguard dns-rapide » (Optimiser), choisir le Bouclier canadien ou Quad9 ; il s'annule exactement",
+                "Set one: “vanguard fast-dns” (Optimize), choose Canadian Shield or Quad9; it undoes exactly"
+            ),
+            &[],
+        ),
+    )
+}
+
 /// Un nom qui ne peut pas exister (16 chiffres hexadécimaux au hasard) : un DNS honnête répond « inconnu ».
 fn nom_inexistant() -> String {
     let graine = std::time::SystemTime::now()
@@ -508,7 +539,10 @@ pub fn dns() -> Vec<Constat> {
     let inventee = std::thread::spawn(reponse_inventee);
     let mut constats = Vec::new();
     match serveurs() {
-        Some(s) => constats.push(constat_serveurs(&s)),
+        Some(s) => {
+            constats.push(constat_serveurs(&s));
+            constats.extend(sans_blocage(&s));
+        }
         None => constats.push(super::impossible(
             CAT,
             tr!("configuration DNS illisible", "DNS configuration unreadable"),

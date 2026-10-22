@@ -176,6 +176,25 @@ fn protection(a: &Actuel, passerelle: Option<IpAddr>) -> Option<String> {
     ))
 }
 
+/// Le DNS actuel bloque-t-il les sites dangereux ? `None` : rien ne permet de le dire (résolveur sur cet ordinateur,
+/// comme NextDNS ; serveur du réseau qui n'est pas la box, comme Pi-hole) ; il peut filtrer, on ne le pousse pas.
+/// Chiffrer seul ne bloque rien.
+pub(crate) fn bloque_les_dangereux(a: &Actuel, passerelle: Option<IpAddr>) -> Option<bool> {
+    if a.resolveur_local.is_some() || a.serveurs.iter().any(|(ip, _)| ip.is_loopback()) {
+        return None;
+    }
+    if a.serveurs.iter().any(|(ip, _)| filtrant(*ip).is_some()) {
+        return Some(true);
+    }
+    if a.serveurs
+        .iter()
+        .any(|(ip, _)| ip.is_ipv4() && locale(*ip) && Some(*ip) != passerelle)
+    {
+        return None;
+    }
+    Some(false)
+}
+
 /// Le nom d'un serveur DNS actuel, pour l'écran.
 fn nom_actuel(ip: IpAddr, a: &Actuel, passerelle: Option<IpAddr>) -> &'static str {
     if ip.is_loopback() {
@@ -494,6 +513,40 @@ mod tests {
             chiffre,
             resolveur_local: local,
         }
+    }
+
+    #[test]
+    fn dns_qui_bloquent_les_dangereux() {
+        let box_ = Some("192.168.1.1".parse().unwrap());
+        // La box, Google, Cloudflare sans filtre, même chiffré : rien de bloqué, le bilan le dit.
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["192.168.1.1"], None, None), box_),
+            Some(false)
+        );
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["8.8.8.8"], None, None), box_),
+            Some(false)
+        );
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["1.1.1.1"], None, Some(true)), box_),
+            Some(false)
+        );
+        // Quad9, Cloudflare famille, Bouclier canadien « Protégé » : ils bloquent.
+        for f in ["9.9.9.9", "1.1.1.2", "149.112.121.20"] {
+            assert_eq!(bloque_les_dangereux(&actuel(&[f], None, None), box_), Some(true), "{f}");
+        }
+        // Bouclier canadien « Privé » (.10) : il ne filtre pas.
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["149.112.121.10"], None, None), box_),
+            Some(false)
+        );
+        // NextDNS sur cet ordinateur, résolveur local, Pi-hole du réseau : on ne sait pas, rien n'est poussé.
+        assert_eq!(bloque_les_dangereux(&actuel(&["127.0.0.53"], None, None), box_), None);
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["8.8.8.8"], Some("NextDNS"), None), box_),
+            None
+        );
+        assert_eq!(bloque_les_dangereux(&actuel(&["192.168.1.53"], None, None), box_), None);
     }
 
     #[test]
