@@ -225,9 +225,23 @@ class GitHub:
         script = Path("outils/publier-version.sh")
         self.publies = set(re.findall(r"\$DOSSIER/([\w.-]+)", script.read_text())) if script.exists() else set()
         self._derniere = False
+        self._reponses = {}
 
     def demander(self, *args):
-        """La réponse de gh (JSON), None si ce qu'on demande n'existe pas."""
+        """La réponse de gh (JSON), None si ce qu'on demande n'existe pas. Chaque question ne part qu'une fois, son
+        échec compris : sans Internet, douze liens vers la dernière version attendaient chacun jusqu'à 60 s."""
+        if args not in self._reponses:
+            try:
+                self._reponses[args] = self._demander(args)
+            except GhMuet as e:
+                self._reponses[args] = e
+        reponse = self._reponses[args]
+        if isinstance(reponse, GhMuet):
+            raise reponse
+        return reponse
+
+    @staticmethod
+    def _demander(args):
         try:
             r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as e:
@@ -237,6 +251,10 @@ class GitHub:
         if re.search(r"not found|404", r.stderr, re.I):
             return None
         raise GhMuet((r.stderr.strip().splitlines() or [f"code {r.returncode}"])[-1])
+
+    def depot(self):
+        """Le dépôt vu par gh (nom et page d'accueil, une seule question pour les deux), None s'il n'existe pas."""
+        return self.demander("repo", "view", self.nom, "--json", "name,homepageUrl")
 
     def derniere(self):
         """Les noms des fichiers de la dernière version, None s'il n'y en a pas."""
@@ -277,8 +295,7 @@ class GitHub:
                 return ("ok", "") if etat.get("enabled") else (
                     "mort", "signalement privé des failles coupé (Settings › Security)")
             if parties[0] in ("", "releases", "issues", "pulls", "actions", "tags", "commits", "branches", "security"):
-                trouve = self.demander("repo", "view", self.nom, "--json", "name")
-                return ("ok", "") if trouve else ("mort", "dépôt introuvable")
+                return ("ok", "") if self.depot() else ("mort", "dépôt introuvable")
         except GhMuet as e:
             return "douteux", f"gh n'a pas pu répondre ({e})"
         return "douteux", "page du dépôt que cet outil ne sait pas vérifier"
@@ -294,7 +311,7 @@ class GitHub:
     def accueil(self):
         """L'adresse de la page d'accueil du dépôt (lien affiché à côté de la description), ou None."""
         try:
-            depot = self.demander("repo", "view", self.nom, "--json", "homepageUrl") if self.nom else None
+            depot = self.depot() if self.nom else None
         except GhMuet:
             return None
         return (depot or {}).get("homepageUrl") or None
