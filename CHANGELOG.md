@@ -7,7 +7,7 @@ une seule publication par jour, qui regroupe le travail de la journée ; le 21 o
 la 0.84 au soir, qui reprend la 0.83 livrée juste avant elle. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
-## Prochaine version
+## 22 octobre 2026, au soir : version 0.85
 
 - **Dépôt des versions renommé** `d9v3/vanguard-update` (avant : vanguard-officiel). L'ancienne adresse redirige : les
   Vanguard déjà installés se mettent encore à jour.

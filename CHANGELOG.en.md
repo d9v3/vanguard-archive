@@ -7,7 +7,7 @@ a day, gathering the day's work; October 21 had two, 0.82 in the morning and 0.8
 delivered just before it. Only the latest version has its download page; every version keeps its tag in the repository
 (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
-## Next version
+## October 22, 2026, evening: version 0.85
 
 - **Release repository renamed** `d9v3/vanguard-update` (formerly vanguard-officiel). The old address redirects:
   Vanguard copies already installed still update.
