@@ -200,7 +200,7 @@ jobs:
           dernier=${dernier#* }
           # Le code a changé : un fichier hors de la documentation, des captures et des outils de développement, que le
           # programme n'intègre pas (comme macos.yml). Comparaison impossible : on teste.
-          HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore|fuzz/.*|deny\.toml|\.cargo/audit\.toml)$'
+          HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore|docs/.*|fuzz/.*|deny\.toml|\.cargo/audit\.toml)$'
           windows=oui
           if [ "$dernier" = "${{ github.sha }}" ]; then
             windows=non
