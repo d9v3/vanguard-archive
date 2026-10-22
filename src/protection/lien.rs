@@ -892,6 +892,42 @@ fn liste_urlhaus(fichier: &str, nom: &str) -> Result<(Vec<u8>, Duration), crate:
     )
 }
 
+/// Les hôtes d'URLhaus consacrés aux logiciels malveillants, en minuscules, pour les comparer aux noms que l'ordinateur
+/// a demandés. `Err` : pourquoi la liste ne sert pas (sans clé, trop vieille, illisible) ; rien n'est alors dédouané.
+pub(crate) fn hotes_urlhaus() -> Result<std::collections::HashSet<String>, String> {
+    let (octets, age) = liste_urlhaus("hostfile.txt", "hotes.txt").map_err(|e| {
+        trf!(
+            "liste d'URLhaus non vérifiée : {}",
+            "URLhaus list not checked: {}",
+            e.raison()
+        )
+    })?;
+    age_des_listes(age).map_err(|r| trf!("liste d'URLhaus : {r}", "URLhaus list: {r}"))?;
+    analyser_hotes(&String::from_utf8_lossy(&octets)).ok_or_else(|| {
+        tr!(
+            "liste d'URLhaus illisible (page d'un portail Wi-Fi ?) : pas vérifiée",
+            "URLhaus list unreadable (a Wi-Fi portal page?): not checked"
+        )
+        .to_string()
+    })
+}
+
+/// La liste des hôtes d'URLhaus (« 127.0.0.1 <hôte> » par ligne, en-tête « # »). `None` pour tout autre texte : un
+/// portail Wi-Fi ne doit pas passer pour une liste vide, donc vérifiée.
+fn analyser_hotes(texte: &str) -> Option<std::collections::HashSet<String>> {
+    let mut lignes = texte.lines().map(str::trim).filter(|l| !l.is_empty()).peekable();
+    if !lignes.peek()?.starts_with('#') {
+        return None;
+    }
+    Some(
+        lignes
+            .filter(|l| !l.starts_with('#'))
+            .filter_map(|l| l.split_whitespace().nth(1))
+            .map(str::to_lowercase)
+            .collect(),
+    )
+}
+
 /// Ce que dit l'âge des listes d'URLhaus utilisées : rien quand elles sont fraîches ; leur âge quand elles n'ont pas
 /// pu être rafraîchies (pas d'Internet) ; au-delà d'une semaine, elles ne servent plus (`Err` : la raison).
 fn age_des_listes(age: Duration) -> Result<Option<String>, String> {
@@ -1541,6 +1577,14 @@ mod tests {
             sens_surbl(&[ip("127.0.0.64")]),
             Inscription::Inscrit("pourriel, abus".into(), Niveau::Eleve)
         );
+    }
+
+    #[test]
+    fn hotes_d_urlhaus() {
+        let h = analyser_hotes("# URLhaus\n\n127.0.0.1\tPiege-Exemple.com\n127.0.0.1 203.0.113.9\n").unwrap();
+        assert!(h.contains("piege-exemple.com") && h.contains("203.0.113.9") && h.len() == 2);
+        assert!(analyser_hotes("<html>Bienvenue au Salon</html>").is_none());
+        assert!(analyser_hotes("").is_none());
     }
 
     #[test]

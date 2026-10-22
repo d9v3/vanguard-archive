@@ -44,6 +44,10 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Un DNS qui ne bloque pas les sites dangereux est dit.** Le bilan le signale (information) et renvoie à « DNS le plus
   rapide », où le Bouclier canadien « Protégé » ou Quad9 se posent en un choix, annulable. Rien n'est dit quand un DNS
   protège déjà, ou quand rien ne permet de le savoir (NextDNS, Pi-hole).
+- **Site qui distribue des logiciels malveillants, signalé.** Les noms que l'ordinateur a demandés (mémoire DNS : sans
+  droits sous Windows, en root sous Linux) sont comparés aux hôtes d'URLhaus, avec la clé abuse.ch : « Qui parle à
+  Internet ? » le montre, et la surveillance horaire le notifie une fois (examen antivirus, fichiers téléchargés). Sans
+  la liste, c'est dit ; le nom exact seulement, pour ne pas accuser tout un hébergeur.
 - **Feodo Tracker figée, dite.** abuse.ch ne tient plus sa liste de serveurs de botnets à jour depuis le 4 mars 2026
   (une seule adresse). Sans ThreatFox (clé abuse.ch absente), c'était la seule liste lue, et rien ne disait qu'elle
   était figée : « Qui parle à Internet ? », le bilan, le blocage et le veilleur le disent maintenant parmi ce qui n'a

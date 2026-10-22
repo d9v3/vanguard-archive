@@ -1231,6 +1231,50 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
     alertes
 }
 
+/// Les noms demandés par l'ordinateur qui sont des hôtes d'URLhaus, prêts à montrer. Le nom exact seulement : un
+/// sous-domaine malveillant ne rend pas suspect tout son domaine (hébergeurs, DNS dynamiques).
+fn sites_dangereux(noms: &[String], hotes: &std::collections::HashSet<String>) -> BTreeSet<String> {
+    noms.iter()
+        .map(|n| n.trim_end_matches('.').to_lowercase())
+        .filter(|n| hotes.contains(n))
+        .map(|n| format!("{} (URLhaus)", affichable(&n)))
+        .collect()
+}
+
+/// Pour la surveillance horaire : les sites qui distribuent des logiciels malveillants que l'ordinateur a demandés
+/// depuis la passe d'avant, en (titre, texte) de notification. Sans mémoire DNS ou sans liste, rien n'est dit ici :
+/// l'écran « Qui parle à Internet ? » dit ce qui n'a pas pu être vérifié.
+pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String)> {
+    let (Ok(noms), Ok(hotes)) = (
+        crate::protection::memoire_dns::noms(),
+        crate::protection::lien::hotes_urlhaus(),
+    ) else {
+        return Vec::new();
+    };
+    let actuels = sites_dangereux(&noms, &hotes);
+    let fichier = crate::reseau::dossier_local().join("surveillance-sites.txt");
+    let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
+    let alertes = nouvelles_alertes(&avant, &actuels)
+        .into_iter()
+        .map(|site| {
+            (
+                tr!(
+                    "Vanguard : site qui distribue des logiciels malveillants",
+                    "Vanguard: site that distributes malware"
+                )
+                .to_string(),
+                trf!(
+                    "Cet ordinateur a demandé {site} : un téléchargement a pu suivre. Lance un examen antivirus et regarde les fichiers téléchargés récemment.",
+                    "This computer asked for {site}: a download may have followed. Run an antivirus scan and check recently downloaded files."
+                ),
+            )
+        })
+        .collect();
+    let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+    let _ = std::fs::write(&fichier, actuels.into_iter().collect::<Vec<_>>().join("\n"));
+    alertes
+}
+
 /// Depuis le menu : l'écran, puis Entrée pour revenir, ou C pour donner ou retirer la clé abuse.ch (celle qui ouvre
 /// les listes de ThreatFox). Le retour au menu se demande ici, pas après : une seule pause.
 pub fn menu() {
@@ -1514,6 +1558,7 @@ fn afficher_memoire_dns(botnets: &Botnets) -> Vec<String> {
             Vec::new()
         }
         Ok(noms) => {
+            afficher_sites_dangereux(&noms);
             let trouves: Vec<String> = noms
                 .iter()
                 .filter_map(|n| botnets.domaine(n))
@@ -1535,6 +1580,37 @@ fn afficher_memoire_dns(botnets: &Botnets) -> Vec<String> {
             trouves
         }
     }
+}
+
+/// La mémoire DNS comparée aux hôtes d'URLhaus : un site qui distribue des logiciels malveillants, demandé récemment.
+/// Sans la liste, c'est dit ; rien n'est déclaré sain.
+fn afficher_sites_dangereux(noms: &[String]) {
+    let hotes = match crate::protection::lien::hotes_urlhaus() {
+        Ok(h) => h,
+        Err(raison) => {
+            afficher_aligne(&format!("  {GRIS}ℹ{RESET} "), &raison, 4, GRIS);
+            return;
+        }
+    };
+    let trouves = sites_dangereux(noms, &hotes);
+    if trouves.is_empty() {
+        trp!(
+            "  {VERT}✔{RESET} Mémoire DNS : aucun des {} noms demandés récemment ne distribue de logiciels malveillants (URLhaus).",
+            "  {VERT}✔{RESET} DNS cache: none of the {} recently asked names distributes malware (URLhaus).",
+            noms.len()
+        );
+        return;
+    }
+    let liste = trouves.iter().cloned().collect::<Vec<_>>().join(", ");
+    afficher_aligne(
+        &format!("  {}✖{RESET} ", couleur(Niveau::Eleve)),
+        &trf!(
+            "Site qui distribue des logiciels malveillants demandé récemment : {liste}. Un téléchargement a pu suivre : lance un examen antivirus et regarde les fichiers téléchargés récemment.",
+            "Site that distributes malware asked recently: {liste}. A download may have followed: run an antivirus scan and check recently downloaded files."
+        ),
+        4,
+        "",
+    );
 }
 
 /// Les connexions, programme par programme. Rend les serveurs de commande trouvés.
@@ -1944,6 +2020,24 @@ mod tests {
             .0,
             Niveau::Moyen
         );
+    }
+
+    #[test]
+    fn sites_dangereux_par_nom_exact() {
+        let hotes: std::collections::HashSet<String> =
+            ["piege-exemple.com", "x.dyn-exemple.org"].map(String::from).into();
+        let noms = [
+            "Piege-Exemple.com.",
+            "www.piege-exemple.com",
+            "dyn-exemple.org",
+            "x.dyn-exemple.org",
+            "exemple.org",
+        ]
+        .map(String::from);
+        let t = sites_dangereux(&noms, &hotes);
+        // Le nom exact, quelle que soit sa casse ou son point final ; ni un sous-domaine, ni le domaine parent.
+        assert_eq!(t.len(), 2, "{t:?}");
+        assert!(t.iter().all(|s| s.ends_with("(URLhaus)")));
     }
 
     #[test]

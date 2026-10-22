@@ -42,6 +42,10 @@ delivered just before it. Only the latest version has its download page; every v
 - **A DNS that does not block dangerous sites is said.** The check-up reports it (information) and points to "Fastest
   DNS", where CIRA's Canadian Shield "Protected" or Quad9 is set in one choice, undoable. Nothing is said when a DNS
   already protects, or when nothing can tell (NextDNS, Pi-hole).
+- **Site that distributes malware, reported.** The names this computer asked for (DNS cache: no rights needed on
+  Windows, root on Linux) are compared with URLhaus hosts, with the abuse.ch key: "Who talks to the Internet?" shows
+  it, and hourly monitoring notifies it once (antivirus scan, downloaded files). Without the list, it is said; the exact
+  name only, so as not to accuse a whole host.
 - **Frozen Feodo Tracker list, said.** abuse.ch has not updated its botnet server list since March 4, 2026 (a single
   address). Without ThreatFox (no abuse.ch key), it was the only list read, and nothing said it was frozen: "Who talks
   to the Internet?", the check-up, blocking and the watcher now say so among what could not be checked. Its addresses

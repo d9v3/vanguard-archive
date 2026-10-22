@@ -529,6 +529,9 @@ async fn passe() {
     for (titre, texte) in crate::protection::sortantes::botnets_a_signaler() {
         alerter(Genre::Botnet, &titre, &texte);
     }
+    for (titre, texte) in crate::protection::sortantes::sites_dangereux_a_signaler() {
+        alerter(Genre::Telechargement, &titre, &texte);
+    }
     // Les extensions sans restrictions qui l'ont demandé (dans_la_surveillance) : leurs problèmes graves seulement.
     for (titre, texte) in crate::plugins::a_signaler() {
         notifier(&titre, &texte);
