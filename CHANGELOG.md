@@ -44,6 +44,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Un DNS qui ne bloque pas les sites dangereux est dit.** Le bilan le signale (information) et renvoie à « DNS le plus
   rapide », où le Bouclier canadien « Protégé » ou Quad9 se posent en un choix, annulable. Rien n'est dit quand un DNS
   protège déjà, ou quand rien ne permet de le savoir (NextDNS, Pi-hole).
+- **Dernières failles exploitées** (`vanguard dernieres-failles [--jours N]`). Celles que la CISA a ajoutées à son
+  catalogue ces derniers jours (7 par défaut), les plus récentes d'abord, avec celles des rançongiciels ; sous Arch,
+  celles qui touchent un paquet de cet ordinateur en tête. Le bilan donne aussi la date d'ajout d'une faille exploitée.
 - **Failles activement exploitées en tête** (Linux, Arch). Les CVE des failles connues des paquets installés sont
   comparées au catalogue KEV de la CISA (failles dont une attaque réelle est connue), téléchargé en entier : la liste des
   logiciels ne sort pas de l'ordinateur. Une faille exploitée rend le constat critique et passe en tête, même sans

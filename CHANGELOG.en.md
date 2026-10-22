@@ -42,6 +42,9 @@ delivered just before it. Only the latest version has its download page; every v
 - **A DNS that does not block dangerous sites is said.** The check-up reports it (information) and points to "Fastest
   DNS", where CIRA's Canadian Shield "Protected" or Quad9 is set in one choice, undoable. Nothing is said when a DNS
   already protects, or when nothing can tell (NextDNS, Pi-hole).
+- **Latest exploited flaws** (`vanguard latest-flaws [--days N]`). Those CISA added to its catalog in the last days
+  (7 by default), newest first, with those used by ransomware; on Arch, those affecting a package on this computer
+  first. The check-up also gives the date an exploited flaw was added.
 - **Actively exploited flaws first** (Linux, Arch). The CVEs of known flaws in installed packages are compared with
   CISA's KEV catalog (flaws with a known real attack), downloaded whole: the software list does not leave the computer.
   An exploited flaw makes the finding critical and comes first, even without a published fix; without the catalog, it

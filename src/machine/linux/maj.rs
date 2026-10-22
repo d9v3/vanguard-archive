@@ -510,6 +510,16 @@ pub(super) fn failles_connues() -> Constat {
     avec_exploitees(constat, &failles, crate::protection::kev::exploitees())
 }
 
+/// Les CVE des failles connues des paquets installés, quand le suivi de la distribution les donne (Arch, par
+/// arch-audit) ; `None` ailleurs ou sans réponse.
+pub(super) fn cves_des_paquets() -> Option<std::collections::HashSet<String>> {
+    if Paquets::detecter()? != Paquets::Pacman || !Path::new("/usr/bin/arch-audit").exists() {
+        return None;
+    }
+    let json = serde_json::from_str::<serde_json::Value>(&sortie_delai("arch-audit", &["--json"], 40, &[0])?).ok()?;
+    Some(failles_arch(&json).into_iter().flat_map(|f| f.cves).collect())
+}
+
 /// Le fichier d'une unité systemd (« php-fpm.service » ; une instance d'un modèle, nom@instance, a pour fichier celui
 /// du modèle, nom@.service), là où les paquets les posent.
 fn fichier_d_unite(unite: &str) -> Option<PathBuf> {
@@ -523,7 +533,8 @@ fn fichier_d_unite(unite: &str) -> Option<PathBuf> {
         .find(|c| c.is_file())
 }
 
-/// Les paquets des programmes qui écoutent au-delà de cet ordinateur, avec un de leurs ports. Le programme quand il
+/// Les paquets des programmes joignables depuis un autre appareil (même critère que « Ports en écoute »), avec un
+/// de leurs ports. Le programme quand il
 /// est de ce compte (/proc/<pid>/exe) ; sinon, sans root, le fichier de son service systemd, posé par le même paquet
 /// (php-fpm.service par php-fpm). Une bibliothèque qu'un serveur charge (openssl) n'est pas vue ici.
 fn paquets_exposes(gestion: Paquets) -> HashMap<String, u16> {
@@ -531,8 +542,9 @@ fn paquets_exposes(gestion: Paquets) -> HashMap<String, u16> {
         return HashMap::new();
     };
     let pids = crate::protection::sortantes::proprietaires();
+    let adresses = super::adresses_exposees();
     let mut fichiers: Vec<(PathBuf, u16)> = Vec::new();
-    for p in prises.iter().filter(|p| !p.adresse.to_canonical().is_loopback()) {
+    for p in prises.iter().filter(|p| super::prise_exposee(p, &adresses)) {
         let programme = pids
             .get(&p.inode)
             .and_then(|pid| std::fs::read_link(format!("/proc/{pid}/exe")).ok());
@@ -582,15 +594,25 @@ fn avec_exposees(mut constat: Constat, failles: &[Faille], exposes: &HashMap<Str
     constat
 }
 
-/// Les failles que la CISA sait exploitées, « paquet (CVE-…) », chacune une fois.
-fn exploitees(failles: &[Faille], kev: &std::collections::HashSet<String>) -> Vec<String> {
+/// Le catalogue des failles exploitées : CVE → jour de son ajout.
+type Kev = HashMap<String, Option<chrono::NaiveDate>>;
+
+/// Les failles que la CISA sait exploitées, « paquet (CVE-…, au catalogue depuis le …) », chacune une fois.
+fn exploitees(failles: &[Faille], kev: &Kev) -> Vec<String> {
     let mut v: Vec<String> = failles
         .iter()
         .flat_map(|f| {
-            f.cves
-                .iter()
-                .filter(|c| kev.contains(*c))
-                .map(move |c| format!("{} ({c})", f.paquet))
+            f.cves.iter().filter_map(move |c| {
+                let ajoutee = kev.get(c)?;
+                Some(match ajoutee {
+                    Some(d) => trf!(
+                        "{} ({c}, au catalogue depuis le {d})",
+                        "{} ({c}, in the catalog since {d})",
+                        f.paquet
+                    ),
+                    None => format!("{} ({c})", f.paquet),
+                })
+            })
         })
         .collect();
     v.sort_unstable();
@@ -600,11 +622,7 @@ fn exploitees(failles: &[Faille], kev: &std::collections::HashSet<String>) -> Ve
 
 /// Une faille exploitée passe en tête et rend le constat critique, avec ou sans correctif publié ; sans le catalogue,
 /// c'est dit, sans rien conclure.
-fn avec_exploitees(
-    mut constat: Constat,
-    failles: &[Faille],
-    kev: Result<std::collections::HashSet<String>, String>,
-) -> Constat {
+fn avec_exploitees(mut constat: Constat, failles: &[Faille], kev: Result<Kev, String>) -> Constat {
     match kev {
         Ok(kev) => {
             let ex = exploitees(failles, &kev);
@@ -1820,20 +1838,27 @@ mod tests {
             cves: vec!["CVE-2025-6020".into()],
         };
         let failles = [php, pam];
-        let kev: std::collections::HashSet<String> = ["CVE-2026-109618".to_string()].into();
-        assert_eq!(exploitees(&failles, &kev), ["php (CVE-2026-109618)"]);
+        let kev: Kev = [(
+            "CVE-2026-109618".to_string(),
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 21),
+        )]
+        .into();
+        assert_eq!(
+            exploitees(&failles, &kev),
+            ["php (CVE-2026-109618, au catalogue depuis le 2026-10-21)"]
+        );
         // Exploitée : critique, en tête, la correction gardée.
         let c = avec_exploitees(bilan_failles(Paquets::Pacman, &failles), &failles, Ok(kev));
         assert_eq!(c.probleme, Some(Niveau::Critique));
-        assert!(c.message.starts_with("Activement exploitée") && c.message.contains("php (CVE-2026-109618)"));
+        assert!(
+            c.message.starts_with("Activement exploitée")
+                && c.message
+                    .contains("php (CVE-2026-109618, au catalogue depuis le 2026-10-21)")
+        );
         assert!(c.correctif.is_some());
         // Rien d'exploité : le constat ne change pas ; sans le catalogue : dit, sans changer le niveau.
         let avant = bilan_failles(Paquets::Pacman, &failles);
-        let c = avec_exploitees(
-            bilan_failles(Paquets::Pacman, &failles),
-            &failles,
-            Ok(std::collections::HashSet::default()),
-        );
+        let c = avec_exploitees(bilan_failles(Paquets::Pacman, &failles), &failles, Ok(Kev::default()));
         assert_eq!(
             (c.probleme, c.message.as_str()),
             (avant.probleme, avant.message.as_str())

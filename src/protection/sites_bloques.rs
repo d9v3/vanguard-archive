@@ -28,7 +28,8 @@ const VIEILLE_JOURS: i64 = 7;
 #[cfg(windows)]
 const MAX_NOMS: usize = 5000;
 #[cfg(not(windows))]
-const MAX_NOMS: usize = 100_000;
+// Sans systemd-resolved ni nscd, glibc relit tout le fichier à chaque nom demandé : 20 000 noms coûtent ~2 ms.
+const MAX_NOMS: usize = 20_000;
 
 fn fichier_hosts() -> PathBuf {
     #[cfg(windows)]
@@ -124,7 +125,8 @@ fn empreinte(octets: &[u8]) -> String {
 
 /// La commande en administrateur qui écrit `prepare` à la place du hosts, si leurs empreintes sont toujours celles
 /// lues sans droits (`nouvelle`, `avant`). Le hosts est réécrit en place : ses droits, son propriétaire et un montage
-/// éventuel restent.
+/// éventuel restent. Réécrire vide le fichier d'abord : une écriture interrompue (disque plein) remet la copie prise
+/// juste avant.
 #[cfg(not(windows))]
 fn commandes(prepare: &str, nouvelle: &str, avant: &str) -> Vec<String> {
     let (sha, vider) = if cfg!(target_os = "macos") {
@@ -133,7 +135,7 @@ fn commandes(prepare: &str, nouvelle: &str, avant: &str) -> Vec<String> {
         ("sha256sum", "resolvectl flush-caches")
     };
     vec![format!(
-        "sudo sh -c 't=$(mktemp) && cat \"$1\" > \"$t\" && [ \"$({sha} < \"$t\" | cut -d\" \" -f1)\" = \"$2\" ] && [ \"$({sha} < /etc/hosts | cut -d\" \" -f1)\" = \"$3\" ] && cat \"$t\" > /etc/hosts; r=$?; rm -f \"$t\"; [ $r = 0 ] && {{ {vider}; }} 2>/dev/null; exit $r' sh {} {} {}",
+        "sudo sh -c 't=$(mktemp) && o=$(mktemp) && cat \"$1\" > \"$t\" && [ \"$({sha} < \"$t\" | cut -d\" \" -f1)\" = \"$2\" ] && [ \"$({sha} < /etc/hosts | cut -d\" \" -f1)\" = \"$3\" ] && cat /etc/hosts > \"$o\" && {{ cat \"$t\" > /etc/hosts || {{ cat \"$o\" > /etc/hosts; false; }}; }}; r=$?; rm -f \"$t\" \"$o\"; [ $r = 0 ] && {{ {vider}; }} 2>/dev/null; exit $r' sh {} {} {}",
         crate::commande::sh_chaine(prepare),
         crate::commande::sh_chaine(nouvelle),
         crate::commande::sh_chaine(avant)
@@ -143,7 +145,7 @@ fn commandes(prepare: &str, nouvelle: &str, avant: &str) -> Vec<String> {
 #[cfg(windows)]
 fn commandes(prepare: &str, nouvelle: &str, avant: &str) -> Vec<String> {
     vec![format!(
-        "$e = {{ param($o) -join ([Security.Cryptography.SHA256]::Create().ComputeHash($o) | ForEach-Object {{ $_.ToString('x2') }}) }}; $p = [IO.File]::ReadAllBytes({}); $f = \"$env:SystemRoot\\System32\\drivers\\etc\\hosts\"; if ((& $e $p) -ne '{nouvelle}' -or (& $e ([IO.File]::ReadAllBytes($f))) -ne '{avant}') {{ throw 'hosts ou fichier préparé changé depuis la lecture : rien écrit' }}; [IO.File]::WriteAllBytes($f, $p); Clear-DnsClientCache",
+        "$e = {{ param($o) -join ([Security.Cryptography.SHA256]::Create().ComputeHash($o) | ForEach-Object {{ $_.ToString('x2') }}) }}; $p = [IO.File]::ReadAllBytes({}); $f = \"$env:SystemRoot\\System32\\drivers\\etc\\hosts\"; if ((& $e $p) -ne '{nouvelle}' -or (& $e ([IO.File]::ReadAllBytes($f))) -ne '{avant}') {{ throw 'hosts ou fichier préparé changé depuis la lecture : rien écrit' }}; $o = [IO.File]::ReadAllBytes($f); try {{ [IO.File]::WriteAllBytes($f, $p) }} catch {{ [IO.File]::WriteAllBytes($f, $o); throw }}; try {{ Clear-DnsClientCache }} catch {{ }}",
         crate::commande::ps_chaine(prepare)
     )]
 }
@@ -166,7 +168,17 @@ fn ecrire(avant: &[u8], nouveau: &str) -> bool {
         &empreinte(avant),
     ));
     let _ = std::fs::remove_file(&prepare);
-    ok && std::fs::read(fichier_hosts()).is_ok_and(|h| h == nouveau.as_bytes())
+    let apres = std::fs::read(fichier_hosts());
+    let ecrit = apres.as_ref().is_ok_and(|h| h == nouveau.as_bytes());
+    // Un échec qui a quand même changé le fichier (copie d'avant pas remise) : jamais « rien n'est changé ».
+    if !ecrit && apres.as_ref().is_ok_and(|h| h != avant) {
+        trp!(
+            "  ⚠ {} a changé malgré l'échec : à vérifier à la main.",
+            "  ⚠ {} changed despite the failure: to check by hand.",
+            chemin_affichable(&fichier_hosts())
+        );
+    }
+    ok && ecrit
 }
 
 /// Les noms à bloquer, et ce qui n'a pas pu être lu. Il en faut au moins une liste.
@@ -174,7 +186,10 @@ fn noms_a_bloquer() -> (BTreeSet<String>, Vec<String>) {
     let mut noms = BTreeSet::new();
     let mut manquent = Vec::new();
     match crate::protection::lien::hotes_urlhaus() {
-        Ok(h) => noms.extend(h),
+        Ok((h, note)) => {
+            noms.extend(h);
+            manquent.extend(note.map(|n| trf!("liste d'URLhaus : {n}", "URLhaus list: {n}")));
+        }
         Err(r) => manquent.push(r),
     }
     match crate::protection::sortantes::domaines_de_commande() {
@@ -199,7 +214,15 @@ pub fn commande(etat: Option<&str>) {
             return;
         }
     };
-    let texte = String::from_utf8_lossy(&avant).into_owned();
+    // Réécrit après une conversion, un accent enregistré en ANSI (ancien Bloc-notes) changerait hors du bloc.
+    let Ok(texte) = String::from_utf8(avant.clone()) else {
+        trp!(
+            "  ✖ {} n'est pas en UTF-8 (un accent enregistré en ANSI ?) : rien n'est changé, pour ne pas le réécrire autrement.",
+            "  ✖ {} is not UTF-8 (an accent saved as ANSI?): nothing is changed, so as not to rewrite it differently.",
+            chemin_affichable(&chemin)
+        );
+        return;
+    };
     let Some(sans) = sans_bloc(&texte) else {
         trp!(
             "  ✖ Le bloc de Vanguard dans {} est abîmé (une marque sans l'autre) : rien n'est changé. À corriger à la main, entre « {DEBUT} » et « {FIN} ».",
@@ -290,30 +313,55 @@ fn poser(avant: &[u8], sans: &str) {
 pub(crate) fn constat(categorie: &'static str) -> Option<Constat> {
     let hosts = std::fs::read_to_string(fichier_hosts()).ok()?;
     let jours = vieux_de(&hosts, chrono::Local::now().date_naive())?;
-    Some(
-        alerte(
-            categorie,
-            Niveau::Info,
-            trf!(
-                "La liste des sites dangereux bloqués date de {jours} jours : ceux apparus depuis passent.",
-                "The list of blocked dangerous sites is {jours} days old: those that appeared since get through."
-            ),
+    let message = if jours == i64::MAX {
+        tr!(
+            "La liste des sites dangereux bloqués n'a pas de date lisible : ceux apparus depuis passent peut-être.",
+            "The list of blocked dangerous sites has no readable date: those that appeared since may get through."
         )
-        .manuel(
-            tr!(
-                "La rafraîchir : vanguard sites-dangereux on (droits d'administrateur)",
-                "Refresh it: vanguard dangerous-sites on (administrator rights)"
-            ),
-            &[],
+        .to_string()
+    } else {
+        trf!(
+            "La liste des sites dangereux bloqués date de {jours} jours : ceux apparus depuis passent.",
+            "The list of blocked dangerous sites is {jours} days old: those that appeared since get through."
+        )
+    };
+    Some(alerte(categorie, Niveau::Info, message).manuel(
+        tr!(
+            "La rafraîchir : vanguard sites-dangereux on (droits d'administrateur)",
+            "Refresh it: vanguard dangerous-sites on (administrator rights)"
         ),
-    )
+        &[],
+    ))
 }
 
-/// L'âge du bloc s'il dépasse `VIEILLE_JOURS` ; une date illisible compte comme vieille.
+/// L'âge du bloc s'il dépasse `VIEILLE_JOURS` ; une date illisible compte comme vieille (`i64::MAX`).
 fn vieux_de(hosts: &str, aujourd_hui: NaiveDate) -> Option<i64> {
     let (date, _) = bloc_pose(hosts)?;
     let jours = date.map_or(i64::MAX, |d| (aujourd_hui - d).num_days());
-    (jours > VIEILLE_JOURS).then_some(jours.min(9999))
+    (jours > VIEILLE_JOURS).then_some(jours)
+}
+
+/// Les noms que ce hosts envoie nulle part (0.0.0.0, ::, boucle locale), le bloc de Vanguard compris : sous Windows,
+/// la mémoire DNS les garde comme des noms demandés, alors qu'ils n'ont mené nulle part.
+fn noms_detournes(hosts: &str) -> std::collections::HashSet<String> {
+    hosts
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or_default())
+        .filter_map(|l| {
+            let mut mots = l.split_whitespace();
+            let ip: std::net::IpAddr = mots.next()?.parse().ok()?;
+            (ip.is_unspecified() || ip.is_loopback()).then_some(mots)
+        })
+        .flatten()
+        .map(|n| n.trim_end_matches('.').to_lowercase())
+        .collect()
+}
+
+/// Ceux du hosts de cet ordinateur ; illisible, aucun.
+pub(crate) fn noms_bloques_ici() -> std::collections::HashSet<String> {
+    std::fs::read_to_string(fichier_hosts())
+        .map(|h| noms_detournes(&h))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -350,6 +398,14 @@ mod tests {
         assert_eq!(sans_bloc("a\n# >>> Vanguard : x >>>\n0.0.0.0 x.org\n"), None);
         assert_eq!(sans_bloc("a\n# <<< Vanguard <<<\nb\n"), None);
         assert_eq!(sans_bloc("# >>> Vanguard\n# >>> Vanguard\n# <<< Vanguard <<<\n"), None);
+    }
+
+    #[test]
+    fn noms_envoyes_nulle_part() {
+        let h = "127.0.0.1 localhost\n::1 localhost ip6-localhost\n192.0.2.5 imprimante.salon\n0.0.0.0 Piege-Exemple.com # pub\n:: c2.exemple.org.\n# 0.0.0.0 commente.org\n";
+        let n = noms_detournes(h);
+        assert!(n.contains("piege-exemple.com") && n.contains("c2.exemple.org") && n.contains("localhost"));
+        assert!(!n.contains("imprimante.salon") && !n.contains("commente.org"));
     }
 
     #[test]
@@ -398,6 +454,6 @@ mod tests {
             c[0]
         );
         // Les deux empreintes sont vérifiées avant d'écrire ; écrit en place.
-        assert!(c[0].contains("= \"$2\" ] && [") && c[0].contains("= \"$3\" ] && cat \"$t\" > /etc/hosts"));
+        assert!(c[0].contains("= \"$2\" ] && [") && c[0].contains("= \"$3\" ] && cat /etc/hosts > \"$o\" && { cat \"$t\" > /etc/hosts || { cat \"$o\" > /etc/hosts; false; }; }"));
     }
 }

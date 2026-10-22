@@ -4,10 +4,13 @@
 
 /// Les noms en mémoire, en minuscules, sans le point final. `Err` : pourquoi ils n'ont pas pu être lus, à montrer.
 pub(crate) fn noms() -> Result<Vec<String>, String> {
+    // Un nom que le hosts envoie nulle part (le blocage de Vanguard, ou celui de la personne) n'a mené à rien : sous
+    // Windows, la mémoire DNS le garde pourtant comme demandé.
+    let bloques = crate::protection::sites_bloques::noms_bloques_ici();
     let mut noms: Vec<String> = lire()?
         .into_iter()
         .map(|n| n.trim_end_matches('.').to_lowercase())
-        .filter(|n| !n.is_empty())
+        .filter(|n| !n.is_empty() && !bloques.contains(n))
         .collect();
     noms.sort();
     noms.dedup();

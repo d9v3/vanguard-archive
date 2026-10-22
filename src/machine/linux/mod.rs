@@ -31,6 +31,11 @@ pub(crate) mod zstd;
 use docker::*;
 use durcissement::*;
 pub use maj::mises_a_jour_completes;
+
+/// Les CVE qui touchent les paquets de cet ordinateur (Arch) : pour marquer les dernières failles exploitées.
+pub(crate) fn cves_installees() -> Option<std::collections::HashSet<String>> {
+    maj::cves_des_paquets()
+}
 use maj::*;
 use persistance::*;
 use privileges::*;
@@ -497,7 +502,7 @@ fn pare_feu() -> Constat {
 /// Adresses joignables depuis un autre appareil : celles des vraies interfaces (Wi-Fi, Ethernet, VPN),
 /// au format de `ss` (IPv6 entre crochets). Les ponts virtuels (Docker, libvirt…) ne sont joignables
 /// que depuis cette machine.
-fn adresses_exposees() -> std::collections::HashSet<String> {
+pub(super) fn adresses_exposees() -> std::collections::HashSet<String> {
     let virtuelle = |nom: &str| {
         [
             "lo", "docker", "br-", "virbr", "veth", "podman", "lxc", "lxdbr", "incusbr", "waydroid", "vnet",
@@ -514,6 +519,13 @@ fn adresses_exposees() -> std::collections::HashSet<String> {
             std::net::IpAddr::V6(ip) => format!("[{ip}]"),
         })
         .collect()
+}
+
+/// Une prise joignable depuis un autre appareil, comme dans « Ports en écoute » : toutes les adresses, ou celle d'une
+/// vraie interface (pas un pont Docker) ; ni le client DHCP ni une prise UDP éphémère anonyme.
+pub(super) fn prise_exposee(p: &ecoute::Ecoute, adresses: &std::collections::HashSet<String>) -> bool {
+    let bruit = p.udp && (p.port == 68 || (p.port >= 32768 && info_port(p.port).service == crate::risk::inconnu()));
+    (p.adresse.is_unspecified() || adresses.contains(&p.adresse_ss())) && !bruit
 }
 
 /// Service systemd d'un groupe de contrôle (« /system.slice/passim.service » → « passim »), prêt à montrer : le

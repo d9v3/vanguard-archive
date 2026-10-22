@@ -147,6 +147,14 @@ enum Commande {
     /// Sites dangereux bloqués par le fichier hosts : ceux d'URLhaus et les serveurs de commande de ThreatFox (clé
     /// abuse.ch), après accord et avec les droits d'administrateur ; « off » les retire exactement. Sans argument :
     /// leur état.
+    #[command(name = "dernieres-failles", visible_alias = "latest-flaws")]
+    /// Dernières failles exploitées : celles que la CISA a ajoutées à son catalogue (attaques réelles connues) ces
+    /// derniers jours, les plus récentes d'abord ; sous Arch, celles qui touchent un paquet de cet ordinateur en tête.
+    DernieresFailles {
+        /// Combien de jours en arrière (7 par défaut).
+        #[arg(long, visible_alias = "days", default_value_t = 7)]
+        jours: u32,
+    },
     #[command(name = "sites-dangereux", visible_alias = "dangerous-sites")]
     SitesDangereux {
         #[arg(value_parser = ["on", "off"])]
@@ -1737,6 +1745,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("surveillance", "Turn hourly network monitoring on or off (notification for unknown devices)"),
     ("tableau", "Monitoring dashboard in the browser: its state, the alerts day by day, the new devices and the \
                  suspicious connections. Local page, nothing is sent"),
+    ("dernieres-failles", "Latest exploited flaws: those CISA added to its catalog (known real attacks) in the last \
+                            days, newest first; on Arch, those affecting a package on this computer first"),
     ("sites-dangereux", "Dangerous sites blocked by the hosts file: URLhaus ones and ThreatFox command servers \
                           (abuse.ch key), after your consent and with administrator rights; \"off\" removes them \
                           exactly. Without argument: their state"),
@@ -1866,6 +1876,7 @@ const AIDES_EN: &[(&str, &str)] = &[
 /// Aide anglaise des options : (commande, option, aide).
 #[rustfmt::skip]
 const OPTIONS_EN: &[(&str, &str, &str)] = &[
+    ("dernieres-failles", "jours", "How many days back (7 by default)"),
     ("nettoyer", "liste", "Show what could be cleaned up and the space to gain, deleting nothing"),
     ("desinstaller", "liste", "Show what would be removed, without removing anything"),
     ("logiciels", "liste", "Show each program offered and its state, without installing anything"),
@@ -2027,6 +2038,7 @@ async fn main() {
         Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),
         Some(Commande::Veilleur { etat, servir }) => veilleur(etat.as_deref(), servir),
         Some(Commande::SitesDangereux { etat }) => protection::sites_bloques::commande(etat.as_deref()),
+        Some(Commande::DernieresFailles { jours }) => protection::kev::ecran(jours),
         Some(Commande::Surveiller) => reseau::surveillance::surveiller().await,
         Some(Commande::Entretien { etat }) => match etat {
             Some(e) => entretien::activer(e == "on"),

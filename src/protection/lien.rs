@@ -893,8 +893,9 @@ fn liste_urlhaus(fichier: &str, nom: &str) -> Result<(Vec<u8>, Duration), crate:
 }
 
 /// Les hôtes d'URLhaus consacrés aux logiciels malveillants, en minuscules, pour les comparer aux noms que l'ordinateur
-/// a demandés. `Err` : pourquoi la liste ne sert pas (sans clé, trop vieille, illisible) ; rien n'est alors dédouané.
-pub(crate) fn hotes_urlhaus() -> Result<std::collections::HashSet<String>, String> {
+/// a demandés, et l'âge de la liste quand elle n'a pas pu être rafraîchie. `Err` : pourquoi la liste ne sert pas (sans
+/// clé, trop vieille, illisible) ; rien n'est alors dédouané.
+pub(crate) fn hotes_urlhaus() -> Result<(std::collections::HashSet<String>, Option<String>), String> {
     let (octets, age) = liste_urlhaus("hostfile.txt", "hotes.txt").map_err(|e| {
         trf!(
             "liste d'URLhaus non vérifiée : {}",
@@ -902,14 +903,16 @@ pub(crate) fn hotes_urlhaus() -> Result<std::collections::HashSet<String>, Strin
             e.raison()
         )
     })?;
-    age_des_listes(age).map_err(|r| trf!("liste d'URLhaus : {r}", "URLhaus list: {r}"))?;
-    analyser_hotes(&String::from_utf8_lossy(&octets)).ok_or_else(|| {
-        tr!(
-            "liste d'URLhaus illisible (page d'un portail Wi-Fi ?) : pas vérifiée",
-            "URLhaus list unreadable (a Wi-Fi portal page?): not checked"
-        )
-        .to_string()
-    })
+    let note = age_des_listes(age).map_err(|r| trf!("liste d'URLhaus : {r}", "URLhaus list: {r}"))?;
+    analyser_hotes(&String::from_utf8_lossy(&octets))
+        .map(|h| (h, note))
+        .ok_or_else(|| {
+            tr!(
+                "liste d'URLhaus illisible (page d'un portail Wi-Fi ?) : pas vérifiée",
+                "URLhaus list unreadable (a Wi-Fi portal page?): not checked"
+            )
+            .to_string()
+        })
 }
 
 /// La liste des hôtes d'URLhaus (« 127.0.0.1 <hôte> » par ligne, en-tête « # »). `None` pour tout autre texte : un

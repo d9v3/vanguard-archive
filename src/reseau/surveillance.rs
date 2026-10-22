@@ -199,6 +199,16 @@ pub(crate) fn cle_alerte(alerte: &str) -> String {
     if alerte.starts_with("Ports en écoute") {
         return alerte.to_string();
     }
+    // Une faille critique : seule sa tête compte, les CVE du catalogue KEV avec leurs chiffres ; le reste du message
+    // (paquets corrigés, ports) change chaque jour et la renotifierait.
+    if let Some(message) = alerte.strip_prefix(&format!("{FAILLES_CRITIQUES} : ")) {
+        let tete = message.split(". ").next().unwrap_or_default();
+        return if tete.contains("KEV") {
+            format!("{FAILLES_CRITIQUES} : {tete}")
+        } else {
+            format!("{FAILLES_CRITIQUES} : critique")
+        };
+    }
     alerte
         .chars()
         .map(|c| if c.is_ascii_digit() { '#' } else { c })
@@ -249,10 +259,25 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
 /// bilan : l'audit du réseau reprend ses constats réseau sans relancer ces règles.
 fn veiller_machine() -> crate::machine::Audit {
     let audit = crate::machine::auditer(false);
-    let apres = etat_machine(&audit);
+    let mut apres = etat_machine(&audit);
     let avant: Option<EtatMachine> = std::fs::read_to_string(fichier_etat())
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok());
+    // Failles pas vérifiées cette fois (hors ligne) : celles d'avant restent, sinon leur retour serait renotifié.
+    if let Some(avant) = &avant
+        && audit
+            .constats
+            .iter()
+            .any(|c| c.categorie == FAILLES_CRITIQUES && !c.verifie)
+    {
+        apres.alertes.extend(
+            avant
+                .alertes
+                .iter()
+                .filter(|a| a.starts_with(&format!("{FAILLES_CRITIQUES} : ")))
+                .cloned(),
+        );
+    }
     if let Some(avant) = &avant {
         for (titre, texte) in nouveautes_machine(avant, &apres) {
             alerter(Genre::Machine, &titre, &texte);
@@ -2165,6 +2190,20 @@ mod tests {
         assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Maison", "bb:bb:bb:bb:bb:bb")).is_some());
         // Autre Wi-Fi (chez un ami) avec la même adresse de box : pas une alerte.
         assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Ami", "bb:bb:bb:bb:bb:bb")).is_none());
+    }
+
+    #[test]
+    fn faille_critique_notifiee_une_fois() {
+        let a = "Failles connues : Activement exploitée (catalogue KEV de la CISA) : php (CVE-2026-109618, au catalogue depuis le 2026-10-21). 3 paquet(s) avec une faille connue : a, b, c.";
+        let b = "Failles connues : Activement exploitée (catalogue KEV de la CISA) : php (CVE-2026-109618, au catalogue depuis le 2026-10-21). 1 paquet(s) avec une faille connue : a.";
+        let c = "Failles connues : Activement exploitée (catalogue KEV de la CISA) : php (CVE-2026-109619, au catalogue depuis le 2026-10-21). 1 paquet(s) avec une faille connue : a.";
+        // Le reste change : même alerte ; une autre CVE exploitée : nouvelle.
+        assert_eq!(cle_alerte(a), cle_alerte(b));
+        assert_ne!(cle_alerte(b), cle_alerte(c));
+        assert_eq!(
+            cle_alerte("Failles connues : 2 paquet(s) avec une faille connue : x, y."),
+            cle_alerte("Failles connues : Paquet dont un programme écoute sur le réseau : z (port 80). 1 paquet(s).")
+        );
     }
 
     #[test]

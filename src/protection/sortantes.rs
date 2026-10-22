@@ -1254,7 +1254,7 @@ fn sites_dangereux(noms: &[String], hotes: &std::collections::HashSet<String>) -
 /// depuis la passe d'avant, en (titre, texte) de notification. Sans mémoire DNS ou sans liste, rien n'est dit ici :
 /// l'écran « Qui parle à Internet ? » dit ce qui n'a pas pu être vérifié.
 pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String)> {
-    let (Ok(noms), Ok(hotes)) = (
+    let (Ok(noms), Ok((hotes, _))) = (
         crate::protection::memoire_dns::noms(),
         crate::protection::lien::hotes_urlhaus(),
     ) else {
@@ -1595,7 +1595,17 @@ fn afficher_memoire_dns(botnets: &Botnets) -> Vec<String> {
 /// Sans la liste, c'est dit ; rien n'est déclaré sain.
 fn afficher_sites_dangereux(noms: &[String]) {
     let hotes = match crate::protection::lien::hotes_urlhaus() {
-        Ok(h) => h,
+        Ok((h, note)) => {
+            if let Some(n) = note {
+                afficher_aligne(
+                    &format!("  {GRIS}ℹ{RESET} "),
+                    &trf!("liste d'URLhaus : {n}", "URLhaus list: {n}"),
+                    4,
+                    GRIS,
+                );
+            }
+            h
+        }
         Err(raison) => {
             afficher_aligne(&format!("  {GRIS}ℹ{RESET} "), &raison, 4, GRIS);
             return;
