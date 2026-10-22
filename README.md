@@ -552,7 +552,7 @@ ne les ayant pas vérifiées.
   changent normalement, ne sont pas comparés. Chaque clé a sa référence (reconnue par l'identifiant de son volume) :
   une deuxième clé VANGUARD ne passe pas pour une clé modifiée.
 - Se mettre à jour : depuis une clé VANGUARD plus récente, ou, sans clé, depuis GitHub. Les programmes publiés y ont
-  leur propre dépôt, [vanguard-officiel](https://github.com/d9v3/vanguard-officiel), à côté de celui du code ; la
+  leur propre dépôt, [vanguard-update](https://github.com/d9v3/vanguard-update), à côté de celui du code ; la
   dernière version y est décrite par un manifeste signé en Ed25519 sur l'ordinateur de l'auteur, dont Vanguard porte
   la clé publique. Un manifeste mal signé, une version plus ancienne, un programme dont la taille ou l'empreinte
   diffère : refusés. Le menu annonce une version plus récente ; rien ne s'installe sans accord.

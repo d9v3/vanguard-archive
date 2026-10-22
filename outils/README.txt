@@ -131,7 +131,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Shortcut on this computer: Vanguard copied here and started with one click
        My computers: those where the key ran a check, their grade and remaining problems (vanguard computers)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
-       Update Vanguard: the copy on this computer, from the key or from GitHub (d9v3/vanguard-officiel,
+       Update Vanguard: the copy on this computer, from the key or from GitHub (d9v3/vanguard-update,
          each version signed by the author and checked)
        Check my backup: the rsync backup read back, random files compared with their original
        Remove Vanguard from this computer: what it placed, shown then checked; data kept unless you agree

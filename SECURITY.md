@@ -48,7 +48,7 @@ Merci de garder le secret jusqu'à la publication de l'avis.
 ## Dans le champ
 
 - le programme `vanguard` pour Linux, Windows et macOS, tel que publié (page Releases et dépôt
-  [vanguard-officiel](https://github.com/d9v3/vanguard-officiel)), et les scripts qu'il écrit puis lance (PowerShell,
+  [vanguard-update](https://github.com/d9v3/vanguard-update)), et les scripts qu'il écrit puis lance (PowerShell,
   shell) ;
 - les scripts de la clé USB : `Lancer Vanguard.bat`, `Lancer Vanguard.command`, `autorun.sh` et ce qu'ils exécutent ;
 - l'installation : la copie sur l'ordinateur depuis la clé, le raccourci, la mise à jour depuis la clé ou depuis
@@ -141,7 +141,7 @@ Please keep the flaw secret until the advisory is published.
 ## In scope
 
 - the `vanguard` program for Linux, Windows and macOS, as published (Releases page and the
-  [vanguard-officiel](https://github.com/d9v3/vanguard-officiel) repository), and the scripts it writes then runs
+  [vanguard-update](https://github.com/d9v3/vanguard-update) repository), and the scripts it writes then runs
   (PowerShell, shell);
 - the USB key's scripts: `Lancer Vanguard.bat`, `Lancer Vanguard.command`, `autorun.sh` and what they run;
 - the installation: the copy onto the computer from the key, the shortcut, the update from the key or from GitHub.

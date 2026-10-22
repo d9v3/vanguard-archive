@@ -1,5 +1,5 @@
 //! Les versions publiées de Vanguard sur GitHub, pour se mettre à jour sans la clé. Les programmes signés sont
-//! publiés à part du code (d9v3/vanguard-officiel), dans un dépôt qui ne contient qu'eux. Rien n'y est cru sur parole : la
+//! publiés à part du code (d9v3/vanguard-update), dans un dépôt qui ne contient qu'eux. Rien n'y est cru sur parole : la
 //! dernière version est décrite par un manifeste (`derniere.txt` : la version, puis l'empreinte SHA-256 et la taille
 //! du programme de chaque système), signé en Ed25519 sur l'ordinateur de l'auteur (`outils/signer-versions.sh`), dont
 //! la clé publique est gravée ici. Un manifeste mal signé, une version qui n'est pas plus récente, un programme dont
@@ -17,7 +17,7 @@ use super::{TAILLE_MAX, Version, lire_version};
 use crate::ui::*;
 
 /// Les fichiers de la dernière version publiée : le lien « latest » de GitHub suit toujours la plus récente.
-const ADRESSE: &str = "https://github.com/d9v3/vanguard-officiel/releases/latest/download/";
+const ADRESSE: &str = "https://github.com/d9v3/vanguard-update/releases/latest/download/";
 
 /// La clé publique qui signe les manifestes ; la clé privée ne quitte pas l'ordinateur de l'auteur
 /// (~/.config/vanguard-dev/versions-ed25519.pem, `outils/signer-versions.sh --cle` la redonne sous cette forme).

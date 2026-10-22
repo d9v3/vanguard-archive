@@ -53,7 +53,7 @@ serveur https://threatfox-api.abuse.ch/v2/files/exports/
 
 # Dépôt des versions signées (src/mise_a_jour/github.rs, outils/depot-versions.sh) : privé jusqu’à la première version, publiée par outils/publier-version.sh juste après l'envoi du code ;
 # avant la première, l'adresse ne répond pas. L'essai de « se-mettre-a-jour » après chaque publication la vérifie.
-ignorer https://github.com/d9v3/vanguard-officiel
+ignorer https://github.com/d9v3/vanguard-update
 # Faux lien d'hameçonnage de l'essai sur le Mac (outils/test-macos/essai.sh) : inventé, jamais ouvert.
 ignorer https://paypal.com.compte-securite.xyz/
 # Préconnexion des polices de la page des fonctions (outils/page-fonctions.html) : des serveurs, pas des pages.

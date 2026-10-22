@@ -515,7 +515,7 @@ since Vanguard has not checked them.
   replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared. Each key has
   its own reference (recognized by its volume identifier): a second VANGUARD key does not pass for a modified one.
 - Update itself: from a newer VANGUARD key, or, without a key, from GitHub. The published programs have their own
-  repository there, [vanguard-officiel](https://github.com/d9v3/vanguard-officiel), next to the code's; the latest
+  repository there, [vanguard-update](https://github.com/d9v3/vanguard-update), next to the code's; the latest
   version is described by a manifest signed with Ed25519 on the author's computer, whose public key Vanguard carries.
   A badly signed manifest, an older version, a program whose size or checksum differs: refused. The menu announces a
   newer version; nothing is installed without your consent.

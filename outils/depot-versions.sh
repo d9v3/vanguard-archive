@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Crée le dépôt PUBLIC des versions (d9v3/vanguard-officiel), d'où Vanguard se met à jour sans la clé : il ne contient
+# Crée le dépôt PUBLIC des versions (d9v3/vanguard-update), d'où Vanguard se met à jour sans la clé : il ne contient
 # qu'un LISEZMOI et, à chaque publication, les programmes et leur manifeste signé (outils/publier-version.sh). Le code
 # est dans d9v3/vanguard-beta. À lancer une seule fois, avec l'accord de l'auteur : ce dépôt est visible de tous.
 #   outils/depot-versions.sh          créer le dépôt (rien si il existe déjà)
@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DEPOT=d9v3/vanguard-officiel
+DEPOT=d9v3/vanguard-update
 lisezmoi() {
   cat <<'FIN'
 # Vanguard — published versions
