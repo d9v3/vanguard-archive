@@ -12,13 +12,21 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Serveurs d'IA ouverts au réseau, vus aussi sur Mac.** La règle qui repère un serveur d'IA local (Ollama, LM Studio,
   llama.cpp…) joignable depuis le réseau lit maintenant les ports en écoute du Mac ; elle était jusqu'ici toujours dite
   non vérifiée sous macOS. Les programmes sont nommés en entier : un nom coupé à neuf caractères ne se reconnaissait
-  pas, et un serveur ouvert serait passé pour sain. Le blocage des menaces en profite.
-- **Connexion forcée par SSH, sur Mac.** Sans Session à distance en écoute, il n'y a rien à lire et Vanguard le dit,
-  au lieu de marquer la règle non vérifiée à chaque bilan ; avec elle, la règle reste non vérifiée (le journal unifié
-  de macOS n'est pas lu), jamais saine.
+  pas, et un serveur ouvert serait passé pour sain. Chaque prise garde le programme de son adresse : un serveur
+  d'IA ouvert au Wi-Fi n'est plus caché par un autre programme qui tient le même port sur la machine elle-même.
+  Sans droits d'administrateur, seuls les programmes du compte en cours sont nommés, et « aucun serveur d'IA » le
+  dit ; si lsof ne répond pas, la règle reste non vérifiée. Le blocage des menaces en profite.
+- **Connexion forcée par SSH, sur Mac.** Sans sshd, ni en écoute sur le port 22 ou sur celui de ssh dans
+  /etc/services, ni en marche (un sshd de Homebrew sur un autre port), il n'y a rien à lire et Vanguard le dit, au lieu
+  de marquer la règle non vérifiée à chaque bilan ; avec lui, la règle reste non vérifiée (le journal unifié de macOS
+  n'est pas lu), jamais saine.
 - **Bancs d'essai sans clé abuse.ch.** Sur le Mac de GitHub, sous Linux et dans la VM Windows, l'analyse YARA passe
   quand Vanguard dit les empreintes de MalwareBazaar non vérifiées faute de clé, et la reconnaissance par empreinte
   exacte s'essaie sur une copie posée pour l'essai, puis retirée : plus rien ne dépend des listes fermées le 21 octobre.
+- **Présentation.** Vanguard se présente comme la cyberdéfense portable des postes et des réseaux (README, page des
+  fonctions, description du dépôt, fichiers de la clé). La page des fonctions de GitHub Pages est de nouveau refaite à
+  chaque publication : elle en était restée à la 0.82, le programme lancé par un chemin relatif depuis un autre
+  dossier.
 
 ## 21 octobre 2026, au soir : version 0.84
 
