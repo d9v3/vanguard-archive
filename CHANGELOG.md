@@ -36,6 +36,10 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   réveil l'heure manquée pendant une veille et passe cinq minutes après l'ouverture de session ; sous macOS, dès
   l'ouverture de session. Une surveillance déjà en place n'est pas changée en silence : le bilan la dit « d'une version
   d'avant », et `vanguard surveillance on` la met à jour.
+- **Feodo Tracker figée, dite.** abuse.ch ne tient plus sa liste de serveurs de botnets à jour depuis le 4 mars 2026
+  (une seule adresse). Sans ThreatFox (clé abuse.ch absente), c'était la seule liste lue, et rien ne disait qu'elle
+  était figée : « Qui parle à Internet ? », le bilan, le blocage et le veilleur le disent maintenant parmi ce qui n'a
+  pas pu être vérifié. Ses adresses servent encore ; avec la clé, ThreatFox suit les mêmes botnets à jour.
 
 ## 22 octobre 2026 : version 0.84.1
 

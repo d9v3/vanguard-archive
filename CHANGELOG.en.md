@@ -34,6 +34,10 @@ delivered just before it. Only the latest version has its download page; every v
   runs five minutes after sign-in; on Linux, it catches up on wake-up the hour missed during sleep and runs five
   minutes after sign-in; on macOS, right at sign-in. Monitoring already in place is not changed silently: the
   check-up says it is "from an earlier version", and `vanguard monitor on` updates it.
+- **Frozen Feodo Tracker list, said.** abuse.ch has not updated its botnet server list since March 4, 2026 (a single
+  address). Without ThreatFox (no abuse.ch key), it was the only list read, and nothing said it was frozen: "Who talks
+  to the Internet?", the check-up, blocking and the watcher now say so among what could not be checked. Its addresses
+  still count; with the key, ThreatFox follows the same botnets up to date.
 
 ## October 22, 2026: version 0.84.1
 

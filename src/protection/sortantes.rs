@@ -701,6 +701,38 @@ fn analyser_feodo(texte: &str) -> Option<BTreeSet<IpAddr>> {
         .collect()
 }
 
+/// Au-delà, Feodo Tracker ne compte plus comme à jour : abuse.ch l'a laissée figée le 4 mars 2026, à une adresse.
+const FEODO_FIGEE_JOURS: i64 = 30;
+
+/// La liste de Feodo Tracker, et le jour de sa dernière mise à jour si elle est figée (`figee_depuis`).
+fn analyser_feodo_datee(texte: &str) -> Option<(BTreeSet<IpAddr>, Option<chrono::NaiveDate>)> {
+    Some((
+        analyser_feodo(texte)?,
+        figee_depuis(texte, chrono::Local::now().date_naive()),
+    ))
+}
+
+/// Le « Last updated » de l'en-tête d'une liste d'abuse.ch, s'il a plus de `FEODO_FIGEE_JOURS` à `aujourd_hui`. Sans
+/// date lisible, rien n'est conclu : la liste sert comme avant.
+fn figee_depuis(texte: &str, aujourd_hui: chrono::NaiveDate) -> Option<chrono::NaiveDate> {
+    let date = texte.lines().take_while(|l| l.starts_with('#')).find_map(|l| {
+        let apres = l.split_once("Last updated:")?.1.trim();
+        chrono::NaiveDate::parse_from_str(apres.get(..10)?, "%Y-%m-%d").ok()
+    })?;
+    ((aujourd_hui - date).num_days() > FEODO_FIGEE_JOURS).then_some(date)
+}
+
+/// Sans ThreatFox (`domaines` à `None`), Feodo Tracker est la seule liste lue : figée, elle ne dédouane rien, et c'est
+/// dit. Avec ThreatFox, qui suit les mêmes botnets à jour, elle sert encore sans rien promettre.
+fn dire_feodo_figee(absentes: &mut Vec<String>, botnets: &Botnets, depuis: Option<chrono::NaiveDate>) {
+    if let (None, Some(d)) = (&botnets.domaines, depuis) {
+        absentes.push(trf!(
+            "liste de Feodo Tracker figée depuis le {d} : abuse.ch ne la tient plus à jour",
+            "Feodo Tracker list frozen since {d}: abuse.ch no longer updates it"
+        ));
+    }
+}
+
 /// En dessous, ThreatFox lui-même doute (50 : signalement pas encore confirmé) : une fausse alerte élevée ferait
 /// couper Internet pour rien.
 const THREATFOX_CONFIANCE: u8 = 75;
@@ -938,7 +970,7 @@ fn botnets() -> (Botnets, Vec<String>) {
                 )
             };
             let liste = abuse_ch::liste(demande, ("feodo", "botnets.txt"), URLHAUS_FRAICHE);
-            verifiee("Feodo Tracker", liste.resultat(false), en_texte(analyser_feodo))
+            verifiee("Feodo Tracker", liste.resultat(false), en_texte(analyser_feodo_datee))
         });
         let api = s.spawn(|| {
             cle.as_ref().map(|cle| {
@@ -976,8 +1008,9 @@ fn botnets() -> (Botnets, Vec<String>) {
     });
     let mut botnets = Botnets::default();
     let mut absentes = Vec::new();
+    let mut figee = None;
     match feodo {
-        Ok(liste) => botnets.feodo = liste,
+        Ok((liste, depuis)) => (botnets.feodo, figee) = (liste, depuis),
         Err(raison) => absentes.push(raison),
     }
     match export {
@@ -993,6 +1026,7 @@ fn botnets() -> (Botnets, Vec<String>) {
         // Sans clé, l'export l'a déjà dit : une seule fois.
         None => {}
     }
+    dire_feodo_figee(&mut absentes, &botnets, figee);
     (botnets, absentes)
 }
 
@@ -1046,9 +1080,10 @@ pub(crate) fn serveurs_gardes() -> (ServeursDeCommande, Vec<String>) {
     let avec_cle = crate::protection::abuse_ch::cle().is_some();
     let mut botnets = Botnets::default();
     let mut absentes = Vec::new();
+    let mut figee = None;
     match garde("feodo", "botnets.txt") {
-        Some(copie) => match verifiee("Feodo Tracker", Ok(copie), en_texte(analyser_feodo)) {
-            Ok(liste) => botnets.feodo = liste,
+        Some(copie) => match verifiee("Feodo Tracker", Ok(copie), en_texte(analyser_feodo_datee)) {
+            Ok((liste, depuis)) => (botnets.feodo, figee) = (liste, depuis),
             Err(raison) => absentes.push(raison),
         },
         None => absentes.push(pas_encore("Feodo Tracker")),
@@ -1080,6 +1115,7 @@ pub(crate) fn serveurs_gardes() -> (ServeursDeCommande, Vec<String>) {
             crate::protection::abuse_ch::Echec::Manquante.raison()
         ));
     }
+    dire_feodo_figee(&mut absentes, &botnets, figee);
     (ServeursDeCommande(botnets), absentes)
 }
 
@@ -1928,6 +1964,37 @@ mod tests {
         assert!(analyser_feodo("").is_none());
         assert!(analyser_feodo("<html><body>Bienvenue au Salon</body></html>").is_none());
         assert!(analyser_feodo("# Feodo Tracker\n192.0.2.66\npas-une-ip\n").is_none());
+    }
+
+    #[test]
+    fn feodo_figee_dite_sans_threatfox() {
+        let jour = |d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").unwrap();
+        let entete = "################\n# Feodo Tracker #\n# Last updated: 2026-03-04 14:28:39 UTC #\n#\n192.0.2.66\n";
+        // Figée au-delà de 30 jours ; la veille de la limite, encore à jour ; sans date lisible, rien n'est conclu.
+        assert_eq!(figee_depuis(entete, jour("2026-10-22")), Some(jour("2026-03-04")));
+        assert_eq!(figee_depuis(entete, jour("2026-04-03")), None);
+        assert_eq!(figee_depuis("# Feodo Tracker\n192.0.2.66\n", jour("2026-10-22")), None);
+        assert_eq!(figee_depuis("# Last updated: hier\n", jour("2026-10-22")), None);
+        // Une date plus bas que l'en-tête n'en est pas une.
+        assert_eq!(
+            figee_depuis("# Feodo\n192.0.2.66\n# Last updated: 2026-03-04\n", jour("2026-10-22")),
+            None
+        );
+        // Sans ThreatFox, la liste figée est dite ; avec ses domaines (export lu), elle sert sans être dite.
+        let mut absentes = Vec::new();
+        dire_feodo_figee(&mut absentes, &Botnets::default(), Some(jour("2026-03-04")));
+        assert!(
+            absentes.len() == 1 && absentes[0].contains("2026-03-04"),
+            "{absentes:?}"
+        );
+        let avec_threatfox = Botnets {
+            domaines: Some(HashMap::new()),
+            ..Botnets::default()
+        };
+        let mut absentes = Vec::new();
+        dire_feodo_figee(&mut absentes, &avec_threatfox, Some(jour("2026-03-04")));
+        dire_feodo_figee(&mut absentes, &Botnets::default(), None);
+        assert!(absentes.is_empty(), "{absentes:?}");
     }
 
     #[test]
