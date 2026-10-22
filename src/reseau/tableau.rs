@@ -133,6 +133,10 @@ fn fichier_passe() -> PathBuf {
     reseau::dossier_local().join("surveillance-passe.txt")
 }
 
+fn fichier_reseau() -> PathBuf {
+    reseau::dossier_local().join("surveillance-reseau-non-verifie.txt")
+}
+
 fn fichier_page() -> PathBuf {
     reseau::dossier_local().join("tableau.html")
 }
@@ -215,6 +219,40 @@ pub(crate) fn noter_passe() {
     let _ = reseau::ecrire_atomique(&fichier_passe(), maintenant);
 }
 
+/// Le scan du réseau de cette passe n'a pas pu se faire (`Some(raison)`), ou il s'est fait (`None`). La passe est
+/// notée dès son début : sans cette note, une passe sans réseau passerait sur le tableau pour une passe saine.
+pub(crate) fn noter_reseau(non_verifie: Option<&str>) {
+    ecrire_reseau(&fichier_reseau(), non_verifie, chrono::Local::now().naive_local());
+}
+
+/// La note dans `fichier` : sa date puis sa raison, une ligne chacune ; retirée quand le scan s'est fait.
+fn ecrire_reseau(fichier: &Path, non_verifie: Option<&str>, maintenant: NaiveDateTime) {
+    match non_verifie {
+        Some(raison) => {
+            let texte = format!(
+                "{}\n{}\n",
+                maintenant.format(FORMAT_DATE),
+                tronquer(&raison.replace('\n', " "), TEXTE_MAX)
+            );
+            if let Err(e) = reseau::ecrire_atomique(fichier, texte) {
+                crate::journal::erreur("scan du réseau non vérifié", &e.to_string());
+            }
+        }
+        None => {
+            let _ = std::fs::remove_file(fichier);
+        }
+    }
+}
+
+/// La note relue : (date, raison) ; une note abîmée ou mal datée est laissée de côté, comme une ligne du journal.
+fn lire_reseau(fichier: &Path) -> Option<(String, String)> {
+    let texte = std::fs::read_to_string(fichier).ok()?;
+    let (date, raison) = texte.split_once('\n')?;
+    let date = date.trim();
+    NaiveDateTime::parse_from_str(date, FORMAT_DATE).ok()?;
+    Some((date.to_string(), crate::ui::affichable(raison.trim())))
+}
+
 /// La dernière passe : notée par `noter_passe`, sinon (passes d'avant le tableau) la date de l'état de la machine,
 /// que chaque passe réécrit.
 fn derniere_passe() -> Option<String> {
@@ -249,6 +287,8 @@ pub(crate) struct Donnees {
     /// La protection en temps réel coupée, avec son échéance (« jusqu'à 17:30 ») : la minuterie est là, mais aucune
     /// passe ne se fait.
     pub temps_reel_coupe: Option<String>,
+    /// Le dernier scan du réseau qui n'a pas pu se faire (date, raison) ; `None` dès qu'un scan s'est fait.
+    pub reseau_non_verifie: Option<(String, String)>,
 }
 
 /// Au-delà, les connexions vues ne sont plus dites en cours : la surveillance repasse chaque heure.
@@ -276,6 +316,7 @@ fn collecter() -> Donnees {
         botnets_en_cours,
         botnets_vus,
         temps_reel_coupe: crate::protection::temps_reel::coupure().map(|c| crate::protection::temps_reel::echeance(&c)),
+        reseau_non_verifie: lire_reseau(&fichier_reseau()),
     }
 }
 
@@ -420,6 +461,16 @@ fn etat(d: &Donnees) -> String {
                 comment_activer()
             );
         }
+    }
+    // Le scan du réseau qui n'a pas pu se faire : dit à côté de la dernière passe, qui sinon passerait pour saine.
+    if let Some((date, raison)) = &d.reseau_non_verifie {
+        let _ = trw!(
+            h,
+            "<div class=fix><span class=\"badge moyen\">NON VÉRIFIÉ</span> Réseau non scanné à la passe du {} : {}. Les contrôles de cet ordinateur ont été faits ; le scan reprend à la passe suivante.</div>",
+            "<div class=fix><span class=\"badge moyen\">NOT CHECKED</span> Network not scanned at the run on {}: {}. This computer's checks were done; the scan resumes at the next run.</div>",
+            esc(&quand(date)),
+            esc(raison)
+        );
     }
     h += "</div>";
     h
@@ -761,6 +812,7 @@ mod tests {
             botnets_en_cours: vec!["<svg onload=alert(3)> → 192.0.2.7:443".into()],
             botnets_vus: Some(date("2026-10-20 14:00:00")),
             temps_reel_coupe: None,
+            reseau_non_verifie: None,
         }
     }
 
@@ -829,6 +881,7 @@ mod tests {
             botnets_en_cours: vec![],
             botnets_vus: None,
             temps_reel_coupe: None,
+            reseau_non_verifie: None,
         };
         let page = html(&vide);
         assert!(page.contains("Rien à montrer pour l'instant") && page.contains("vanguard surveillance on"));
@@ -863,6 +916,42 @@ mod tests {
         let page = html(&calme);
         assert!(page.contains("Aucune alerte notée") && page.contains("Aucun appareil connu"));
         assert!(page.contains("Aucun programme de cet ordinateur"));
+    }
+
+    /// Un scan du réseau qui n'a pas pu se faire : noté avec sa date et sa raison, dit sur la page à côté de la
+    /// dernière passe, retiré dès qu'un scan s'est fait.
+    #[test]
+    fn scan_du_reseau_non_verifie() {
+        assert!(!html(&donnees()).contains("NON VÉRIFIÉ") && !html(&donnees()).contains("NOT CHECKED"));
+        let dossier = reseau::dossier_local().join("tableau-reseau");
+        let _ = std::fs::remove_dir_all(&dossier);
+        let fichier = dossier.join("surveillance-reseau-non-verifie.txt");
+        assert_eq!(lire_reseau(&fichier), None);
+        ecrire_reseau(
+            &fichier,
+            Some("pas de réseau\n<b>piège</b>"),
+            date("2026-10-20 14:37:05"),
+        );
+        let note = lire_reseau(&fichier).expect("note relue");
+        assert_eq!(
+            note,
+            ("2026-10-20 14:37:05".into(), "pas de réseau <b>piège</b>".into())
+        );
+        let page = html(&Donnees {
+            reseau_non_verifie: Some(note),
+            ..donnees()
+        });
+        assert!(page.contains("NON VÉRIFIÉ") || page.contains("NOT CHECKED"), "{page}");
+        assert!(page.contains("20/10/2026 à 14:37") || page.contains("2026-10-20 14:37"));
+        assert!(page.contains("&lt;b&gt;piège&lt;/b&gt;") && !page.contains("<b>piège"));
+        // Toujours active : la surveillance n'est pas dite en panne, seul ce scan l'est.
+        assert!(page.contains("badge ok"));
+        ecrire_reseau(&fichier, None, date("2026-10-20 15:00:10"));
+        assert!(!fichier.exists() && lire_reseau(&fichier).is_none());
+        // Une note abîmée (sans date lisible) n'est pas montrée.
+        std::fs::write(&fichier, "hier\nx\n").unwrap();
+        assert_eq!(lire_reseau(&fichier), None);
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 
     #[test]

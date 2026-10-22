@@ -472,6 +472,32 @@ fn veiller_passerelle(r: &reseau::Rapport) {
     }
 }
 
+/// Le réseau attendu au plus une minute au début du scan, redemandé toutes les deux secondes : au réveil, systemd lance
+/// la passe rattrapée avant que NetworkManager ait rebranché le Wi-Fi et refait le DHCP (quelques secondes), et sans
+/// passerelle le scan échouait, ou visait l'interface de Docker ou de libvirt à la place du réseau de la maison.
+const ATTENTE_RESEAU: std::time::Duration = std::time::Duration::from_secs(60);
+const PAS_RESEAU: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Attend que `reseau_la` dise le réseau là (une passerelle par défaut), en le redemandant tous les `pas`, `max` au
+/// plus ; rend s'il est venu. Asynchrone : l'attente ne bloque pas le fil de tokio.
+async fn attendre_reseau(
+    mut reseau_la: impl FnMut() -> bool,
+    pas: std::time::Duration,
+    max: std::time::Duration,
+) -> bool {
+    let fin = tokio::time::Instant::now() + max;
+    loop {
+        if reseau_la() {
+            return true;
+        }
+        let reste = fin.saturating_duration_since(tokio::time::Instant::now());
+        if reste.is_zero() {
+            return false;
+        }
+        tokio::time::sleep(pas.min(reste)).await;
+    }
+}
+
 pub async fn surveiller() {
     // Les exemples du guide se renouvellent pendant la passe (au plus une fois par semaine), sans la retarder.
     let exemples = std::thread::spawn(crate::guide::renouveler_exemples);
@@ -509,14 +535,28 @@ async fn passe() {
     }
     // La protection active, si elle a été activée : le certain bloqué tout seul, chaque blocage notifié.
     crate::protection::blocage::en_surveillance();
-    let Ok(r) = reseau::executer(Options {
+    // La passe est déjà notée (début) et les contrôles de la machine faits : un scan du réseau qui ne peut pas se
+    // faire est noté à part, non vérifié, pour que le tableau ne montre pas une passe saine.
+    if !attendre_reseau(|| reseau::scan::passerelle().is_some(), PAS_RESEAU, ATTENTE_RESEAU).await {
+        tableau::noter_reseau(Some(tr!(
+            "pas de réseau : aucune passerelle une minute après le début du scan (Wi-Fi coupé, câble débranché, ou réveil sans réseau)",
+            "no network: no gateway a minute after the scan started (Wi-Fi off, cable unplugged, or wake-up without network)"
+        )));
+        return;
+    }
+    let r = match reseau::executer(Options {
         silencieux: true,
         ..Options::defaut(None, "courants")
     })
     .await
-    else {
-        return;
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tableau::noter_reseau(Some(&e));
+            return;
+        }
     };
+    tableau::noter_reseau(None);
     veiller_passerelle(&r);
     veiller_audit(
         &r,
@@ -683,11 +723,16 @@ impl Planifie {
 }
 
 /// Ce que le planificateur du système dit d'une tâche de Vanguard : absente, le programme qu'elle lance (et si elle
-/// a les réglages d'aujourd'hui), ou illisible.
+/// a les réglages d'aujourd'hui), ou illisible. `a_jour` porte sa propre erreur : une minuterie illisible n'empêche
+/// pas de juger le programme lu (disparu, sur un lecteur débranché), seule la question « version d'avant » reste
+/// alors sans réponse.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Lecture {
     Absente,
-    Lue { programme: PathBuf, a_jour: bool },
+    Lue {
+        programme: PathBuf,
+        a_jour: Result<bool, String>,
+    },
     Illisible(String),
 }
 
@@ -712,7 +757,7 @@ pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
                 || Lecture::Illisible(tr!("plist illisible", "unreadable plist").to_string()),
                 |(programme, au_lancement)| Lecture::Lue {
                     programme,
-                    a_jour: au_lancement,
+                    a_jour: Ok(au_lancement),
                 },
             ),
         }
@@ -727,7 +772,7 @@ pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
                     .find(|(n, _)| n.eq_ignore_ascii_case(tache))
                     .map_or(Lecture::Absente, |(_, d)| Lecture::Lue {
                         programme: PathBuf::from(d.programme.trim().trim_matches('"')),
-                        a_jour: a_jour_windows(&d),
+                        a_jour: Ok(a_jour_windows(&d)),
                     })
             }
         }
@@ -736,7 +781,7 @@ pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
 
 /// Les unités `nom` posées dans `dossier` : le programme du service, et, si `juger_minuterie`, si la minuterie est
 /// d'aujourd'hui. Une minuterie absente ne se dit pas d'avant (sa disparition se juge à part, `juger_disparition`) ;
-/// illisible, rien n'est conclu : non vérifié, jamais compté comme à jour.
+/// illisible, son âge n'est pas conclu (non vérifié, jamais compté comme à jour), mais le programme lu reste jugé.
 #[cfg(any(target_os = "linux", test))]
 fn lire_unites(dossier: &Path, nom: &str, juger_minuterie: bool) -> Lecture {
     let lire = |ext: &str| std::fs::read_to_string(dossier.join(format!("{nom}.{ext}")));
@@ -752,14 +797,12 @@ fn lire_unites(dossier: &Path, nom: &str, juger_minuterie: bool) -> Lecture {
     };
     let a_jour = if juger_minuterie {
         match lire("timer") {
-            Ok(t) => !minuterie_d_avant(&t),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-            Err(e) => {
-                return Lecture::Illisible(trf!("minuterie illisible ({e})", "unreadable timer ({e})"));
-            }
+            Ok(t) => Ok(!minuterie_d_avant(&t)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Err(e) => Err(e.to_string()),
         }
     } else {
-        true
+        Ok(true)
     };
     Lecture::Lue { programme, a_jour }
 }
@@ -821,7 +864,8 @@ fn sur_un_lecteur_absent(programme: &Path, cle: Option<&Path>, existe: &impl Fn(
 /// Le constat d'une tâche planifiée lue : rien si elle est absente (la disparition se juge à part) ou si tout va bien ;
 /// une alerte si le programme qu'elle lance n'existe plus (`existe`) : la tâche est là, mais elle ne tourne plus, ou
 /// seulement quand la clé (`cle`) est branchée à la même place ; une information si la surveillance a été posée par
-/// une version d'avant ; « non vérifié » si rien n'a pu être lu.
+/// une version d'avant ; « non vérifié » si le programme n'a pas pu être lu, ou, programme présent, si la minuterie ne
+/// l'a pas été (l'alerte d'un programme disparu passe avant : elle ne dépend pas de la minuterie).
 pub(crate) fn juger_tache(
     quoi: Planifie,
     l: &Lecture,
@@ -840,7 +884,7 @@ pub(crate) fn juger_tache(
                 ),
             ));
         }
-        Lecture::Lue { programme, a_jour } => (programme, *a_jour),
+        Lecture::Lue { programme, a_jour } => (programme, a_jour),
     };
     // Un nom sans chemin (« vanguard », quand le programme n'a pas pu se situer) se cherche dans le PATH au lancement :
     // d'ici, rien ne le confirme, et rien ne le dément.
@@ -920,8 +964,21 @@ pub(crate) fn juger_tache(
     }
     // L'entretien a déjà son rattrapage (-StartWhenAvailable) ; et pas de RunAtLoad pour lui : il notifierait à
     // chaque ouverture de session.
-    if a_jour || quoi == Planifie::Entretien {
+    if quoi == Planifie::Entretien {
         return None;
+    }
+    match a_jour {
+        Ok(true) => return None,
+        Ok(false) => {}
+        Err(e) => {
+            return Some(crate::machine::impossible(
+                "Surveillance",
+                &trf!(
+                    "minuterie de {tache} non lue, rien ne dit si elle vient d'une version d'avant : {e}",
+                    "timer of {tache} not read, nothing tells whether it comes from an earlier version: {e}"
+                ),
+            ));
+        }
     }
     let message = if cfg!(target_os = "linux") {
         // La minuterie d'avant passe déjà après un arrêt et à l'ouverture de session (OnBootSec échu) : seule la veille
@@ -976,7 +1033,7 @@ pub fn activer(oui: bool) {
     let d_avant = oui
         && matches!(
             lire_planifie(Planifie::Surveillance),
-            Lecture::Lue { a_jour: false, .. }
+            Lecture::Lue { a_jour: Ok(false), .. }
         );
     // Sous Linux, la minuterie qui la remplace est montrée avant d'être posée : c'est elle que la personne accepte en
     // demandant la remise à jour.
@@ -1075,9 +1132,17 @@ pub(crate) fn retirer_planifie(quoi: Planifie, trouves: &[PathBuf]) -> Result<()
                 .iter()
                 .any(|f| f.extension().is_some_and(|e| e == ext) && std::fs::symlink_metadata(f).is_ok())
         };
+        // Le fichier d'horodatage d'une minuterie Persistent=true (celle d'avant de la surveillance, celle de
+        // l'entretien) : à part des unités, car son nom finit aussi par « .timer » et ne dit pas qu'une unité est posée.
+        let horodatages = dossier_horodatages_maison();
         // Rien de posé : rien à arrêter ni à recharger, et pas d'échec à dire (un bus de session absent, comme dans
-        // une session sans bureau, ferait échouer systemctl pour rien).
+        // une session sans bureau, ferait échouer systemctl pour rien). Un horodatage resté d'un retrait d'avant part
+        // quand même.
         if !present("timer") && !present("service") {
+            let echecs = retirer_horodatage(horodatages.as_deref(), nom);
+            if !echecs.is_empty() {
+                return Err(trf!("non retiré : {}", "not removed: {}", echecs.join(", ")));
+            }
             return Ok(());
         }
         // Sans son fichier, systemctl dirait « unité inconnue » : une unité absente n'est pas à arrêter.
@@ -1087,6 +1152,8 @@ pub(crate) fn retirer_planifie(quoi: Planifie, trouves: &[PathBuf]) -> Result<()
         let mut echecs = retirer_fichiers(&fichiers);
         let recharge = reussit("systemctl", &["--user", "daemon-reload"]);
         echecs.extend(encore_la(&fichiers));
+        // Après l'arrêt de la minuterie : en marche, elle le recréerait à sa passe suivante.
+        echecs.extend(retirer_horodatage(horodatages.as_deref(), nom));
         if !echecs.is_empty() {
             return Err(trf!("non retiré : {}", "not removed: {}", echecs.join(", ")));
         }
@@ -1184,24 +1251,58 @@ pub(crate) fn dossier_unites_maison() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user")
 }
 
+/// Le dossier où le gestionnaire systemd de l'utilisateur tient les fichiers d'horodatage des minuteries
+/// Persistent=true : `$XDG_DATA_HOME/systemd/timers`, sinon `~/.local/share/systemd/timers`. `None` s'il serait
+/// relatif (HOME vide, XDG_DATA_HOME relatif) : un retrait viserait alors le dossier courant.
+#[cfg(target_os = "linux")]
+fn dossier_horodatages(donnees: Option<std::ffi::OsString>, maison: &Path) -> Option<PathBuf> {
+    let dossier = donnees
+        .filter(|d| !d.is_empty())
+        .map_or_else(|| maison.join(".local/share"), PathBuf::from)
+        .join("systemd/timers");
+    dossier.is_absolute().then_some(dossier)
+}
+
+#[cfg(target_os = "linux")]
+fn dossier_horodatages_maison() -> Option<PathBuf> {
+    dossier_horodatages(std::env::var_os("XDG_DATA_HOME"), &crate::nettoyer::maison())
+}
+
+/// Retire le fichier d'horodatage de la minuterie `nom` (« stamp-nom.timer ») : systemd le pose au démarrage d'une
+/// minuterie Persistent=true et le touche à chaque passe, mais ne le retire jamais, même quand la minuterie part. Rend
+/// ce qui n'est pas parti, relu après le retrait ; un dossier inconnu (`None`) n'a rien à retirer.
+#[cfg(target_os = "linux")]
+fn retirer_horodatage(dossier: Option<&Path>, nom: &str) -> Vec<String> {
+    let Some(dossier) = dossier else {
+        return Vec::new();
+    };
+    let fichier = [dossier.join(format!("stamp-{nom}.timer"))];
+    let mut echecs = retirer_fichiers(&fichier);
+    echecs.extend(encore_la(&fichier));
+    echecs
+}
+
 /// Les deux unités systemd : le service, puis la minuterie (`r`).
 ///
 /// D'aujourd'hui : toutes les heures pile (OnCalendar=hourly) et cinq minutes après le démarrage du gestionnaire de
 /// l'utilisateur (OnStartupSec=5min). Une heure de l'horloge murale continue d'avancer pendant une veille, et systemd
 /// fait au réveil la passe d'une heure échue pendant le sommeil (une seule, même si plusieurs sont passées :
-/// systemd.timer(5), OnCalendar=). Après un arrêt ou une fermeture de session, le gestionnaire de l'utilisateur repart
-/// à l'ouverture suivante, et OnStartupSec y fait la passe cinq minutes plus tard, le temps que le réseau se monte ; à
-/// l'activation, il est déjà échu et passe tout de suite (« already in the past … will immediately elapse »). Pas de
-/// Persistent= : il ne ferait que doubler cette passe à l'ouverture (il rattrape au démarrage de la minuterie, comme
-/// OnStartupSec), et laisserait un fichier d'horodatage à retirer à la désinstallation. Pas de RandomizedDelaySec= :
-/// une seule minuterie de ce genre par ordinateur, rien à étaler ; la précision par défaut (AccuracySec=1min) suffit à
-/// la regrouper avec les autres réveils.
+/// systemd.timer(5), OnCalendar=). Ce rattrapage part dès le réveil, souvent avant que le Wi-Fi soit rebranché et
+/// l'adresse redemandée : c'est la passe qui attend le réseau (`attendre_reseau`, une minute au plus), pas la
+/// minuterie. Après un arrêt ou une fermeture de session, le gestionnaire de l'utilisateur repart à l'ouverture
+/// suivante, et OnStartupSec y fait la passe cinq minutes plus tard, le temps que le réseau se monte ; à l'activation,
+/// il est déjà échu et passe tout de suite (« already in the past … will immediately elapse »). Pas de Persistent= : il
+/// ne ferait que doubler cette passe à l'ouverture (il rattrape au démarrage de la minuterie, comme OnStartupSec), et
+/// laisserait un fichier d'horodatage (`retirer_horodatage`). Pas de RandomizedDelaySec= : une seule minuterie de ce
+/// genre par ordinateur, rien à étaler ; la précision par défaut (AccuracySec=1min) suffit à la regrouper avec les
+/// autres réveils.
 ///
 /// D'avant : cinq minutes après le démarrage (OnBootSec, déjà échu à une ouverture de session plus tardive, donc
 /// immédiat), puis une heure après chaque passe (OnUnitActiveSec). Son Persistent= n'agit que sur un OnCalendar= : il
-/// ne rattrapait rien. Après une veille, l'horloge de OnUnitActiveSec s'arrête avec l'ordinateur : la passe vient au
-/// bout du reste de l'heure entamée, sans rattrapage au réveil. Gardée à l'identique pour une surveillance reprise
-/// telle qu'acceptée (`reprendre`), et reconnue à ces réglages (`minuterie_d_avant`).
+/// ne rattrapait rien, mais systemd lui tient quand même un fichier d'horodatage, retiré quand elle est remplacée
+/// (`installer`) ou retirée (`retirer_planifie`). Après une veille, l'horloge de OnUnitActiveSec s'arrête avec
+/// l'ordinateur : la passe vient au bout du reste de l'heure entamée, sans rattrapage au réveil. Gardée à l'identique
+/// pour une surveillance reprise telle qu'acceptée (`reprendre`), et reconnue à ces réglages (`minuterie_d_avant`).
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn unites_systemd(exe: &str, r: Reglages) -> (String, &'static str) {
     // Chemin entre guillemets (un dossier personnel peut contenir une espace), « % » doublé (spécificateurs de
@@ -1284,9 +1385,16 @@ fn installer(exe: &str, r: Reglages) -> bool {
     // Redémarrée plutôt que « enable --now » : une minuterie déjà en marche (une réactivation qui remplace celle d'une
     // version d'avant) ne serait pas relancée par start, et rien ici ne vérifie que daemon-reload lui fait prendre ses
     // nouveaux réglages ; redémarrée, elle les prend à coup sûr. Arrêtée, restart la démarre, comme start.
-    reussit("systemctl", &["--user", "daemon-reload"])
+    let posee = reussit("systemctl", &["--user", "daemon-reload"])
         && reussit("systemctl", &["--user", "enable", &minuterie])
-        && reussit("systemctl", &["--user", "restart", &minuterie])
+        && reussit("systemctl", &["--user", "restart", &minuterie]);
+    // La minuterie d'avant (Persistent=true) laisse son fichier d'horodatage ; celle d'aujourd'hui n'en a plus
+    // l'usage. Retiré après le redémarrage, quand plus rien ne le touche. Un échec reste sans effet sur la
+    // surveillance (plus aucune minuterie ne le lit), et la désinstallation le retire de nouveau, relu ensuite.
+    if r == Reglages::Aujourdhui {
+        let _ = retirer_horodatage(dossier_horodatages_maison().as_deref(), NOM);
+    }
+    posee
 }
 
 #[cfg(target_os = "macos")]
@@ -1670,7 +1778,7 @@ mod tests {
         };
         let lue = |a_jour| Lecture::Lue {
             programme: PathBuf::from(exe),
-            a_jour,
+            a_jour: Ok(a_jour),
         };
         ecrire(Reglages::Aujourdhui);
         assert_eq!(lire_unites(&d, NOM, true), lue(true));
@@ -1689,11 +1797,27 @@ mod tests {
         // La minuterie retirée : sa disparition se juge à part, pas de « version d'avant » ici.
         std::fs::remove_file(d.join(format!("{NOM}.timer"))).unwrap();
         assert_eq!(lire_unites(&d, NOM, true), lue(true));
-        // Un dossier à la place de la minuterie : illisible, donc non vérifié.
+        // Un dossier à la place de la minuterie : le programme est lu quand même, seul l'âge de la minuterie reste
+        // sans réponse.
         std::fs::create_dir_all(d.join(format!("{NOM}.timer"))).unwrap();
-        assert!(matches!(lire_unites(&d, NOM, true), Lecture::Illisible(_)));
-        let c = juger_tache(Planifie::Surveillance, &lire_unites(&d, NOM, true), None, |_| true).expect("constat");
+        let illisible = lire_unites(&d, NOM, true);
+        assert!(
+            matches!(&illisible, Lecture::Lue { programme, a_jour: Err(_) } if programme == Path::new(exe)),
+            "{illisible:?}"
+        );
+        // Programme présent : non vérifié, et le message dit que c'est la minuterie qui n'a pas été lue, pas le
+        // programme.
+        let c = juger_tache(Planifie::Surveillance, &illisible, None, |_| true).expect("constat");
         assert!(!c.verifie);
+        assert!(
+            (c.message.contains("minuterie") && !c.message.contains("programme"))
+                || (c.message.contains("timer") && !c.message.contains("program")),
+            "{}",
+            c.message
+        );
+        // Programme disparu : l'alerte élevée est dite malgré la minuterie illisible.
+        let c = juger_tache(Planifie::Surveillance, &illisible, None, |p| p != Path::new(exe)).expect("constat");
+        assert!(c.verifie && c.probleme == Some(Niveau::Eleve), "{}", c.message);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1706,7 +1830,7 @@ mod tests {
         });
         let lue = |a_jour| Lecture::Lue {
             programme: programme.clone(),
-            a_jour,
+            a_jour: Ok(a_jour),
         };
         // Tout existe, sauf le programme : son dossier est encore là.
         let parti = |p: &Path| p != programme;
@@ -1745,7 +1869,7 @@ mod tests {
         // Un nom sans chemin : non vérifié non plus, avec le nom de la tâche.
         let relatif = Lecture::Lue {
             programme: PathBuf::from("vanguard"),
-            a_jour: true,
+            a_jour: Ok(true),
         };
         assert!(
             !juger_tache(Planifie::Surveillance, &relatif, None, |_| true)
@@ -1781,7 +1905,7 @@ mod tests {
             } else {
                 "/opt/vanguard/vanguard"
             }),
-            a_jour: a_jour_windows(d),
+            a_jour: Ok(a_jour_windows(d)),
         };
         assert!(juger_tache(Planifie::Surveillance, &l, None, |_| true).is_none());
         // Une tâche d'avant n'a jamais eu StartWhenAvailable.
@@ -1836,7 +1960,7 @@ mod tests {
                 Planifie::Surveillance,
                 &Lecture::Lue {
                     programme: p.to_path_buf(),
-                    a_jour: true,
+                    a_jour: Ok(true),
                 },
                 Some(ailleurs),
                 la,
@@ -1875,6 +1999,94 @@ mod tests {
         assert_eq!(encore_la(&[bloque]).len(), 1);
         std::fs::set_permissions(&verrou, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Au réveil, le réseau revient quelques secondes après la passe : elle l'attend, en le redemandant, puis
+    /// s'arrête à la borne s'il ne vient pas. Passerelle simulée, aucune vraie interface ; pas et borne réduits pour
+    /// que le test reste court.
+    #[tokio::test]
+    async fn reseau_attendu_au_plus_la_borne() {
+        use std::time::{Duration, Instant};
+        let pas = Duration::from_millis(20);
+        // Là tout de suite : aucune attente.
+        let debut = Instant::now();
+        assert!(attendre_reseau(|| true, pas, Duration::from_secs(5)).await);
+        assert!(debut.elapsed() < Duration::from_secs(1));
+        // Revenu à la troisième demande : attendu, sans aller jusqu'à la borne.
+        let mut demandes = 0;
+        let debut = Instant::now();
+        let venu = attendre_reseau(
+            || {
+                demandes += 1;
+                demandes >= 3
+            },
+            pas,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(venu && demandes == 3, "{demandes}");
+        assert!(debut.elapsed() >= 2 * pas && debut.elapsed() < Duration::from_secs(4));
+        // Jamais revenu : faux à la borne, ni avant ni bien après, et redemandé entre-temps.
+        let mut demandes = 0;
+        let borne = Duration::from_millis(150);
+        let debut = Instant::now();
+        let venu = attendre_reseau(
+            || {
+                demandes += 1;
+                false
+            },
+            pas,
+            borne,
+        )
+        .await;
+        let duree = debut.elapsed();
+        assert!(!venu);
+        assert!(duree >= borne && duree < borne + Duration::from_secs(2), "{duree:?}");
+        assert!(demandes >= 3, "{demandes}");
+        // Les vraies valeurs : une minute au plus, redemandé toutes les deux secondes.
+        assert_eq!(
+            (ATTENTE_RESEAU, PAS_RESEAU),
+            (Duration::from_secs(60), Duration::from_secs(2))
+        );
+    }
+
+    /// Le fichier d'horodatage de la minuterie d'avant (Persistent=true) : retiré, puis relu absent ; un fichier qui
+    /// ne part pas est dit ; un dossier inconnu ne vise rien, surtout pas le dossier courant.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn horodatage_de_la_minuterie_retire() {
+        let maison = crate::reseau::dossier_local().join("horodatage");
+        let _ = std::fs::remove_dir_all(&maison);
+        let dossier = dossier_horodatages(None, &maison).unwrap();
+        assert_eq!(dossier, maison.join(".local/share/systemd/timers"));
+        assert_eq!(
+            dossier_horodatages(Some(maison.join("donnees").into()), Path::new("/ailleurs")),
+            Some(maison.join("donnees/systemd/timers"))
+        );
+        assert_eq!(dossier_horodatages(Some("".into()), Path::new("")), None);
+        assert_eq!(
+            dossier_horodatages(Some("relatif".into()), Path::new("/home/alice")),
+            None
+        );
+        assert_eq!(retirer_horodatage(None, NOM), Vec::<String>::new());
+        std::fs::create_dir_all(&dossier).unwrap();
+        let stamp = dossier.join(format!("stamp-{NOM}.timer"));
+        let voisin = dossier.join("stamp-autre.timer");
+        std::fs::write(&stamp, "").unwrap();
+        std::fs::write(&voisin, "").unwrap();
+        assert_eq!(retirer_horodatage(Some(&dossier), NOM), Vec::<String>::new());
+        assert!(std::fs::symlink_metadata(&stamp).is_err(), "relu absent");
+        // Celui d'une autre minuterie reste ; déjà absent, rien à dire.
+        assert!(voisin.exists());
+        assert_eq!(retirer_horodatage(Some(&dossier), NOM), Vec::<String>::new());
+        // Un dossier à sa place ne part pas : c'est dit, avec son chemin.
+        std::fs::create_dir_all(&stamp).unwrap();
+        let echecs = retirer_horodatage(Some(&dossier), NOM);
+        assert!(
+            !echecs.is_empty() && echecs[0].contains(&format!("stamp-{NOM}.timer")),
+            "{echecs:?}"
+        );
+        let _ = std::fs::remove_dir_all(&maison);
     }
 
     /// Root efface même dans un dossier en lecture seule : le cas ne se vérifie alors pas.
