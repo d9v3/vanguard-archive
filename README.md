@@ -521,8 +521,8 @@ ni nom de Wi-Fi ; il ne part jamais sur GitHub.
 **Raccourci sur cet ordinateur** — Vanguard copié ici et lancé d'un clic.
 
 **Retirer Vanguard de cet ordinateur** — tout ce qu'il y a posé (surveillance, entretien, sauvegarde automatique,
-fichiers-pièges, raccourci et icône, copie du programme, restes d'une version d'avant) est retrouvé, montré avec ce
-qui sera fait, puis coché. Le dossier de données n'est effacé qu'après un second accord ; les changements faits sur le
+veilleur, fichiers-pièges, raccourci et icône, copie du programme, restes d'une version d'avant) est retrouvé, montré
+avec ce qui sera fait, puis coché. Le dossier de données n'est effacé qu'après un second accord ; les changements faits sur le
 système se défont d'abord par leurs outils, ou sont dits avec leur commande ; la clé n'est jamais touchée.
 
 **Guide des commandes** — les commandes utiles d'Omarchy, d'Arch, de Fedora, de Debian et Ubuntu (et des autres

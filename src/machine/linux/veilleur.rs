@@ -51,7 +51,11 @@ regle!(
 );
 
 /// Le nom de l'unité de l'utilisateur.
-const UNITE: &str = "vanguard-veilleur.service";
+pub(crate) const UNITE: &str = "vanguard-veilleur.service";
+/// L'état que le service réécrit dans le dossier de données, et la note du choix de la personne : la désinstallation
+/// les garde si le veilleur reste alors que le dossier part.
+pub(crate) const ETAT: &str = "veilleur-etat.json";
+pub(crate) const VOULU: &str = "veilleur-voulu";
 /// La sortie d'un refus (noyau trop ancien, abonnement refusé, root) : l'unité ne le relance pas
 /// (RestartPreventExitStatus), puisque relancer n'y changerait rien.
 const SORTIE_REFUS: i32 = 77;
@@ -1288,12 +1292,12 @@ pub(crate) struct Etat {
 const DERNIERS_PARTIS: usize = 10;
 
 fn fichier_etat() -> PathBuf {
-    crate::reseau::dossier_local().join("veilleur-etat.json")
+    crate::reseau::dossier_local().join(ETAT)
 }
 
 /// Le choix de la personne, noté à l'allumage : si l'unité disparaît sans qu'elle l'ait coupée, le bilan le dit.
 fn fichier_voulu() -> PathBuf {
-    crate::reseau::dossier_local().join("veilleur-voulu")
+    crate::reseau::dossier_local().join(VOULU)
 }
 
 pub(crate) fn voulu() -> bool {
@@ -1320,9 +1324,12 @@ fn maintenant() -> i64 {
 /// Le service tourne-t-il vraiment ? Un battement de moins de 3 minutes, et le processus noté est bien le veilleur
 /// (un numéro repris par un autre programme ne compte pas).
 fn vivant_d_apres(etat: &Etat, maintenant: i64) -> bool {
-    let recent = (0..180).contains(&maintenant.saturating_sub(etat.battement));
-    recent
-        && etat.pid != 0
+    (0..180).contains(&maintenant.saturating_sub(etat.battement)) && en_marche(etat)
+}
+
+/// Le processus noté dans l'état est-il encore le veilleur ?
+fn en_marche(etat: &Etat) -> bool {
+    etat.pid != 0
         && std::fs::read(format!("/proc/{}/cmdline", etat.pid)).is_ok_and(|o| {
             let mots: Vec<&[u8]> = o.split(|&b| b == 0).collect();
             mots.contains(&b"veilleur".as_slice()) && mots.contains(&b"--servir".as_slice())
@@ -1496,7 +1503,7 @@ fn noyau_trop_ancien(release: &str) -> String {
 const MARQUE_FR: &str = "# Posé par Vanguard (vanguard veilleur on)";
 const MARQUE_EN: &str = "# Placed by Vanguard (vanguard watcher on)";
 
-fn fichier_unite() -> PathBuf {
+pub(crate) fn fichier_unite() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
         .join(".config/systemd/user")
         .join(UNITE)
@@ -1529,9 +1536,15 @@ fn unite(exe: &str) -> String {
     unite_dans(exe, crate::langue::anglais())
 }
 
+/// L'unité telle que « on » la pose, pour les essais d'autres modules (la désinstallation la reconnaît).
+#[cfg(test)]
+pub(crate) fn unite_d_essai(exe: &str, anglais: bool) -> String {
+    unite_dans(exe, anglais)
+}
+
 /// Est-ce l'unité de Vanguard ? Sa première ligne est notre marque, dans l'une ou l'autre langue : une unité du même
 /// nom posée par quelqu'un d'autre n'est jamais effacée.
-fn notre_unite(texte: &str) -> bool {
+pub(crate) fn notre_unite(texte: &str) -> bool {
     texte
         .lines()
         .next()
@@ -1740,31 +1753,94 @@ fn couper() {
         trp!("  Rien n'est changé.", "  Nothing is changed.");
         return;
     }
+    match retirer_sans_question(&chemin, true) {
+        Retire::Fait => trp!("  {VERT}✔{RESET} Veilleur coupé.", "  {VERT}✔{RESET} Watcher off."),
+        Retire::Echoue(raison) => trp!(
+            "  ✖ Le veilleur n'a pas pu être coupé entièrement ({}) : systemctl --user status {UNITE} dit où il en est.",
+            "  ✖ The watcher could not be turned off completely ({}): systemctl --user status {UNITE} tells where it stands.",
+            raison
+        ),
+        Retire::NonVerifie(raison) => trp!(
+            "  ⚠ Veilleur coupé, sans que ce soit vérifié ({}) : systemctl --user status {UNITE} dit où il en est.",
+            "  ⚠ Watcher off, without this being checked ({}): systemctl --user status {UNITE} tells where it stands.",
+            raison
+        ),
+    }
+}
+
+/// Ce qu'a donné un retrait du veilleur, constaté après coup.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Retire {
+    Fait,
+    /// Quelque chose reste (l'unité, l'activation, le service en marche), ou l'unité n'est plus celle de Vanguard.
+    Echoue(String),
+    /// Rien ne montre qu'il reste, mais systemd n'a pas confirmé l'arrêt.
+    NonVerifie(String),
+}
+
+/// Arrête le veilleur puis retire son unité `chemin`, sans rien demander : montré et accepté avant, par « vanguard
+/// veilleur off » ou par la désinstallation, qui partagent ainsi le même retrait. Une unité du même nom que Vanguard
+/// n'a pas posée n'est jamais effacée ; elle est seulement arrêtée si `arreter_l_etrangere` (« off » l'a annoncé),
+/// sinon rien n'y est fait. Le retrait est constaté ensuite (unité relue, plus activée, service plus en marche),
+/// jamais supposé. La note du choix et l'état partent avec, sans quoi le bilan dirait le veilleur disparu sans avoir
+/// été coupé.
+pub(crate) fn retirer_sans_question(chemin: &std::path::Path, arreter_l_etrangere: bool) -> Retire {
+    // Relue juste avant : une unité étrangère posée depuis ce qui a été montré n'est pas effacée.
+    let presente = std::fs::symlink_metadata(chemin).is_ok();
+    let a_nous = std::fs::read(chemin).is_ok_and(|o| notre_unite(&String::from_utf8_lossy(&o)));
+    if presente && !a_nous && !arreter_l_etrangere {
+        return Retire::Echoue(trf!(
+            "{} n'est plus l'unité de Vanguard : gardée telle quelle, rien n'est arrêté",
+            "{} is no longer Vanguard's unit: kept as it is, nothing is stopped",
+            crate::ui::chemin_affichable(chemin)
+        ));
+    }
+    // Lu avant l'arrêt : le service le réécrit tant qu'il tourne, et il dit quel processus vérifier ensuite.
+    let avant = lire_etat();
     let arrete = systemctl(&["--user", "disable", "--now", UNITE]);
     let mut commandes = vec![format!("systemctl --user disable --now {UNITE}")];
-    let retiree = if a_nous {
+    if a_nous {
         commandes.push(format!("{} {}", tr!("retirer", "remove"), chemin.display()));
-        std::fs::remove_file(&chemin).is_ok()
-    } else {
-        true
-    };
+        let _ = std::fs::remove_file(chemin);
+    }
     commandes.push("systemctl --user daemon-reload".to_string());
-    let recharge = systemctl(&["--user", "daemon-reload"]);
+    let _ = systemctl(&["--user", "daemon-reload"]);
+    let encore_la = a_nous && std::fs::symlink_metadata(chemin).is_ok();
+    let activee = crate::machine::linux::natif::unite_activee(UNITE, true);
+    let tourne = avant.as_ref().filter(|e| en_marche(e)).map(|e| e.pid);
+    let issue = if encore_la {
+        Retire::Echoue(trf!(
+            "unité encore là : {}",
+            "unit still there: {}",
+            crate::ui::chemin_affichable(chemin)
+        ))
+    } else if let Some(pid) = tourne {
+        Retire::Echoue(trf!(
+            "toujours en marche (processus {pid}) : systemctl --user stop {UNITE}",
+            "still running (process {pid}): systemctl --user stop {UNITE}"
+        ))
+    } else if activee == Some(true) {
+        Retire::Echoue(trf!(
+            "toujours activée : systemctl --user disable {UNITE}",
+            "still enabled: systemctl --user disable {UNITE}"
+        ))
+    } else if !arrete && presente {
+        // Une unité absente rend disable en échec sans que rien ne tourne ; présente, l'échec veut dire que systemd
+        // n'a pas répondu : rien ne la montre en marche, mais l'arrêt n'est pas confirmé.
+        Retire::NonVerifie(
+            tr!(
+                "systemctl --user n'a pas confirmé l'arrêt ; aucun veilleur n'est vu en marche",
+                "systemctl --user did not confirm the stop; no watcher is seen running"
+            )
+            .to_string(),
+        )
+    } else {
+        Retire::Fait
+    };
     let _ = std::fs::remove_file(fichier_voulu());
     let _ = std::fs::remove_file(fichier_etat());
-    // Une unité absente rend disable en échec sans que rien ne tourne : le résultat qui compte est l'unité retirée et
-    // plus activée.
-    let reussi =
-        retiree && recharge && (arrete || crate::machine::linux::natif::unite_activee(UNITE, true) != Some(true));
-    crate::changements::noter(&[commandes], &[reussi]);
-    if reussi {
-        trp!("  {VERT}✔{RESET} Veilleur coupé.", "  {VERT}✔{RESET} Watcher off.");
-    } else {
-        trp!(
-            "  ✖ Le veilleur n'a pas pu être coupé entièrement : systemctl --user status {UNITE} dit où il en est.",
-            "  ✖ The watcher could not be turned off completely: systemctl --user status {UNITE} tells where it stands."
-        );
-    }
+    crate::changements::noter(&[commandes], &[issue == Retire::Fait]);
+    issue
 }
 
 // ───────────────────────────── Commande, menu, bilan ─────────────────────────────

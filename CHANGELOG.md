@@ -19,12 +19,13 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   ni code chargé dans le noyau. Un programme parti avant d'être lu est compté tel quel, jamais jugé sain ; le
   programme d'une connexion fermée n'est pas connu. Le bilan dit s'il est coupé, allumé, ou allumé mais à l'arrêt.
 - **Retirer Vanguard de cet ordinateur.** `vanguard desinstaller` (menu Données) retrouve tout ce que Vanguard a posé
-  ici, sans registre : la surveillance horaire, l'entretien du mois, la sauvegarde automatique, les fichiers-pièges, le
-  raccourci et son icône, la copie du programme, et ce qu'une version d'avant le changement de nom avait laissé. Tout
-  est montré avec ce qui sera fait, puis coché ; le dossier de données (carnet des appareils, historique, apprentissage,
+  ici, sans registre : la surveillance horaire, l'entretien du mois, la sauvegarde automatique, le veilleur (son unité
+  reconnue à sa marque : une unité du même nom posée par quelqu'un d'autre reste), les fichiers-pièges, le raccourci et
+  son icône, la copie du programme, et ce qu'une version d'avant le changement de nom avait laissé. Tout est montré
+  avec ce qui sera fait, puis coché ; le dossier de données (carnet des appareils, historique, apprentissage,
   quarantaine) n'est jamais coché d'office et demande un second accord. Les changements faits sur le système se défont
   d'abord par leurs outils, ou sont dits avec la commande qui les défait ; la clé USB n'est jamais touchée. À la fin :
-  ce qui est retiré, gardé, et ce qui a échoué. Sans droits d'administrateur.
+  ce qui est retiré, gardé, et ce qui a échoué ou n'a pas pu être vérifié. Sans droits d'administrateur.
 - **Raccourci retiré avec son icône** (Linux) : `raccourci off` laissait l'icône ; elle part aussi, si c'est bien celle
   de Vanguard.
 - **Une surveillance qui ne tourne plus est dite.** Le bilan vérifie que le programme lancé par la surveillance horaire

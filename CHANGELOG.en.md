@@ -19,12 +19,13 @@ delivered just before it. Only the latest version has its download page; every v
   kernel. A program gone before it could be read is counted as such, never judged safe; the program of a closed
   connection is not known. The check says whether it is off, on, or on but stopped.
 - **Remove Vanguard from this computer.** `vanguard uninstall` (Data menu) finds everything Vanguard placed here,
-  without a register: the hourly monitoring, the monthly check-up, the automatic backup, the decoy files, the shortcut
-  and its icon, the program copy, and what a version from before the name change had left. Everything is shown with what
+  without a register: the hourly monitoring, the monthly check-up, the automatic backup, the watcher (its unit
+  recognised by its mark: a unit of the same name placed by someone else stays), the decoy files, the shortcut and its
+  icon, the program copy, and what a version from before the name change had left. Everything is shown with what
   will be done, then checked; the data folder (device record, history, learning, quarantine) is never checked by default
   and asks for a second consent. Changes made to the system are first undone by their own tools, or said with the
-  command that undoes them; the USB key is never touched. At the end: what was removed, kept, and what failed. No
-  administrator rights.
+  command that undoes them; the USB key is never touched. At the end: what was removed, kept, and what failed or could
+  not be checked. No administrator rights.
 - **Shortcut removed with its icon** (Linux): `shortcut off` left the icon behind; it goes too, if it is really
   Vanguard's.
 - **Monitoring that no longer runs is said.** The check-up verifies that the program started by the hourly monitoring

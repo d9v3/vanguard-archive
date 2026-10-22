@@ -1,6 +1,6 @@
 //! Retirer Vanguard de cet ordinateur : tout ce qu'il y a posé (surveillance horaire, entretien du mois, sauvegarde
-//! automatique, fichiers-pièges, raccourci et icône, copie du programme, restes d'une version d'avant, dossier de
-//! données), retrouvé, montré avec ce qui sera fait, puis coché.
+//! automatique, veilleur, fichiers-pièges, raccourci et icône, copie du programme, restes d'une version d'avant,
+//! dossier de données), retrouvé, montré avec ce qui sera fait, puis coché.
 //!
 //! Rien n'est tenu dans un registre de ce qui a été posé : tout est recalculé à partir de ce qui est trouvé, par des
 //! noms exacts, une marque ou une empreinte. Un registre se perd, et un programme du compte peut le réécrire : il ne
@@ -26,6 +26,9 @@ pub(crate) struct Lieux {
     /// Les dossiers des unités systemd de l'utilisateur (Linux ; vide ailleurs) : celui de la surveillance et de
     /// l'entretien, puis celui de la sauvegarde s'il diffère (XDG_CONFIG_HOME).
     pub unites: Vec<PathBuf>,
+    /// L'unité du veilleur (Linux ; `None` ailleurs), posée seulement par « vanguard veilleur on ».
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub veilleur: Option<PathBuf>,
     /// Le dossier des agents launchd (macOS).
     pub agents: Option<PathBuf>,
     /// Les tâches du Planificateur aux noms de Vanguard (Windows) ; `None` : le planificateur n'a pas pu être lu.
@@ -70,6 +73,10 @@ impl Lieux {
                 }
             }
         }
+        #[cfg(target_os = "linux")]
+        let veilleur = Some(crate::machine::linux::veilleur::fichier_unite()).filter(|p| p.is_absolute());
+        #[cfg(not(target_os = "linux"))]
+        let veilleur = None;
         #[cfg(target_os = "macos")]
         let agents = Some(crate::nettoyer::maison().join("Library/LaunchAgents")).filter(|d| d.is_absolute());
         #[cfg(not(target_os = "macos"))]
@@ -101,6 +108,7 @@ impl Lieux {
         Ok(Lieux {
             donnees,
             unites,
+            veilleur,
             agents,
             taches,
             raccourci: crate::raccourci::chemin(),
@@ -115,6 +123,7 @@ impl Lieux {
         Lieux {
             donnees: racine.join("donnees/vanguard"),
             unites: vec![racine.join(".config/systemd/user"), racine.join("config/systemd/user")],
+            veilleur: Some(racine.join(".config/systemd/user/vanguard-veilleur.service")),
             agents: Some(racine.join("Library/LaunchAgents")),
             taches: Some(Vec::new()),
             raccourci: Some(racine.join("donnees/applications/Vanguard.desktop")),
@@ -125,12 +134,15 @@ impl Lieux {
 }
 
 /// Ce qu'est un élément trouvé ; l'ordre est celui de la liste et du retrait. Les données partent en dernier :
-/// plusieurs retraits y écrivent avant (changements.jsonl, pieges.json, sauvegarde.json).
+/// plusieurs retraits y écrivent avant (changements.jsonl, pieges.json, sauvegarde.json), et le veilleur, tant qu'il
+/// tourne, y réécrit son état.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Genre {
     Surveillance,
     Entretien,
     Sauvegarde,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Veilleur,
     Avant,
     Pieges,
     Raccourci,
@@ -149,6 +161,9 @@ pub(crate) enum Retrait {
     Entretien(Vec<PathBuf>),
     /// La note de ce qui a été mis en place (`None` : unités trouvées par leur nom, sans note), et les unités trouvées.
     Sauvegarde(Option<MiseEnPlace>, Vec<PathBuf>),
+    /// L'unité du veilleur, reconnue à sa marque : délégué au retrait de « vanguard veilleur off ».
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Veilleur(PathBuf),
     Pieges,
     /// Le raccourci (même absent) : `raccourci::retirer` retire aussi l'icône de Vanguard.
     Raccourci(PathBuf),
@@ -412,6 +427,48 @@ fn sauvegarde(l: &Lieux, r: &mut Recensement) {
     r.elements.push(element);
 }
 
+/// Le veilleur, si son unité est posée. Seule sa marque la dit de Vanguard : une unité du même nom sans elle est à
+/// quelqu'un d'autre, gardée et pas même arrêtée ; une unité illisible n'est comptée ni comme la sienne ni comme
+/// absente.
+#[cfg(target_os = "linux")]
+fn veilleur(p: &Path, r: &mut Recensement) {
+    use crate::machine::linux::veilleur::{UNITE, notre_unite};
+    if std::fs::symlink_metadata(p).is_err() {
+        return;
+    }
+    match std::fs::read(p).map(|o| String::from_utf8_lossy(&o).into_owned()) {
+        Ok(texte) if notre_unite(&texte) => {
+            let lance = surveillance::programme_d_une_unite(&texte);
+            let lance_montre = lance
+                .as_deref()
+                .map_or_else(|| tr!("non lu", "not read").to_string(), chemin_affichable);
+            r.elements.push(Element {
+                genre: Genre::Veilleur,
+                texte: tr!("Veilleur (lancements, connexions)", "Watcher (launches, connections)").to_string(),
+                precision: tr!("arrêté puis retiré", "stopped, then removed").to_string(),
+                detail: trf!(
+                    "Arrêté (systemctl --user disable --now {UNITE}), puis son unité retirée : {}. Il lance : {lance_montre}",
+                    "Stopped (systemctl --user disable --now {UNITE}), then its unit removed: {}. It starts: {lance_montre}",
+                    chemin_affichable(p)
+                ),
+                coche: true,
+                lance,
+                retrait: Retrait::Veilleur(p.to_path_buf()),
+            });
+        }
+        Ok(_) => r.pas_a_lui.push(trf!(
+            "Une unité {UNITE} ({}) n'a pas été posée par Vanguard : elle reste, et n'est pas arrêtée.",
+            "A {UNITE} unit ({}) was not placed by Vanguard: it stays, and is not stopped.",
+            chemin_affichable(p)
+        )),
+        Err(e) => r.non_verifie.push(trf!(
+            "L'unité du veilleur ne se lit pas ({}, {e}) : rien ne dit qu'elle est de Vanguard, elle reste. « vanguard veilleur off » la retire si c'est la sienne.",
+            "The watcher's unit cannot be read ({}, {e}): nothing says it is Vanguard's, it stays. “vanguard watcher off” removes it if it is its own.",
+            chemin_affichable(p)
+        )),
+    }
+}
+
 /// Tout ce que Vanguard a posé dans les lieux `l`, sans rien changer : ne lit que des fichiers sous les chemins de
 /// `l` et les tâches de `l.taches`. Dans l'ordre du retrait ; tout coché d'office, sauf les dossiers de données.
 pub(crate) fn recenser(l: &Lieux) -> Recensement {
@@ -426,6 +483,10 @@ pub(crate) fn recenser(l: &Lieux) -> Recensement {
         r.elements.extend(planifie(l, quoi));
     }
     sauvegarde(l, &mut r);
+    #[cfg(target_os = "linux")]
+    if let Some(p) = &l.veilleur {
+        veilleur(p, &mut r);
+    }
 
     // Les restes d'une version d'avant : la copie du programme d'avant va avec bin/, l'ancien dossier de données avec
     // les données ; le reste à part.
@@ -713,7 +774,7 @@ fn chemins(e: &Element) -> Vec<PathBuf> {
         Retrait::Surveillance(f) | Retrait::Entretien(f) | Retrait::Sauvegarde(_, f) | Retrait::Fichiers(f) => {
             f.clone()
         }
-        Retrait::Raccourci(p) | Retrait::Dossier(p) => vec![p.clone()],
+        Retrait::Raccourci(p) | Retrait::Dossier(p) | Retrait::Veilleur(p) => vec![p.clone()],
         Retrait::Avant(r) => r.chemins(),
     }
 }
@@ -761,9 +822,9 @@ fn garder_les_dependances(e: &[Element], etats: &mut [bool]) -> Vec<String> {
 
 /// Ce que des éléments gardés demandent encore dans le dossier `d`, qu'on efface : la copie du programme qu'ils
 /// lancent (bin/ est dans le dossier de données), leurs propres fichiers, et, pour le dossier d'aujourd'hui
-/// (`actuel`), leur note (le choix de la surveillance, qui fait dire au bilan qu'elle a disparu ; la note de la
-/// sauvegarde et la liste des pièges, sans lesquelles ils ne se défont plus exactement). Avec l'élément qui en a
-/// besoin.
+/// (`actuel`), leur note (le choix de la surveillance ou du veilleur, qui fait dire au bilan qu'il a disparu, et l'état
+/// du veilleur ; la note de la sauvegarde et la liste des pièges, sans lesquelles ils ne se défont plus exactement).
+/// Avec l'élément qui en a besoin.
 fn gardes_dans(d: &Path, actuel: bool, e: &[Element], etats: &[bool]) -> Vec<(PathBuf, String)> {
     let mut gardes: Vec<(PathBuf, String)> = Vec::new();
     for (x, &coche) in e.iter().zip(etats) {
@@ -777,6 +838,12 @@ fn gardes_dans(d: &Path, actuel: bool, e: &[Element], etats: &[bool]) -> Vec<(Pa
                 (Genre::Surveillance, _) => besoins.push(d.join(surveillance::VOULUE)),
                 (_, Retrait::Sauvegarde(Some(_), _)) => besoins.push(d.join(crate::sauvegarde::NOTES)),
                 (Genre::Pieges, _) => besoins.push(d.join(crate::protection::pieges::LISTE)),
+                // Le choix noté, sans quoi le bilan le dirait disparu, et l'état que le service réécrit.
+                #[cfg(target_os = "linux")]
+                (Genre::Veilleur, _) => {
+                    use crate::machine::linux::veilleur::{ETAT, VOULU};
+                    besoins.extend([d.join(VOULU), d.join(ETAT)]);
+                }
                 _ => {}
             }
         }
@@ -1146,19 +1213,35 @@ struct Execution<'a> {
     a_faire: Vec<String>,
 }
 
-/// Retire un élément, sans rien demander (montré et accepté avant) ; rend ce qui est fait, ou la raison d'un échec.
-fn retirer(e: &Element, x: &mut Execution) -> Result<String, String> {
+/// Pourquoi un élément n'est pas compté comme retiré.
+#[derive(Debug)]
+enum Echec {
+    /// Il reste, ou une étape a échoué.
+    Echoue(String),
+    /// Rien ne montre qu'il reste, mais le retrait n'a pas pu être constaté : jamais compté comme fait.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    NonVerifie(String),
+}
+
+/// Retire un élément, sans rien demander (montré et accepté avant) ; rend ce qui est fait, ou pourquoi ce ne l'est pas.
+fn retirer(e: &Element, x: &mut Execution) -> Result<String, Echec> {
     match &e.retrait {
-        Retrait::Surveillance(trouves) => surveillance::retirer(trouves).map(|()| e.texte.clone()),
-        Retrait::Entretien(trouves) => crate::entretien::retirer(trouves).map(|()| e.texte.clone()),
+        Retrait::Surveillance(trouves) => surveillance::retirer(trouves)
+            .map(|()| e.texte.clone())
+            .map_err(Echec::Echoue),
+        Retrait::Entretien(trouves) => crate::entretien::retirer(trouves)
+            .map(|()| e.texte.clone())
+            .map_err(Echec::Echoue),
         Retrait::Sauvegarde(Some(m), _) => {
             let (ok, laissees) = crate::sauvegarde::annuler_sans_question(m);
             if !ok {
-                return Err(tr!(
-                    "une étape a échoué, sa note est gardée : « vanguard sauvegarde-auto --annuler » pour réessayer",
-                    "a step failed, its note is kept: “vanguard auto-backup --undo” to try again"
-                )
-                .to_string());
+                return Err(Echec::Echoue(
+                    tr!(
+                        "une étape a échoué, sa note est gardée : « vanguard sauvegarde-auto --annuler » pour réessayer",
+                        "a step failed, its note is kept: “vanguard auto-backup --undo” to try again"
+                    )
+                    .to_string(),
+                ));
             }
             // Une unité modifiée depuis sa pose reste, et sa note avec elle, même si le dossier de données part.
             for u in &laissees {
@@ -1178,15 +1261,34 @@ fn retirer(e: &Element, x: &mut Execution) -> Result<String, String> {
                 e.texte
             ))
         }
-        Retrait::Sauvegarde(None, fichiers) => crate::sauvegarde::retirer_sans_note(fichiers).map(|()| e.texte.clone()),
+        Retrait::Sauvegarde(None, fichiers) => crate::sauvegarde::retirer_sans_note(fichiers)
+            .map(|()| e.texte.clone())
+            .map_err(Echec::Echoue),
+        // Le même retrait que « vanguard veilleur off » ; une unité devenue étrangère depuis la liste n'est pas
+        // touchée.
+        #[cfg(target_os = "linux")]
+        Retrait::Veilleur(p) => {
+            use crate::machine::linux::veilleur::{Retire, retirer_sans_question};
+            match retirer_sans_question(p, false) {
+                Retire::Fait => Ok(e.texte.clone()),
+                Retire::Echoue(raison) => Err(Echec::Echoue(raison)),
+                Retire::NonVerifie(raison) => Err(Echec::NonVerifie(raison)),
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        Retrait::Veilleur(_) => Err(Echec::Echoue(
+            tr!("le veilleur est de Linux seulement", "the watcher is Linux only").to_string(),
+        )),
         Retrait::Pieges => match crate::protection::pieges::retirer_sans_question() {
-            Err(()) => Err(tr!("leur liste ne se lit plus", "their list can no longer be read").to_string()),
-            Ok((restes, _)) if !restes.is_empty() => Err(trf!(
+            Err(()) => Err(Echec::Echoue(
+                tr!("leur liste ne se lit plus", "their list can no longer be read").to_string(),
+            )),
+            Ok((restes, _)) if !restes.is_empty() => Err(Echec::Echoue(trf!(
                 "{} non retiré(s), dont {}",
                 "{} not removed, including {}",
                 restes.len(),
                 chemin_affichable(&restes[0])
-            )),
+            ))),
             Ok((_, preuves)) if !preuves.is_empty() => Ok(trf!(
                 "{} ; gardés, preuve d'un passage : {}",
                 "{}; kept, evidence of an attack: {}",
@@ -1209,7 +1311,7 @@ fn retirer(e: &Element, x: &mut Execution) -> Result<String, String> {
                 })
                 .collect();
             if !echecs.is_empty() {
-                return Err(echecs.join(", "));
+                return Err(Echec::Echoue(echecs.join(", ")));
             }
             Ok(match faits.iter().find(|(_, x)| *x == crate::raccourci::Fait::Garde) {
                 Some((i, _)) => trf!(
@@ -1246,22 +1348,24 @@ fn retirer(e: &Element, x: &mut Execution) -> Result<String, String> {
             if echecs.is_empty() {
                 Ok(e.texte.clone())
             } else {
-                Err(echecs.join(", "))
+                Err(Echec::Echoue(echecs.join(", ")))
             }
         }
-        Retrait::Avant(r) => passage::retirer_reste(r).map(|()| e.texte.clone()),
+        Retrait::Avant(r) => passage::retirer_reste(r)
+            .map(|()| e.texte.clone())
+            .map_err(Echec::Echoue),
         Retrait::Dossier(d) => {
             let lien = lien_vers(d);
             let gardes: Vec<&(PathBuf, String)> = x.gardes.iter().filter(|(p, _)| surveillance::sous(p, d)).collect();
             let fichiers: Vec<PathBuf> = gardes.iter().map(|(p, _)| p.clone()).collect();
             let restes = effacer_dossier(d, x.en_marche, &fichiers, x.cle);
             if let Some((p, raison)) = restes.first() {
-                return Err(trf!(
+                return Err(Echec::Echoue(trf!(
                     "{} élément(s) non effacé(s), dont {} ({raison})",
                     "{} item(s) not erased, including {} ({raison})",
                     restes.len(),
                     chemin_affichable(p)
-                ));
+                )));
             }
             if !gardes.is_empty() {
                 let liste: Vec<String> = gardes
@@ -1277,11 +1381,13 @@ fn retirer(e: &Element, x: &mut Execution) -> Result<String, String> {
             }
             // Une passe déjà lancée a pu écrire de nouveau pendant l'effacement : un dossier revenu n'est pas retiré.
             if std::fs::symlink_metadata(d).is_ok() {
-                return Err(tr!(
-                    "revenu pendant l'effacement : une passe de Vanguard encore en cours y a écrit ; réessaie dans une minute",
-                    "back during the erasing: a Vanguard run still in progress wrote into it; try again in a minute"
-                )
-                .to_string());
+                return Err(Echec::Echoue(
+                    tr!(
+                        "revenu pendant l'effacement : une passe de Vanguard encore en cours y a écrit ; réessaie dans une minute",
+                        "back during the erasing: a Vanguard run still in progress wrote into it; try again in a minute"
+                    )
+                    .to_string(),
+                ));
             }
             Ok(match lien {
                 Some(cible) => trf!(
@@ -1724,9 +1830,15 @@ pub fn commande(liste: bool) {
                 afficher_aligne(&format!("  {VERT}✔{RESET} "), &e.texte, 4, "");
                 bilan.retire.push(fait);
             }
-            Err(raison) => {
+            Err(Echec::Echoue(raison)) => {
                 afficher_aligne("  ✖ ", &format!("{} : {raison}", e.texte), 4, "");
                 bilan.echoue.push((e.texte.clone(), raison));
+            }
+            // Ni retiré ni échoué : la fin n'est pas dite « faite », le point est redit au bilan.
+            Err(Echec::NonVerifie(raison)) => {
+                let ligne = format!("{} : {raison}", e.texte);
+                afficher_aligne("  ? ", &ligne, 4, "");
+                bilan.non_verifie.push(ligne);
             }
         }
     }
@@ -2061,6 +2173,72 @@ mod tests {
         x.gardes.clear();
         assert!(retirer(&rec.elements[i], &mut x).is_ok());
         assert!(!l.donnees.exists());
+        let _ = std::fs::remove_dir_all(r);
+    }
+
+    /// L'unité du veilleur : celle de Vanguard (dans l'une ou l'autre langue) comptée, cochée, retirée avant le
+    /// dossier de données, et ce qu'elle demande gardé si elle reste ; une unité du même nom sans la marque gardée,
+    /// dite, jamais dans la liste.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn veilleur_reconnu_a_sa_marque() {
+        use crate::machine::linux::veilleur::{ETAT, VOULU, unite_d_essai};
+        let r = racine("veilleur");
+        let l = Lieux::jetable(&r);
+        let unite = l.veilleur.clone().unwrap();
+        let exe = l.donnees.join("bin").join(crate::mise_a_jour::NOM);
+        ecrire(&exe, "programme");
+        ecrire(&l.donnees.join(VOULU), "");
+        ecrire(&l.donnees.join(ETAT), "{}");
+        for anglais in [false, true] {
+            ecrire(&unite, unite_d_essai(&exe.display().to_string(), anglais));
+            let rec = recenser(&l);
+            assert_eq!(
+                genres(&rec),
+                [Genre::Veilleur, Genre::Programme, Genre::Donnees],
+                "{:?}",
+                rec.elements
+            );
+            let v = &rec.elements[0];
+            assert!(v.coche);
+            assert_eq!(v.retrait, Retrait::Veilleur(unite.clone()));
+            assert_eq!(v.lance.as_deref(), Some(exe.as_path()));
+            assert!(largeur_affichee(&v.precision) <= 33 && largeur_affichee(&v.texte) <= 44);
+            assert!(
+                rec.pas_a_lui.is_empty() && rec.non_verifie.is_empty(),
+                "{:?}",
+                rec.pas_a_lui
+            );
+        }
+        // Le veilleur gardé, le dossier de données coché : sa copie du programme, son choix et son état restent.
+        let rec = recenser(&l);
+        let mut etats = vec![false, true, true];
+        let messages = garder_les_dependances(&rec.elements, &mut etats);
+        assert_eq!(etats, [false, false, true], "{messages:?}");
+        let gardes = gardes_dans(&l.donnees, true, &rec.elements, &etats);
+        for p in [exe.clone(), l.donnees.join(VOULU), l.donnees.join(ETAT)] {
+            assert!(gardes.iter().any(|(q, _)| *q == p), "{} : {gardes:?}", p.display());
+        }
+        // Le même nom sans la marque : quelqu'un d'autre l'a posée.
+        ecrire(
+            &unite,
+            "[Unit]\nDescription=Mon veilleur\n[Service]\nExecStart=/usr/bin/mon-veilleur\n",
+        );
+        let rec = recenser(&l);
+        assert!(!genres(&rec).contains(&Genre::Veilleur), "{:?}", rec.elements);
+        assert!(!format!("{:?}", rec.elements).contains("mon-veilleur"));
+        assert!(
+            rec.pas_a_lui.iter().any(|m| m.contains("vanguard-veilleur.service")),
+            "{:?}",
+            rec.pas_a_lui
+        );
+        // La marque ailleurs qu'en première ligne ne suffit pas.
+        ecrire(&unite, format!("[Unit]\n{}", unite_d_essai("/usr/bin/autre", false)));
+        assert!(!genres(&recenser(&l)).contains(&Genre::Veilleur));
+        // Absente : rien.
+        std::fs::remove_file(&unite).unwrap();
+        let rec = recenser(&l);
+        assert!(!genres(&rec).contains(&Genre::Veilleur) && rec.pas_a_lui.is_empty());
         let _ = std::fs::remove_dir_all(r);
     }
 

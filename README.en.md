@@ -486,8 +486,8 @@ goes to GitHub.
 **Shortcut on this computer** — Vanguard copied here and started with one click.
 
 **Remove Vanguard from this computer** — everything it placed there (monitoring, monthly check-up, automatic backup,
-decoy files, shortcut and icon, program copy, leftovers of an earlier version) is found, shown with what will be done,
-then checked. The data folder is erased only after a second consent; changes made to the system are first undone by
+watcher, decoy files, shortcut and icon, program copy, leftovers of an earlier version) is found, shown with what will
+be done, then checked. The data folder is erased only after a second consent; changes made to the system are first undone by
 their own tools, or said with their command; the key is never touched.
 
 **Command guide** — the useful commands of Omarchy, Arch, Fedora, Debian and Ubuntu (and other Linux), Windows 11,
