@@ -37,9 +37,10 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   l'ouverture de session. Une surveillance déjà en place n'est pas changée en silence : le bilan la dit « d'une version
   d'avant », et `vanguard surveillance on` la met à jour.
 - **Protection anti-hameçonnage imposée coupée, vue.** Une stratégie de Chrome, Chromium, Brave, Edge ou Firefox
-  (fichier de /etc sous Linux, registre sous Windows, policies.json) qui coupe Safe Browsing ou SmartScreen passe avant
-  les Paramètres, qui ne peuvent plus la rallumer : un logiciel indésirable s'en sert. Le bilan la dit, avec l'endroit
-  où la retirer. Des réglages de navigateur illisibles ne passent plus pour une protection active.
+  (fichier de /etc sous Linux, registre sous Windows, policies.json), lue comme le navigateur la lit, qui coupe Safe
+  Browsing passe avant les Paramètres, qui ne peuvent plus la rallumer : un logiciel indésirable s'en sert. Le bilan la
+  dit, avec l'endroit où la retirer ; une stratégie seulement recommandée compte tant que la personne n'a rien choisi.
+  Des réglages de navigateur ou des stratégies illisibles ne passent plus pour une protection active.
 - **Un DNS qui ne bloque pas les sites dangereux est dit.** Le bilan le signale (information) et renvoie à « DNS le plus
   rapide », où le Bouclier canadien « Protégé » ou Quad9 se posent en un choix, annulable. Rien n'est dit quand un DNS
   protège déjà, ou quand rien ne permet de le savoir (NextDNS, Pi-hole).

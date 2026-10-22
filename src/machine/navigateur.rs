@@ -4,6 +4,8 @@
 //! passe avant les Paramètres : un logiciel indésirable s'en sert pour couper la protection sans qu'on puisse la
 //! rallumer. Celles de macOS (profils gérés) ne sont pas lues.
 
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 use super::{Constat, alerte, impossible, ok};
@@ -65,102 +67,190 @@ fn lire_chromium(preferences: &str, etat_local: &str) -> Option<Reglages> {
     })
 }
 
-/// La règle d'une stratégie qui coupe la protection contre les sites frauduleux, telle qu'elle sera montrée. Firefox :
-/// ses préférences imposées (`Preferences`, valeur nue ou `{"Value": …}`) ; les Chromium : Safe Browsing à 0 ou
-/// coupé, et SmartScreen pour Edge (le registre donne 0, les fichiers false).
-fn coupee_par(strategie: &Value, firefox: bool) -> Option<String> {
-    let faux = |v: &Value| *v == false || *v == 0;
-    if firefox {
-        let prefs = &strategie["Preferences"];
-        return [
-            "browser.safebrowsing.malware.enabled",
-            "browser.safebrowsing.phishing.enabled",
-        ]
-        .into_iter()
-        .find(|n| faux(&prefs[*n]) || faux(&prefs[*n]["Value"]))
-        .map(|n| format!("Preferences : {n} = false"));
-    }
-    [
-        "SafeBrowsingProtectionLevel",
-        "SafeBrowsingEnabled",
-        "SmartScreenEnabled",
-    ]
-    .into_iter()
-    .find(|n| faux(&strategie[*n]))
-    .map(|n| format!("{n} = 0"))
+/// Les stratégies d'un navigateur, fusionnées comme il les applique : pour chaque clé, sa valeur et l'endroit d'où
+/// elle vient. Imposées (« managed », Policies) ou recommandées (« recommended », …\Recommended : la valeur par défaut
+/// tant que la personne n'a pas choisi). Firefox : son policies.json, et où il est. `illisibles` : fichiers présents
+/// que même le JSON de Chrome (commentaires, virgules en trop) ne lit pas ; rien n'est conclu pour eux.
+#[derive(Default)]
+struct Strategies {
+    imposees: BTreeMap<String, (Value, String)>,
+    recommandees: BTreeMap<String, (Value, String)>,
+    firefox: Option<(Value, String)>,
+    illisibles: Vec<String>,
 }
 
-/// Les stratégies imposées au navigateur `nom` (celui de `extensions::racines`) : (où elles sont, leur contenu). Un
-/// fichier qui n'est pas du JSON est sauté : le navigateur l'ignore aussi.
+/// Le JSON des stratégies tel que Chrome le lit : commentaires `//` et `/* */`, virgule avant `}` ou `]` permis.
+#[cfg(any(target_os = "linux", test))]
+fn json_souple(texte: &str) -> Option<Value> {
+    if let Ok(v) = serde_json::from_str(texte) {
+        return Some(v);
+    }
+    let mut sortie = String::with_capacity(texte.len());
+    let mut c = texte.chars().peekable();
+    let mut chaine = false;
+    while let Some(x) = c.next() {
+        if chaine {
+            sortie.push(x);
+            if x == '\\' {
+                sortie.extend(c.next());
+            } else if x == '"' {
+                chaine = false;
+            }
+            continue;
+        }
+        match x {
+            '"' => {
+                chaine = true;
+                sortie.push(x);
+            }
+            '/' if c.peek() == Some(&'/') => while c.next_if(|&y| y != '\n').is_some() {},
+            '/' if c.peek() == Some(&'*') => {
+                c.next();
+                let mut avant = ' ';
+                for y in c.by_ref() {
+                    if avant == '*' && y == '/' {
+                        break;
+                    }
+                    avant = y;
+                }
+            }
+            ',' => {
+                let reste = c.clone().find(|y| !y.is_whitespace());
+                if !matches!(reste, Some('}' | ']')) {
+                    sortie.push(x);
+                }
+            }
+            _ => sortie.push(x),
+        }
+    }
+    serde_json::from_str(&sortie).ok()
+}
+
+/// Une valeur de stratégie lue comme un nombre : booléen, nombre, ou chiffres d'une chaîne (registre REG_SZ).
+fn nombre(v: &Value) -> Option<i64> {
+    v.as_i64()
+        .or_else(|| v.as_bool().map(i64::from))
+        .or_else(|| v.as_str()?.trim().parse().ok())
+}
+
+/// La règle Safe Browsing qui coupe la protection, et son origine. SafeBrowsingProtectionLevel, présent, passe avant
+/// SafeBrowsingEnabled, comme dans Chrome.
+fn safe_browsing_coupe(s: &BTreeMap<String, (Value, String)>) -> Option<(String, String)> {
+    if let Some((v, ou)) = s.get("SafeBrowsingProtectionLevel") {
+        return (nombre(v) == Some(0)).then(|| ("SafeBrowsingProtectionLevel = 0".to_string(), ou.clone()));
+    }
+    let (v, ou) = s.get("SafeBrowsingEnabled")?;
+    (nombre(v) == Some(0)).then(|| ("SafeBrowsingEnabled = false".to_string(), ou.clone()))
+}
+
+const PREFS_SAFE_BROWSING: [&str; 2] = [
+    "browser.safebrowsing.malware.enabled",
+    "browser.safebrowsing.phishing.enabled",
+];
+
+/// Firefox : (préférence imposée qui coupe, préférence seulement par défaut qui coupe). Imposée : valeur nue (ancienne
+/// forme, verrouillée) ou `"Status": "locked"` ; sinon (« default », « user », sans Status), la personne garde la main.
+fn firefox_coupe(politiques: &Value) -> (Option<&'static str>, Option<&'static str>) {
+    let prefs = &politiques["Preferences"];
+    let imposee = PREFS_SAFE_BROWSING
+        .into_iter()
+        .find(|n| prefs[*n] == false || (prefs[*n]["Value"] == false && prefs[*n]["Status"] == "locked"));
+    let par_defaut = PREFS_SAFE_BROWSING
+        .into_iter()
+        .find(|n| prefs[*n]["Value"] == false && prefs[*n]["Status"] != "locked");
+    (imposee, par_defaut)
+}
+
+/// Les stratégies du navigateur `nom` (celui de `extensions::racines`). Pas lues : celles de macOS (profils gérés),
+/// de Firefox sous Windows (registre Mozilla), des navigateurs en Flatpak (extensions de politiques).
 #[cfg(target_os = "linux")]
-fn strategies(nom: &str) -> Vec<(String, Value)> {
-    let lire = |chemin: &std::path::Path| {
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(chemin).ok()?).ok()?;
-        Some((chemin.display().to_string(), v))
-    };
+fn strategies(nom: &str) -> Strategies {
+    use std::path::Path;
+    let mut s = Strategies::default();
     if nom == "Firefox" {
-        return [
+        // Le premier qui existe masque l'autre, comme dans Firefox.
+        if let Some(c) = [
             "/etc/firefox/policies/policies.json",
             "/usr/lib/firefox/distribution/policies.json",
         ]
         .into_iter()
-        .filter_map(|c| lire(std::path::Path::new(c)))
-        .map(|(ou, v)| (ou, v["policies"].clone()))
-        .collect();
+        .find(|c| Path::new(c).exists())
+        {
+            match std::fs::read_to_string(c).ok().as_deref().and_then(json_souple) {
+                Some(v) => s.firefox = Some((v["policies"].clone(), c.to_string())),
+                None => s.illisibles.push(c.to_string()),
+            }
+        }
+        return s;
     }
-    let dossiers: &[&str] = match nom {
-        "Chrome" => &["/etc/opt/chrome/policies/managed"],
-        "Chromium" => &[
-            "/etc/chromium/policies/managed",
-            "/etc/chromium-browser/policies/managed",
-        ],
-        "Brave" => &["/etc/brave/policies/managed"],
-        "Edge" => &["/etc/opt/edge/policies/managed"],
+    let bases: &[&str] = match nom {
+        "Chrome" => &["/etc/opt/chrome/policies"],
+        "Chromium" => &["/etc/chromium/policies", "/etc/chromium-browser/policies"],
+        "Brave" => &["/etc/brave/policies"],
+        "Edge" => &["/etc/opt/edge/policies"],
         _ => &[],
     };
-    let mut fichiers: Vec<_> = dossiers
-        .iter()
-        .filter_map(|d| std::fs::read_dir(d).ok())
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|c| c.extension().is_some_and(|e| e == "json"))
-        .collect();
-    fichiers.sort();
-    fichiers.iter().filter_map(|c| lire(c)).collect()
+    for base in bases {
+        for (sous, cible) in [("managed", &mut s.imposees), ("recommended", &mut s.recommandees)] {
+            // Tous les fichiers du dossier, quel que soit leur nom, dans l'ordre : le dernier gagne.
+            let mut fichiers: Vec<_> = std::fs::read_dir(Path::new(base).join(sous))
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|c| c.is_file())
+                .collect();
+            fichiers.sort();
+            for c in fichiers {
+                let ou = c.display().to_string();
+                match std::fs::read_to_string(&c).ok().as_deref().and_then(json_souple) {
+                    Some(Value::Object(o)) => cible.extend(o.into_iter().map(|(k, v)| (k, (v, ou.clone())))),
+                    _ => s.illisibles.push(ou),
+                }
+            }
+        }
+    }
+    s
 }
 
 #[cfg(windows)]
-fn strategies(nom: &str) -> Vec<(String, Value)> {
+fn strategies(nom: &str) -> Strategies {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let mut s = Strategies::default();
     let cle = match nom {
         "Chrome" => r"SOFTWARE\Policies\Google\Chrome",
         "Chromium" => r"SOFTWARE\Policies\Chromium",
         "Brave" => r"SOFTWARE\Policies\BraveSoftware\Brave",
         "Edge" => r"SOFTWARE\Policies\Microsoft\Edge",
-        _ => return Vec::new(),
+        _ => return s,
     };
-    [(HKEY_LOCAL_MACHINE, "HKLM"), (HKEY_CURRENT_USER, "HKCU")]
-        .into_iter()
-        .filter_map(|(racine, court)| {
-            let k = RegKey::predef(racine).open_subkey(cle).ok()?;
-            let valeurs: serde_json::Map<String, Value> = [
-                "SafeBrowsingProtectionLevel",
-                "SafeBrowsingEnabled",
-                "SmartScreenEnabled",
-            ]
-            .into_iter()
-            .filter_map(|v| k.get_value::<u32, _>(v).ok().map(|d| (v.to_string(), d.into())))
-            .collect();
-            Some((format!("{court}\\{cle}"), Value::Object(valeurs)))
-        })
-        .collect()
+    // HKLM lu en dernier : il passe avant HKCU.
+    for (racine, court) in [(HKEY_CURRENT_USER, "HKCU"), (HKEY_LOCAL_MACHINE, "HKLM")] {
+        for (sous, cible) in [("", &mut s.imposees), (r"\Recommended", &mut s.recommandees)] {
+            let chemin = format!("{cle}{sous}");
+            let Ok(k) = RegKey::predef(racine).open_subkey(&chemin) else {
+                continue;
+            };
+            for v in ["SafeBrowsingProtectionLevel", "SafeBrowsingEnabled"] {
+                // DWORD, ou chiffres en REG_SZ : Chrome applique les deux.
+                let valeur = k
+                    .get_value::<u32, _>(v)
+                    .ok()
+                    .map(Value::from)
+                    .or_else(|| k.get_value::<String, _>(v).ok().map(Value::from));
+                if let Some(valeur) = valeur {
+                    cible.insert(v.to_string(), (valeur, format!(r"{court}\{chemin}\{v}")));
+                }
+            }
+        }
+    }
+    s
 }
 
 #[cfg(target_os = "macos")]
-fn strategies(_nom: &str) -> Vec<(String, Value)> {
-    Vec::new()
+fn strategies(_nom: &str) -> Strategies {
+    Strategies::default()
 }
 
 /// Une stratégie qui coupe la protection : les Paramètres ne peuvent pas la rallumer.
@@ -227,19 +317,36 @@ fn juger(navigateur: &str, r: &Reglages) -> Constat {
 pub fn navigateurs() -> Vec<Constat> {
     let mut constats = Vec::new();
     let mut vus = Vec::new();
-    let mut strategies_lues = Vec::new();
+    // Par navigateur, lu une fois : la stratégie recommandée qui coupe (Firefox : la préférence en cause).
+    let mut recommandees: Vec<(&str, Option<&str>)> = Vec::new();
     for (nom, racine, firefox) in super::extensions::racines() {
         let profils = super::extensions::profils(&racine, firefox);
-        // Une stratégie vaut pour tous les profils du navigateur : dite une fois, s'il y en a un.
-        if !profils.is_empty() && !strategies_lues.contains(&nom) {
-            strategies_lues.push(nom);
-            if let Some((ou, regle)) = strategies(nom)
-                .iter()
-                .find_map(|(ou, s)| coupee_par(s, firefox).map(|r| (ou.clone(), r)))
-            {
+        if !profils.is_empty() && !recommandees.iter().any(|(n, _)| *n == nom) {
+            let s = strategies(nom);
+            let (imposee, recommandee) = if firefox {
+                let (imposee, defaut) = s.firefox.as_ref().map_or((None, None), |(v, _)| firefox_coupe(v));
+                let ou = s.firefox.as_ref().map(|(_, ou)| ou.clone()).unwrap_or_default();
+                (imposee.map(|p| (format!("Preferences : {p} = false"), ou)), defaut)
+            } else {
+                let recommandee = safe_browsing_coupe(&s.recommandees).map(|_| "safebrowsing.enabled");
+                (safe_browsing_coupe(&s.imposees), recommandee)
+            };
+            if let Some((regle, ou)) = imposee {
                 constats.push(juger_strategie(nom, &ou, &regle));
             }
+            if !s.illisibles.is_empty() {
+                constats.push(impossible(
+                    CAT,
+                    &trf!(
+                        "stratégies de {nom} illisibles : {}",
+                        "{nom} policies unreadable: {}",
+                        s.illisibles.join(", ")
+                    ),
+                ));
+            }
+            recommandees.push((nom, recommandee));
         }
+        let recommandee = recommandees.iter().find(|(n, _)| *n == nom).and_then(|(_, r)| *r);
         let plusieurs = profils.len() > 1;
         for (dossier, chemin) in profils {
             let reel = chemin.canonicalize().unwrap_or_else(|_| chemin.clone());
@@ -247,12 +354,32 @@ pub fn navigateurs() -> Vec<Constat> {
                 continue;
             }
             vus.push(reel);
-            let lire = |f: &str| std::fs::read_to_string(chemin.join(f)).unwrap_or_default();
+            // Absent : un profil neuf, valeurs par défaut. Illisible : rien n'est conclu.
+            let lire = |f: &str| match std::fs::read_to_string(chemin.join(f)) {
+                Ok(t) => Ok(t),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+                Err(e) => Err(format!("{f} : {e}")),
+            };
             let reglages = if firefox {
-                Some(lire_firefox(&(lire("prefs.js") + &lire("user.js"))))
+                lire("prefs.js").and_then(|p| Ok(p + &lire("user.js")?)).map(|prefs| {
+                    let mut r = lire_firefox(&prefs);
+                    // Une stratégie par défaut qui coupe vaut tant que la personne n'a rien écrit elle-même.
+                    if recommandee.is_some_and(|n| pref(&prefs, n).is_none()) {
+                        r.anti_hameconnage = false;
+                    }
+                    r
+                })
             } else {
                 let etat_local = std::fs::read_to_string(racine.join("Local State")).unwrap_or_default();
-                lire_chromium(&lire("Preferences"), &etat_local)
+                lire("Preferences").and_then(|p| {
+                    let mut r = lire_chromium(&p, &etat_local).ok_or_else(|| "Preferences".to_string())?;
+                    let choisi =
+                        serde_json::from_str::<Value>(&p).unwrap_or_default()["safebrowsing"]["enabled"].is_boolean();
+                    if recommandee.is_some() && !choisi {
+                        r.anti_hameconnage = false;
+                    }
+                    Ok(r)
+                })
             };
             let navigateur = if plusieurs {
                 let court = dossier
@@ -264,12 +391,12 @@ pub fn navigateurs() -> Vec<Constat> {
                 nom.to_string()
             };
             constats.push(match reglages {
-                Some(r) => juger(&navigateur, &r),
-                None => impossible(
+                Ok(r) => juger(&navigateur, &r),
+                Err(raison) => impossible(
                     CAT,
                     &trf!(
-                        "réglages de {navigateur} illisibles (Preferences)",
-                        "{navigateur} settings unreadable (Preferences)"
+                        "réglages de {navigateur} illisibles ({raison})",
+                        "{navigateur} settings unreadable ({raison})"
                     ),
                 ),
             });
@@ -344,54 +471,77 @@ mod tests {
 
     #[test]
     fn strategies_qui_coupent() {
-        let json = |t: &str| serde_json::from_str::<Value>(t).unwrap();
-        // Chromium : fichiers de /etc (booléen ou nombre) et registre (DWORD) ; Edge par SmartScreen.
+        let fusion = |t: &str| -> BTreeMap<String, (Value, String)> {
+            serde_json::from_str::<serde_json::Map<String, Value>>(t)
+                .unwrap()
+                .into_iter()
+                .map(|(k, v)| (k, (v, "ici".to_string())))
+                .collect()
+        };
+        // Coupée : niveau 0, ou Enabled faux sans niveau ; booléen, nombre ou chiffres en REG_SZ.
         for t in [
             r#"{"SafeBrowsingProtectionLevel":0}"#,
+            r#"{"SafeBrowsingProtectionLevel":"0"}"#,
             r#"{"SafeBrowsingEnabled":false}"#,
             r#"{"SafeBrowsingEnabled":0}"#,
-            r#"{"SmartScreenEnabled":0}"#,
+            r#"{"SafeBrowsingEnabled":"0"}"#,
         ] {
-            assert!(coupee_par(&json(t), false).is_some(), "{t}");
+            assert!(safe_browsing_coupe(&fusion(t)).is_some(), "{t}");
         }
-        // Protection standard ou renforcée, autre stratégie, rien : pas coupée.
+        // Le niveau passe avant Enabled ; SmartScreenEnabled (sans effet hors d'un Windows géré) ne compte pas.
         for t in [
-            r#"{"SafeBrowsingProtectionLevel":1}"#,
-            r#"{"SafeBrowsingProtectionLevel":2,"SmartScreenEnabled":1}"#,
+            r#"{"SafeBrowsingProtectionLevel":1,"SafeBrowsingEnabled":false}"#,
+            r#"{"SafeBrowsingProtectionLevel":2}"#,
+            r#"{"SmartScreenEnabled":false}"#,
             r#"{"HomepageLocation":"https://exemple.org"}"#,
             "{}",
-            "null",
         ] {
-            assert_eq!(coupee_par(&json(t), false), None, "{t}");
+            assert_eq!(safe_browsing_coupe(&fusion(t)), None, "{t}");
         }
-        // Firefox : préférence imposée, nue ou verrouillée ; les autres préférences ne comptent pas.
-        assert!(
-            coupee_par(
-                &json(r#"{"Preferences":{"browser.safebrowsing.phishing.enabled":false}}"#),
-                true
-            )
-            .is_some()
-        );
-        assert!(
-            coupee_par(
-                &json(r#"{"Preferences":{"browser.safebrowsing.malware.enabled":{"Value":false,"Status":"locked"}}}"#),
-                true
-            )
-            .is_some()
+        let json = |t: &str| serde_json::from_str::<Value>(t).unwrap();
+        // Firefox : verrouillée (ou valeur nue) = imposée ; sinon seulement par défaut.
+        let p = "browser.safebrowsing.phishing.enabled";
+        assert_eq!(
+            firefox_coupe(&json(&format!(r#"{{"Preferences":{{"{p}":false}}}}"#))),
+            (Some(p), None)
         );
         assert_eq!(
-            coupee_par(
-                &json(r#"{"Preferences":{"browser.safebrowsing.phishing.enabled":{"Value":true}}}"#),
-                true
-            ),
-            None
+            firefox_coupe(&json(&format!(
+                r#"{{"Preferences":{{"{p}":{{"Value":false,"Status":"locked"}}}}}}"#
+            ))),
+            (Some(p), None)
         );
-        assert_eq!(coupee_par(&json(r#"{"SafeBrowsingEnabled":false}"#), true), None);
+        for statut in ["", r#","Status":"default""#, r#","Status":"user""#] {
+            assert_eq!(
+                firefox_coupe(&json(&format!(
+                    r#"{{"Preferences":{{"{p}":{{"Value":false{statut}}}}}}}"#
+                ))),
+                (None, Some(p)),
+                "{statut}"
+            );
+        }
+        assert_eq!(
+            firefox_coupe(&json(&format!(r#"{{"Preferences":{{"{p}":{{"Value":true}}}}}}"#))),
+            (None, None)
+        );
         let c = juger_strategie(
             "Chrome",
-            "/etc/opt/chrome/policies/managed/x.json",
-            "SafeBrowsingEnabled = 0",
+            "/etc/opt/chrome/policies/managed/x",
+            "SafeBrowsingEnabled = false",
         );
         assert!(c.probleme == Some(Niveau::Moyen) && c.message.contains("SafeBrowsingEnabled"));
+    }
+
+    #[test]
+    fn json_comme_chrome() {
+        // Commentaires et virgules en trop : Chrome applique le fichier, il doit se lire.
+        let v =
+            json_souple("{\n  // coupé\n  \"SafeBrowsingEnabled\": false, /* là */\n  \"A\": [1, 2,],\n}\n").unwrap();
+        assert_eq!(v["SafeBrowsingEnabled"], false);
+        assert_eq!(v["A"], serde_json::json!([1, 2]));
+        // Dans une chaîne, « // » et « ,} » restent du texte.
+        let v = json_souple(r#"{"U": "https://exemple.org/a,}", "B": 1,}"#).unwrap();
+        assert_eq!(v["U"], "https://exemple.org/a,}");
+        assert!(json_souple("{\"A\": ").is_none() && json_souple("pas du json").is_none());
     }
 }
