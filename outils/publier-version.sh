@@ -53,7 +53,7 @@ notes() {
   printf '%s\n' "$TELECHARGER"
 }
 
-TELECHARGER="Télécharge le programme de ton système :
+TELECHARGER="Un programme par système, à télécharger :
 - **Windows** : \`vanguard-windows-x86_64.exe\`, double-clic. Il n'est pas signé : SmartScreen peut avertir
   (« Informations complémentaires » puis « Exécuter quand même »).
 - **Linux** : \`vanguard-linux-x86_64\` (toutes les distributions), \`chmod +x\` puis lancer dans un terminal.
