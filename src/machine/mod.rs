@@ -799,6 +799,26 @@ fn lancer_chacune(correctifs: &[Vec<String>]) -> (Vec<bool>, Vec<Vec<String>>) {
     }
 }
 
+/// Ports en écoute de `lsof -nP -iTCP -sTCP:LISTEN` → nom du programme. « COMMAND PID USER FD TYPE DEVICE SIZE/OFF
+/// NODE NAME » … « llama-server 512 alice 9u IPv4 … TCP *:8080 (LISTEN) ».
+#[cfg(any(target_os = "macos", test))]
+fn lire_lsof(sortie: &str) -> std::collections::HashMap<u16, String> {
+    let mut map = std::collections::HashMap::new();
+    for l in sortie.lines().skip(1) {
+        let c: Vec<&str> = l.split_whitespace().collect();
+        let port = c
+            .iter()
+            .rev()
+            .find_map(|m| m.rsplit_once(':'))
+            .and_then(|(_, p)| p.parse::<u16>().ok());
+        if let (Some(port), Some(nom)) = (port, c.first()) {
+            // lsof échappe les espaces des noms : « Google\x20Chrome ».
+            map.insert(port, affichable(&nom.replace("\\x20", " ")));
+        }
+    }
+    map
+}
+
 /// Programme qui écoute sur chaque port TCP de cette machine (port → nom du programme, que chaque programme choisit :
 /// prêt à montrer). Sans droits admin, les programmes de root/SYSTEM restent souvent anonymes.
 pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
@@ -815,25 +835,12 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
             map.insert(p.port, nom);
         }
     }
-    // « COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME » … « ControlCe 512 alice 9u IPv4 … TCP *:7000 (LISTEN) ».
-    // Sans droits admin, lsof ne montre que les programmes de l'utilisateur.
+    // Sans droits admin, lsof ne montre que les programmes de l'utilisateur. « +c 0 » : le nom entier, sans quoi lsof
+    // le coupe à 9 caractères (« llama-ser ») et un serveur d'IA ne se reconnaît plus.
     #[cfg(target_os = "macos")]
-    for l in sortie("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"])
-        .unwrap_or_default()
-        .lines()
-        .skip(1)
-    {
-        let c: Vec<&str> = l.split_whitespace().collect();
-        let port = c
-            .iter()
-            .rev()
-            .find_map(|m| m.rsplit_once(':'))
-            .and_then(|(_, p)| p.parse::<u16>().ok());
-        if let (Some(port), Some(nom)) = (port, c.first()) {
-            // lsof échappe les espaces des noms : « Google\x20Chrome ».
-            map.insert(port, affichable(&nom.replace("\\x20", " ")));
-        }
-    }
+    map.extend(lire_lsof(
+        &sortie("lsof", &["+c", "0", "-nP", "-iTCP", "-sTCP:LISTEN"]).unwrap_or_default(),
+    ));
     // netstat et tasklist, sans PowerShell ; PowerShell seulement s'ils ne répondent pas.
     #[cfg(windows)]
     let paires = windows::ports_tcp_et_noms().unwrap_or_else(|| {
@@ -994,6 +1001,17 @@ pub fn executer(json: bool) -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn noms_entiers_de_lsof() {
+        let l = lire_lsof(
+            "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n\
+             llama-server 512 alice 9u IPv4 0x1 0t0 TCP *:8080 (LISTEN)\n\
+             LM\\x20Studio 600 alice 12u IPv6 0x2 0t0 TCP [::1]:1234 (LISTEN)\n",
+        );
+        assert_eq!(l.get(&8080).map(String::as_str), Some("llama-server"));
+        assert_eq!(l.get(&1234).map(String::as_str), Some("LM Studio"));
+    }
 
     #[test]
     fn lien_ouvert_d_un_seul_morceau() {

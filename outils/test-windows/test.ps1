@@ -824,8 +824,9 @@ New-Item -ItemType Directory -Force $dossierYara | Out-Null
 Set-Content -Path (Join-Path $dossierYara 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
 [IO.File]::WriteAllBytes((Join-Path $dossierYara 'outil.exe'), [byte[]](0x4D, 0x5A, 0x90, 0x00) + [Text.Encoding]::ASCII.GetBytes('programme sans danger'))
 Lancer 'yara' @('yara', $dossierYara)
-# Le texte est replié à 76 colonnes : les mots se cherchent remis bout à bout.
-$y = (Sortie 'yara') -replace '\s+', ' '
+# Le texte est replié à 76 colonnes, chaque ligne finie par un code de couleur : les mots se cherchent sans couleurs,
+# remis bout à bout.
+$y = (Sortie 'yara') -replace '\x1b\[[0-9;]*m', '' -replace '\s+', ' '
 if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
 if ($y -match "installer|install it|winget") { Bug 'Vanguard parle encore d''installer un moteur YARA' }
 if ($y -match 'Aucun fichier ne correspond|No file matches') { Ok 'Dossier sans danger : rien trouvé, tout lu' }
@@ -878,7 +879,7 @@ try {
         }
     }
 }
-$ye = (Sortie 'yara-empreinte') -replace '\s+', ' '
+$ye = (Sortie 'yara-empreinte') -replace '\x1b\[[0-9;]*m', '' -replace '\s+', ' '
 if ($ye -match 'facture\.pdf\.exe' -and $ye -match 'empreinte exacte|exact fingerprint') { Ok 'Fichier d''essai reconnu par son empreinte exacte' } else { Bug 'Fichier d''essai PAS reconnu par son empreinte' }
 if ($ye -match "Rien n'a été fait|Nothing was done") { Ok 'Quarantaine refusée : rien fait' } else { Bug 'Refus de la quarantaine PAS respecté' }
 if (Test-Path -LiteralPath $essaiEmpreinte) { Ok 'Fichier d''essai laissé en place' } else { Bug 'Fichier d''essai déplacé malgré le refus' }
