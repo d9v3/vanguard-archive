@@ -1,5 +1,5 @@
-VANGUARD — portable cyber defense for homes and small networks
-==============================================================
+VANGUARD — portable cyber defense for endpoints and networks
+============================================================
 Version française : LISEZMOI.txt
 
 Vanguard hardens computers, detects vulnerabilities and intrusions (check graded from A to F, network audit,

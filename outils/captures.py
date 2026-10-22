@@ -407,8 +407,8 @@ p{{margin:0;font-size:34px;line-height:1.3;color:#d8d0ca}}
 p.en{{margin-top:10px;font-size:26px;color:#8a8a8a}}
 .os{{margin-top:34px;font-size:24px;letter-spacing:1px;color:#29b8db}}
 </style><img src="{logo}" alt=""><div><h1>Vanguard</h1>
-<p>La cyberdéfense de ton foyer, réseau et ordinateurs, depuis une clé USB.</p>
-<p class="en">Home cyber defense for your network and computers, from a USB key.</p>
+<p>Cyberdéfense portable des postes et des réseaux, depuis une clé USB.</p>
+<p class="en">Portable cyber defense for endpoints and networks, from a USB key.</p>
 <div class="os">Linux · Windows · macOS</div></div>"""
     photographier(page, PARTAGE, 1280, 640, bac)
 

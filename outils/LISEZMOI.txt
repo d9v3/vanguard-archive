@@ -1,5 +1,5 @@
-VANGUARD — cyberdéfense portable du foyer et des petits réseaux
-===============================================================
+VANGUARD — cyberdéfense portable des postes et des réseaux
+==========================================================
 English version: README.txt
 
 Vanguard durcit les ordinateurs, détecte les failles et les intrusions (bilan noté de A à F, audit du réseau,

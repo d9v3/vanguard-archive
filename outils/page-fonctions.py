@@ -193,6 +193,9 @@ def main():
     args = a.parse_args()
     if not args.programme.is_file():
         sys.exit(f"✖ programme introuvable : {args.programme} (--programme)")
+    # Chemin absolu : le programme est lancé depuis un dossier personnel jetable (lancer), où un chemin relatif
+    # comme celui de deployer.sh ne mène nulle part (la page de GitHub Pages en est restée à la 0.82).
+    args.programme = args.programme.resolve()
     v = args.version or version()
     courte = ".".join(v.split(".")[:2])
     jour = datetime.date.today()

@@ -3,7 +3,7 @@
 <p align="center"><a href="README.md">Français</a> · <b>English</b></p>
 
 <p align="center">
-  <b>Cyber defense for homes and small networks, from a USB key.</b><br>
+  <b>Portable cyber defense for endpoints and networks, from a USB key.</b><br>
   Vanguard hardens computers and detects vulnerabilities and intrusions, on each machine and across the network;<br>
   it blocks the threats found on the computer and collects the evidence of an incident.<br>
   Every finding is explained, and nothing is changed without consent. Troubleshooting tools are included as well.<br>
@@ -76,7 +76,7 @@ to go back.
 
 ### Cyber defense, threat by threat
 
-The threats to a home or a small network, one by one: what the router exposes to the Internet, an intruder on the
+The threats to endpoints and their network, one by one: what the router exposes to the Internet, an intruder on the
 Wi-Fi, a vulnerable connected device, an infected computer, a hijacked DNS or certificate, scams, privacy intrusions.
 
 | Threat or area | What Vanguard does |
@@ -131,7 +131,7 @@ Wi-Fi, a vulnerable connected device, an infected computer, a hijacked DNS or ce
   is recorded to undo exactly; only Enter or yes applies them. Threat blocking adds, the same way, Microsoft's
   vulnerable driver blocklist. The other fixes, or those chosen along with them, go through a readable script.
 
-#### Exposure to the Internet and the home network
+#### Exposure to the Internet and the local network
 
 **Network audit, domain by domain** (`vanguard network-audit`, menu Network and Internet › 2, and right after the
 full check) — six grades: Internet exposure (the ports the router opens, asked of the router itself, a public IPv6

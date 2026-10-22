@@ -3,7 +3,7 @@
 <p align="center"><b>Français</b> · <a href="README.en.md">English</a></p>
 
 <p align="center">
-  <b>Cyberdéfense du foyer et des petits réseaux, depuis une clé USB.</b><br>
+  <b>Cyberdéfense portable des postes et des réseaux, depuis une clé USB.</b><br>
   Vanguard durcit les ordinateurs et détecte les failles et les intrusions, sur chaque machine comme sur le réseau ;<br>
   il bloque les menaces trouvées sur l'ordinateur et collecte les traces d'un incident.<br>
   Chaque constat est expliqué, et rien n'est modifié sans accord. Le dépannage vient en plus.<br>
@@ -83,7 +83,7 @@ choisir ; Échap ou Retour arrière pour revenir.
 
 ### Cyberdéfense, menace par menace
 
-Les menaces d'un foyer ou d'un petit réseau, une par une : ce que la box expose à Internet, un intrus sur le Wi-Fi, un
+Les menaces des postes et du réseau, une par une : ce que le routeur expose à Internet, un intrus sur le Wi-Fi, un
 objet connecté vulnérable, un ordinateur infecté, un DNS ou un certificat détourné, les arnaques, les atteintes à la
 vie privée.
 
@@ -144,7 +144,7 @@ vie privée.
   appliquent. Le blocage des menaces y ajoute, de la même façon, la liste de Microsoft qui bloque les pilotes
   vulnérables. Les autres corrections, ou celles choisies avec elles, passent par un script lisible.
 
-#### Exposition vers Internet et réseau de la maison
+#### Exposition vers Internet et réseau local
 
 **Audit du réseau, domaine par domaine** (`vanguard audit-reseau`, menu Réseau et Internet › 2, et à la suite du
 bilan complet) — six notes : exposition à Internet (les ports que la box ouvre, demandés à la box elle-même, l'IPv6
