@@ -821,14 +821,16 @@ pub(crate) fn lire_lsof_prises(sortie: &str) -> Vec<(String, u16, String)> {
 }
 
 /// macOS : les prises en écoute nommées par lsof, sans droits admin (les programmes du compte seulement). `None` :
-/// lsof absent ou en échec. Sans aucune prise à montrer, lsof répond 1 sans rien écrire : une liste vide, pas un échec.
+/// lsof absent ou en échec. Sans aucune prise à montrer, lsof répond 1 sans rien écrire, ni sortie ni erreur : une
+/// liste vide, pas un échec.
 #[cfg(target_os = "macos")]
 pub(crate) fn prises_lsof() -> Option<Vec<(String, u16, String)>> {
     let r = crate::commande::lancer(
         Command::new("lsof").args(["+c", "0", "-nP", "-iTCP", "-sTCP:LISTEN"]),
         30,
     )?;
-    (r.code == Some(0) || (r.code == Some(1) && r.sortie.trim().is_empty())).then(|| lire_lsof_prises(&r.sortie))
+    let vide = r.code == Some(1) && r.sortie.trim().is_empty() && r.erreurs.trim().is_empty();
+    (r.code == Some(0) || vide).then(|| lire_lsof_prises(&r.sortie))
 }
 
 /// Programme qui écoute sur chaque port TCP de cette machine (port → nom du programme, que chaque programme choisit :
