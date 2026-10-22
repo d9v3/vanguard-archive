@@ -195,6 +195,16 @@ fn lire_texte(texte: &str) -> Vec<Changement> {
     texte.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
+/// Les corrections réussies qui ne sont pas des blocages, du plus ancien au plus récent : (date, première commande).
+/// Une correction n'a pas de valeur d'avant notée : elle se défait à la main, avec la commande inverse.
+pub(crate) fn a_defaire_a_la_main() -> Vec<(String, String)> {
+    lire()
+        .into_iter()
+        .filter(|c| c.reussi && c.blocage.is_none())
+        .map(|c| (c.date, c.commandes.into_iter().next().unwrap_or_default()))
+        .collect()
+}
+
 /// Pour le rapport HTML : (corrections notées, réussies, date de la dernière). Les commandes n'y vont pas : le rapport
 /// voyage sur la clé et sert aux captures d'écran, et une commande peut citer un nom de fichier ou de compte.
 pub fn resume() -> Option<(usize, usize, String)> {

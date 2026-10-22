@@ -747,6 +747,121 @@ fn raccourci_pose_puis_retire() {
     assert_eq!(retire.code, Some(0), "{}", retire.erreurs);
 }
 
+/// Retirer Vanguard, dans une maison jetable où il a posé une surveillance, un raccourci et sa copie : la liste
+/// montre tout sans rien retirer ; une ligne vide ne retire rien ; les numéros cochés puis « o » retirent ce qui est
+/// coché, et le dossier de données reste. Sans bus de session, systemctl --user échoue : c'est dit dans « Échoué »,
+/// jamais compté comme fait. Tout tient dans 76 colonnes, en français et en anglais (alias « uninstall »).
+#[test]
+fn desinstaller_montre_puis_retire_dans_une_maison_jetable() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let maison = maison_jetable();
+    let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
+    let lancer = |langue: &str, args: &[&str], entree: &str| {
+        let s = vanguard_dans(programme, &maison, langue, args, entree, 60);
+        assert_eq!(s.code, Some(0), "{}\n{}", s.texte, s.erreurs);
+        let t = sans_couleurs(&s.texte);
+        // Un chemin plus long que la ligne (ceux de la maison jetable et du programme d'essai le sont) a sa ligne à
+        // lui, entier : seul un texte qu'on aurait pu couper compte.
+        let longues: Vec<&str> = t
+            .lines()
+            .filter(|l| l.chars().count() > 76 && l.trim().contains(' '))
+            .collect();
+        assert_eq!(longues, Vec::<&str>::new(), "lignes trop longues : {t}");
+        t
+    };
+    lancer("fr", &["raccourci", "on"], "");
+    let donnees = maison.join("donnees/vanguard");
+    let copie = donnees.join("bin/vanguard");
+    std::fs::create_dir_all(copie.parent().unwrap()).unwrap();
+    std::fs::write(&copie, "copie").unwrap();
+    std::fs::write(donnees.join("appareils.json"), "{}").unwrap();
+    let unites = maison.join(".config/systemd/user");
+    std::fs::create_dir_all(&unites).unwrap();
+    std::fs::write(
+        unites.join("vanguard-surveillance.service"),
+        format!("[Service]\nExecStart=\"{}\" surveiller\n", copie.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        unites.join("vanguard-surveillance.timer"),
+        "[Timer]\nOnUnitActiveSec=1h\n",
+    )
+    .unwrap();
+    std::fs::write(unites.join("autre.timer"), "[Timer]\n").unwrap();
+    let raccourci = maison.join("donnees/applications/Vanguard.desktop");
+    let icone = maison.join("donnees/icons/hicolor/128x128/apps/vanguard.png");
+    assert!(raccourci.is_file() && icone.is_file());
+    let intact = || {
+        raccourci.is_file()
+            && icone.is_file()
+            && copie.is_file()
+            && unites.join("vanguard-surveillance.timer").is_file()
+            && donnees.join("appareils.json").is_file()
+    };
+
+    let liste = lancer("fr", &["desinstaller", "--liste"], "");
+    for attendu in [
+        "Surveillance horaire",
+        "Raccourci : menu des applications",
+        "Copie du programme (bin/)",
+        "Dossier de données",
+        "Rien n'a été retiré",
+    ] {
+        assert!(liste.contains(attendu), "{attendu} absent : {liste}");
+    }
+    assert!(!liste.contains("autre.timer"), "{liste}");
+    assert!(intact(), "--liste a retiré quelque chose");
+
+    let vide = lancer("fr", &["desinstaller"], "\n");
+    assert!(vide.contains("Rien n'a été retiré"), "{vide}");
+    assert!(intact(), "une ligne vide a retiré quelque chose");
+    // Les numéros des cases, tels que la liste à cocher les montre.
+    let numero = |texte: &str| {
+        vide.lines()
+            .find(|l| l.contains(&format!("[ ] {texte}")))
+            .and_then(|l| l.split_whitespace().next())
+            .unwrap_or_else(|| panic!("{texte} absent : {vide}"))
+            .to_string()
+    };
+    let choix = format!(
+        "{} {} {}\no\n",
+        numero("Surveillance horaire"),
+        numero("Raccourci : menu"),
+        numero("Copie du programme")
+    );
+    let fait = lancer("fr", &["desinstaller"], &choix);
+    assert!(!raccourci.exists() && !icone.exists(), "{fait}");
+    assert!(!copie.exists(), "{fait}");
+    assert!(!unites.join("vanguard-surveillance.timer").exists(), "{fait}");
+    assert!(unites.join("autre.timer").is_file(), "{fait}");
+    assert!(
+        donnees.join("appareils.json").is_file(),
+        "le dossier de données est parti : {fait}"
+    );
+    // systemctl --user sans bus : la surveillance est dite « Échoué », jamais comptée comme retirée.
+    if fait.contains("── Échoué") {
+        let echoue = fait.split("── Échoué").nth(1).unwrap();
+        assert!(echoue.contains("Surveillance horaire"), "{fait}");
+        assert!(fait.contains("non retiré(s)") && !fait.contains("Fait :"), "{fait}");
+        let retire = fait.split("── Retiré").nth(1).unwrap_or_default();
+        let retire = retire.split("── ").next().unwrap_or_default();
+        assert!(!retire.contains("Surveillance horaire"), "{fait}");
+    } else {
+        assert!(fait.contains("Fait :"), "{fait}");
+    }
+
+    // En anglais, par son alias : la liste, sans rien retirer.
+    let anglais = lancer("en", &["uninstall", "--list"], "");
+    assert!(anglais.contains("Remove Vanguard from this computer"), "{anglais}");
+    assert!(
+        anglais.contains("Data folder") && anglais.contains("Nothing was removed"),
+        "{anglais}"
+    );
+    let _ = std::fs::remove_dir_all(&maison);
+}
+
 /// Les outils qui écrivent sur un disque s'ouvrent et rendent la main quand on revient sans rien choisir (Entrée) ;
 /// la clé VANGUARD, et chacune de ses partitions, n'est jamais proposée.
 #[test]

@@ -361,7 +361,7 @@ Au-delà de la défense : le dépannage, l'optimisation, les données, puis le s
 | **Dépannage** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, ordinateur d'un proche, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser, logiciels et jeu** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage ; les meilleurs logiciels en 8 catégories, depuis leur source officielle, et les mises à jour de tout d'un coup ; connexion pour le jeu (ping, gigue, pertes, débit et bufferbloat, comparés aux mesures habituelles), Wi-Fi encombré, type de NAT, DNS le plus rapide (sans retirer un DNS qui protège), réglages pour jouer. |
 | **Données et sauvegarde** | Sauvegarde automatique et vérifier ma sauvegarde (copie rsync réellement relue), copier mes fichiers (copie vérifiée) et vérifier une copie. |
-| **Suivi, outils et clé USB** | Rapport HTML avec la courbe des notes, entretien du mois, apprentissage sur l'ordinateur, ce que Vanguard a changé (chaque correction, datée), tous les paramètres au même endroit, extensions personnelles (plugins et scripts, vérifiés avant de tourner) ; clé USB protégée en écriture ailleurs que sur l'ordinateur de son propriétaire, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur), guide des commandes, recherche dans tous les menus. |
+| **Suivi, outils et clé USB** | Rapport HTML avec la courbe des notes, entretien du mois, apprentissage sur l'ordinateur, ce que Vanguard a changé (chaque correction, datée), tous les paramètres au même endroit, extensions personnelles (plugins et scripts, vérifiés avant de tourner) ; clé USB protégée en écriture ailleurs que sur l'ordinateur de son propriétaire, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur), retrait complet de Vanguard d'un ordinateur, guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, domaine par domaine</b></summary>
@@ -513,6 +513,11 @@ ni nom de Wi-Fi ; il ne part jamais sur GitHub.
 
 **Raccourci sur cet ordinateur** — Vanguard copié ici et lancé d'un clic.
 
+**Retirer Vanguard de cet ordinateur** — tout ce qu'il y a posé (surveillance, entretien, sauvegarde automatique,
+fichiers-pièges, raccourci et icône, copie du programme, restes d'une version d'avant) est retrouvé, montré avec ce
+qui sera fait, puis coché. Le dossier de données n'est effacé qu'après un second accord ; les changements faits sur le
+système se défont d'abord par leurs outils, ou sont dits avec leur commande ; la clé n'est jamais touchée.
+
 **Guide des commandes** — les commandes utiles d'Omarchy, d'Arch, de Fedora, de Debian et Ubuntu (et des autres
 Linux), de Windows 11, de macOS, et celles qui s'écrivent pareil partout (Vanguard, ping, nslookup, ssh, curl, git…),
 chacune expliquée ; ⚠ marque celles qui changent quelque chose. Chaque distribution a sa présentation, ses marches à
@@ -619,6 +624,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard raccourci [on\|off]` | raccourci sur cet ordinateur |
 | `vanguard ordinateurs` | mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants |
 | `vanguard se-mettre-a-jour` | mettre Vanguard à jour sur cet ordinateur, depuis la clé ou depuis GitHub (versions signées par l'auteur) |
+| `vanguard desinstaller [--liste]` | retirer Vanguard de cet ordinateur : ce qu'il a posé, retrouvé, montré puis coché (données gardées sauf second accord, clé jamais touchée) ; `--liste` : sans rien retirer |
 | `vanguard fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
 | `vanguard copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
 | `vanguard verifier-cle [dossier]` | vérifier ma clé : capacité réelle, vitesses, blocs en erreur (écrit dans le libre après accord, puis efface) |
@@ -673,7 +679,7 @@ Chaque entrée du menu existe aussi en commande.
 `email`, `password`, `browser-passwords`, `outbound`, `remote-access`, `link`, `check-file`, `camera-mic`,
 `permissions`, `quarantine`, `containers`, `settings`, `blocking`, `backup`, `restore`, `name`, `slow`, `startup`,
 `specs`, `copy-files`, `check-copy`, `check-backup`, `check-drive`, `handout`, `changes`, `auto-backup`, `shortcut`,
-`computers`, `self-update`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`, `lab`, `ext`).
+`computers`, `self-update`, `uninstall`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`, `lab`, `ext`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire

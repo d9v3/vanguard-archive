@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::ui::*;
+
 /// L'ancien nom d'un nom de Vanguard, dans la même casse : « vanguard-surveillance » → son équivalent d'avant.
 pub(crate) fn ancien(nom: &str) -> String {
     nom.replace("VANGUARD", "GARDIEN")
@@ -162,10 +164,7 @@ fn retirer_minuterie(nom: &str) -> bool {
             return false;
         }
         let actif = crate::reseau::surveillance::minuterie_activee(&format!("{nom}.timer"));
-        crate::reseau::surveillance::reussit("systemctl", &["--user", "disable", "--now", &format!("{nom}.timer")]);
-        let _ = std::fs::remove_file(dossier.join(format!("{nom}.service")));
-        let _ = std::fs::remove_file(dossier.join(format!("{nom}.timer")));
-        crate::reseau::surveillance::reussit("systemctl", &["--user", "daemon-reload"]);
+        let _ = retirer_unites(nom, &dossier);
         actif
     }
     #[cfg(target_os = "macos")]
@@ -202,7 +201,6 @@ fn retirer_minuterie(nom: &str) -> bool {
 }
 
 /// Le nom lisible de la tâche planifiée Windows d'avant, d'après le nom court de la minuterie.
-#[cfg(any(windows, test))]
 fn tache_windows(nom: &str) -> String {
     let (programme, quoi) = nom.split_once('-').unwrap_or((nom, ""));
     let lisible = match quoi {
@@ -280,11 +278,240 @@ fn retirer_raccourci() -> Option<PathBuf> {
         return None;
     }
     std::fs::remove_file(&vieux).ok()?;
-    #[cfg(target_os = "linux")]
-    if let Some(donnees) = nouveau.parent().and_then(Path::parent) {
-        let _ = std::fs::remove_file(donnees.join(format!("icons/hicolor/128x128/apps/{}.png", ancien("vanguard"))));
+    // L'icône d'avant seulement si c'est bien la sienne : une icône du même nom venue d'ailleurs reste.
+    if let Some(icone) = icone_d_avant(&nouveau) {
+        let _ = std::fs::remove_file(icone);
     }
     (!nouveau.exists()).then_some(nouveau)
+}
+
+/// L'icône posée par la version d'avant à côté du raccourci du menu des applications (Linux), si elle est là et
+/// reconnue à son empreinte.
+fn icone_d_avant(raccourci: &Path) -> Option<PathBuf> {
+    let icone = crate::raccourci::icone(raccourci)?.with_file_name(format!("{}.png", ancien("vanguard")));
+    let reconnue = std::fs::symlink_metadata(&icone).is_ok_and(|m| m.is_file())
+        && std::fs::read(&icone).is_ok_and(|o| crate::raccourci::icone_de_vanguard(&o));
+    reconnue.then_some(icone)
+}
+
+/// Ce qu'une version d'avant a laissé sur cet ordinateur, retrouvé par l'ancien nom pour la désinstallation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Reste {
+    /// Les unités systemd d'avant (« nom.timer », « nom.service »), dans ce dossier.
+    Minuterie {
+        nom: String,
+        dossier: PathBuf,
+    },
+    /// Le plist d'un agent launchd d'avant.
+    Agent(PathBuf),
+    /// Une tâche du Planificateur d'avant, par son nom.
+    Tache(String),
+    Raccourci(PathBuf),
+    Icone(PathBuf),
+    /// La copie du programme d'avant dans bin/.
+    Programme(PathBuf),
+    /// L'ancien dossier des données, que `au_lancement` n'a pas pu déplacer.
+    Donnees(PathBuf),
+}
+
+impl Reste {
+    /// Ce que c'est, en quelques mots (26 colonnes au plus : la ligne à cocher les fait précéder de « Version d'avant : »).
+    pub(crate) fn quoi(&self) -> String {
+        let genre = |nom: &str| {
+            if nom.ends_with("surveillance") {
+                0
+            } else if nom.ends_with("entretien") {
+                1
+            } else {
+                2
+            }
+        };
+        match self {
+            Reste::Minuterie { nom, .. } => match genre(nom) {
+                0 => tr!("minuterie de surveillance", "monitoring timer"),
+                1 => tr!("minuterie d'entretien", "check-up timer"),
+                _ => tr!("minuterie de sauvegarde", "backup timer"),
+            },
+            Reste::Agent(p) => match genre(&p.file_stem().unwrap_or_default().to_string_lossy()) {
+                0 => tr!("agent de surveillance", "monitoring agent"),
+                _ => tr!("agent d'entretien", "check-up agent"),
+            },
+            Reste::Tache(nom) if nom.ends_with("du mois") => tr!("tâche d'entretien", "check-up task"),
+            Reste::Tache(_) => tr!("tâche de surveillance", "monitoring task"),
+            Reste::Raccourci(_) => tr!("raccourci", "shortcut"),
+            Reste::Icone(_) => tr!("icône", "icon"),
+            Reste::Programme(_) => tr!("copie du programme", "program copy"),
+            Reste::Donnees(_) => tr!("dossier de données", "data folder"),
+        }
+        .to_string()
+    }
+
+    /// Les fichiers ou le dossier qu'il touche (une tâche Windows n'en a pas).
+    pub(crate) fn chemins(&self) -> Vec<PathBuf> {
+        match self {
+            Reste::Minuterie { nom, dossier } => ["timer", "service"]
+                .iter()
+                .map(|e| dossier.join(format!("{nom}.{e}")))
+                .filter(|p| std::fs::symlink_metadata(p).is_ok())
+                .collect(),
+            Reste::Agent(p) | Reste::Raccourci(p) | Reste::Icone(p) | Reste::Programme(p) | Reste::Donnees(p) => {
+                vec![p.clone()]
+            }
+            Reste::Tache(_) => Vec::new(),
+        }
+    }
+}
+
+/// Les tâches du Planificateur qu'une version d'avant posait, par leur nom.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn taches_d_avant() -> Vec<String> {
+    ["vanguard-surveillance", "vanguard-entretien"]
+        .iter()
+        .map(|n| tache_windows(&ancien(n)))
+        .collect()
+}
+
+/// Tout ce qu'une version d'avant a laissé dans les lieux `l`, sans rien retirer, avec le chemin à montrer. Les mêmes
+/// règles que la reprise (`retirer_minuterie`, `tache_windows`, `retirer_raccourci`) : un nom exact, la marque d'avant
+/// pour un raccourci, l'empreinte pour une icône. Ce que la version d'avant n'a pas posé n'y est jamais.
+pub(crate) fn restes(l: &crate::desinstaller::Lieux) -> Vec<(Reste, PathBuf)> {
+    let mut restes = Vec::new();
+    for dossier in &l.unites {
+        for quoi in ["surveillance", "entretien", "sauvegarde"] {
+            let nom = ancien(&format!("vanguard-{quoi}"));
+            let timer = dossier.join(format!("{nom}.timer"));
+            let service = dossier.join(format!("{nom}.service"));
+            if timer.exists() || service.exists() {
+                let montre = if timer.exists() { timer } else { service };
+                restes.push((
+                    Reste::Minuterie {
+                        nom,
+                        dossier: dossier.clone(),
+                    },
+                    montre,
+                ));
+            }
+        }
+    }
+    if let Some(agents) = &l.agents {
+        for quoi in ["surveillance", "entretien"] {
+            let plist = agents.join(format!("com.{}.{quoi}.plist", ancien("vanguard")));
+            if plist.is_file() {
+                restes.push((Reste::Agent(plist.clone()), plist));
+            }
+        }
+    }
+    for t in l.taches.iter().flatten() {
+        if taches_d_avant().iter().any(|n| n.eq_ignore_ascii_case(&t.nom)) {
+            restes.push((Reste::Tache(t.nom.clone()), PathBuf::from(&t.nom)));
+        }
+    }
+    if let Some(nouveau) = &l.raccourci
+        && let Some(nom) = nouveau.file_name()
+    {
+        let vieux = nouveau.with_file_name(ancien(&nom.to_string_lossy()));
+        let a_lui = vieux.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+            || std::fs::read_to_string(&vieux).is_ok_and(|t| t.contains(&ancien(crate::raccourci::MARQUE)));
+        if vieux.is_file() && a_lui {
+            restes.push((Reste::Raccourci(vieux.clone()), vieux));
+        }
+        if let Some(icone) = icone_d_avant(nouveau) {
+            restes.push((Reste::Icone(icone.clone()), icone));
+        }
+    }
+    let programme = l
+        .donnees
+        .join("bin")
+        .join(format!("{}{}", ancien("vanguard"), std::env::consts::EXE_SUFFIX));
+    if std::fs::symlink_metadata(&programme).is_ok() {
+        restes.push((Reste::Programme(programme.clone()), programme));
+    }
+    let vieux = l.donnees.with_file_name(ancien("vanguard"));
+    if vieux.is_dir() {
+        restes.push((Reste::Donnees(vieux.clone()), vieux));
+    }
+    restes
+}
+
+/// Retire un reste d'une version d'avant, sans rien demander (la désinstallation l'a montré et fait accepter) ; rend
+/// la raison d'un échec. Le dossier de données d'avant, lui, s'efface avec le reste des données
+/// (`desinstaller::effacer_dossier`).
+pub(crate) fn retirer_reste(r: &Reste) -> Result<(), String> {
+    match r {
+        Reste::Minuterie { nom, dossier } => retirer_unites(nom, dossier),
+        Reste::Agent(plist) => {
+            #[cfg(target_os = "macos")]
+            {
+                let domaine = crate::reseau::surveillance::domaine_launchd();
+                let _ = crate::reseau::surveillance::reussit(
+                    "launchctl",
+                    &["bootout", &domaine, &plist.display().to_string()],
+                );
+            }
+            std::fs::remove_file(plist).map_err(|e| e.to_string())
+        }
+        Reste::Tache(nom) => retirer_tache(nom),
+        Reste::Raccourci(p) | Reste::Icone(p) | Reste::Programme(p) => {
+            std::fs::remove_file(p).map_err(|e| e.to_string())
+        }
+        Reste::Donnees(d) => Err(trf!(
+            "{} : un dossier s'efface avec les données",
+            "{}: a folder is erased with the data",
+            d.display()
+        )),
+    }
+}
+
+/// Les deux unités d'une minuterie d'avant : arrêtée, ses fichiers retirés, systemd rechargé. Dit si systemctl n'a
+/// pas répondu, jamais compté comme fait.
+fn retirer_unites(nom: &str, dossier: &Path) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let arretee =
+        crate::reseau::surveillance::reussit("systemctl", &["--user", "disable", "--now", &format!("{nom}.timer")]);
+    #[cfg(not(target_os = "linux"))]
+    let arretee = false;
+    let mut echecs = Vec::new();
+    for e in ["timer", "service"] {
+        let f = dossier.join(format!("{nom}.{e}"));
+        if std::fs::symlink_metadata(&f).is_ok()
+            && let Err(x) = std::fs::remove_file(&f)
+        {
+            echecs.push(format!("{} ({x})", f.display()));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    let recharge = crate::reseau::surveillance::reussit("systemctl", &["--user", "daemon-reload"]);
+    #[cfg(not(target_os = "linux"))]
+    let recharge = false;
+    if !echecs.is_empty() {
+        return Err(trf!("non retiré : {}", "not removed: {}", echecs.join(", ")));
+    }
+    if !(arretee && recharge) {
+        return Err(tr!(
+            "fichiers retirés, mais systemctl --user n'a pas répondu : la minuterie peut rester chargée jusqu'à la prochaine ouverture de session, où elle disparaît",
+            "files removed, but systemctl --user did not answer: the timer may stay loaded until the next sign-in, where it goes away"
+        )
+        .to_string());
+    }
+    Ok(())
+}
+
+/// Une tâche du Planificateur d'avant : arrêtée (une passe en cours n'écrit plus rien), puis retirée.
+fn retirer_tache(nom: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let e = crate::commande::ps_texte(nom);
+        crate::machine::windows::ps(&format!(
+            "Stop-ScheduledTask -TaskName '{e}' -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName '{e}' -Confirm:$false"
+        ))
+        .map(|_| ())
+        .ok_or_else(|| tr!("PowerShell n'a pas pu retirer la tâche", "PowerShell could not remove the task").to_string())
+    }
+    #[cfg(not(windows))]
+    Err(trf!(
+        "« {nom} » : une tâche de Windows, pas de cet ordinateur",
+        "“{nom}”: a Windows task, not of this computer"
+    ))
 }
 
 #[cfg(test)]
@@ -335,6 +562,96 @@ mod tests {
         assert!(repris.contains("Description=Sauvegarde Vanguard vers /run/media/alice/Externe/Sauvegarde-Gardien/pc"));
         // Le dossier sur le disque ne bouge pas, seul le témoin exclu suit.
         assert!(repris.contains("--exclude=.vanguard-copie-en-cours \"/home/alice/Documents\" \"/run/media/alice/Externe/Sauvegarde-Gardien/pc/\""));
+    }
+
+    /// Les restes d'une version d'avant, dans un ordinateur jetable : reconnus à leur nom exact, à la marque d'avant
+    /// pour un raccourci, à l'empreinte pour une icône ; le reste n'y est jamais.
+    #[test]
+    fn restes_d_une_version_d_avant() {
+        let racine = crate::reseau::dossier_local().join("passage-restes");
+        let _ = std::fs::remove_dir_all(&racine);
+        let l = crate::desinstaller::Lieux::jetable(&racine);
+        let ecrire = |p: &Path, t: &[u8]| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, t).unwrap();
+        };
+        let unites = &l.unites[0];
+        ecrire(&unites.join("gardien-surveillance.timer"), b"[Timer]\n");
+        ecrire(&unites.join("gardien-entretien.service"), b"[Service]\n");
+        ecrire(&unites.join("gardien-autre.timer"), b"[Timer]\n");
+        ecrire(&l.unites[1].join("gardien-sauvegarde.timer"), b"[Timer]\n");
+        let agents = l.agents.clone().unwrap();
+        ecrire(&agents.join("com.gardien.surveillance.plist"), b"<plist/>");
+        let raccourci = l.raccourci.clone().unwrap();
+        let vieux = raccourci.with_file_name("Gardien.desktop");
+        ecrire(
+            &vieux,
+            format!("[Desktop Entry]\n{}\n", ancien(crate::raccourci::MARQUE)).as_bytes(),
+        );
+        let icone = crate::raccourci::icone(&raccourci)
+            .unwrap()
+            .with_file_name("gardien.png");
+        ecrire(&icone, include_bytes!("../assets/icones/vanguard-128.png"));
+        let bin = l
+            .donnees
+            .join("bin")
+            .join(format!("gardien{}", std::env::consts::EXE_SUFFIX));
+        ecrire(&bin, b"avant");
+        let donnees = l.donnees.with_file_name("gardien");
+        ecrire(&donnees.join("historique.json"), b"[]");
+        let trouves: Vec<Reste> = restes(&l).into_iter().map(|(r, _)| r).collect();
+        assert_eq!(
+            trouves,
+            [
+                Reste::Minuterie {
+                    nom: "gardien-surveillance".into(),
+                    dossier: unites.clone()
+                },
+                Reste::Minuterie {
+                    nom: "gardien-entretien".into(),
+                    dossier: unites.clone()
+                },
+                Reste::Minuterie {
+                    nom: "gardien-sauvegarde".into(),
+                    dossier: l.unites[1].clone()
+                },
+                Reste::Agent(agents.join("com.gardien.surveillance.plist")),
+                Reste::Raccourci(vieux.clone()),
+                Reste::Icone(icone.clone()),
+                Reste::Programme(bin),
+                Reste::Donnees(donnees),
+            ]
+        );
+        assert!(trouves.iter().all(|r| r.quoi().chars().count() <= 26));
+        // Sans la marque d'avant, le raccourci n'est pas à elle ; une icône d'autres octets non plus.
+        std::fs::write(&vieux, "[Desktop Entry]\nName=Gardien\n").unwrap();
+        std::fs::write(&icone, "une autre icone").unwrap();
+        let apres: Vec<Reste> = restes(&l).into_iter().map(|(r, _)| r).collect();
+        assert!(
+            !apres.iter().any(|r| matches!(r, Reste::Raccourci(_) | Reste::Icone(_))),
+            "{apres:?}"
+        );
+        // Des tâches de Windows lues : celles d'avant seulement.
+        let mut w = crate::desinstaller::Lieux::jetable(&racine.join("w"));
+        w.taches = Some(
+            [
+                "gardien - surveillance du reseau",
+                "vanguard - surveillance du reseau",
+                "autre",
+            ]
+            .into_iter()
+            .map(|nom| crate::desinstaller::TacheLue {
+                nom: nom.into(),
+                programme: String::new(),
+                active: true,
+            })
+            .collect(),
+        );
+        assert_eq!(
+            restes(&w).into_iter().map(|(r, _)| r).collect::<Vec<_>>(),
+            [Reste::Tache("gardien - surveillance du reseau".into())]
+        );
+        let _ = std::fs::remove_dir_all(&racine);
     }
 
     #[test]

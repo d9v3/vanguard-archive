@@ -205,6 +205,16 @@ pub(crate) fn remettre(nom: &str) -> Result<(), String> {
     remettre_dans(&e, &dossier)
 }
 
+/// Le nombre de fichiers en quarantaine sur cet ordinateur.
+pub(crate) fn nombre() -> usize {
+    nombre_dans(&dossier())
+}
+
+/// Le nombre de fichiers isolés dans le dossier de quarantaine `dossier`.
+pub(crate) fn nombre_dans(dossier: &Path) -> usize {
+    liste_dans(dossier).len()
+}
+
 /// Supprime pour de bon un fichier de la quarantaine.
 fn supprimer_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
     let chemin = dossier.join(&e.nom);

@@ -7,6 +7,23 @@ a day, gathering the day's work; October 21 had two, 0.82 in the morning and 0.8
 delivered just before it. Only the latest version has its download page; every version keeps its tag in the repository
 (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## Next version
+
+- **Remove Vanguard from this computer.** `vanguard uninstall` (Data menu) finds everything Vanguard placed here,
+  without a register: the hourly monitoring, the monthly check-up, the automatic backup, the decoy files, the shortcut
+  and its icon, the program copy, and what a version from before the name change had left. Everything is shown with what
+  will be done, then checked; the data folder (device record, history, learning, quarantine) is never checked by default
+  and asks for a second consent. Changes made to the system are first undone by their own tools, or said with the
+  command that undoes them; the USB key is never touched. At the end: what was removed, kept, and what failed. No
+  administrator rights.
+- **Shortcut removed with its icon** (Linux): `shortcut off` left the icon behind; it goes too, if it is really
+  Vanguard's.
+- **Monitoring that no longer runs is said.** The check-up verifies that the program started by the hourly monitoring
+  and by the monthly check-up still exists (and rsync for the backup), not only the task, and says how to put it back.
+- **Missed runs caught up.** Turned on now, monitoring catches up a missed hour on Windows (computer off or asleep) and
+  runs five minutes after sign-in; on macOS, right at sign-in. Monitoring already in place is not changed silently: the
+  check-up says it is "from an earlier version", and `vanguard monitor on` updates it.
+
 ## October 22, 2026: version 0.84.1
 
 - **AI servers open to the network, now seen on Macs too.** The rule that spots a local AI server (Ollama, LM Studio,

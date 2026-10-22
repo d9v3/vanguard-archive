@@ -44,7 +44,11 @@ fn fichier() -> PathBuf {
 
 /// Les fichiers-pièges posés ; `Err` si la liste existe mais ne se lit plus.
 fn charger() -> Result<Vec<Piege>, ()> {
-    match std::fs::read_to_string(fichier()) {
+    charger_de(&fichier())
+}
+
+fn charger_de(liste: &Path) -> Result<Vec<Piege>, ()> {
+    match std::fs::read_to_string(liste) {
         Ok(texte) => serde_json::from_str(&texte).map_err(|_| ()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(_) => Err(()),
@@ -352,6 +356,19 @@ fn retirer_tous(pieges: &[Piege], liste: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) 
         restes.extend(gardes.into_iter().map(|p| p.chemin));
     }
     (restes, preuves)
+}
+
+/// Le nombre de fichiers-pièges posés, d'après la liste du dossier de données `donnees` ; `Err` si elle ne se lit plus.
+pub(crate) fn nombre_dans(donnees: &Path) -> Result<usize, ()> {
+    charger_de(&donnees.join("pieges.json")).map(|p| p.len())
+}
+
+/// Retire les fichiers-pièges sans question (la désinstallation l'a montré et fait accepter) : rend ceux qui n'ont
+/// pas pu partir, et ceux gardés comme preuves (modifiés ou renommés : la trace d'un passage). `Err` si la liste ne
+/// se lit plus.
+pub(crate) fn retirer_sans_question() -> Result<(Vec<PathBuf>, Vec<PathBuf>), ()> {
+    let pieges = charger()?;
+    Ok(retirer_tous(&pieges, &fichier()))
 }
 
 /// Un constat de la catégorie, avec une marche à suivre à faire soi-même.

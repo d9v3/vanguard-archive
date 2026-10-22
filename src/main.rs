@@ -12,6 +12,7 @@ mod commande;
 mod copier;
 mod corriger;
 mod depanner;
+mod desinstaller;
 mod diagnostic;
 mod dns_rapide;
 mod donnees;
@@ -413,6 +414,15 @@ enum Commande {
     /// publiée sur GitHub, signée par l'auteur et vérifiée ; toujours sur accord, jamais vers une version plus ancienne.
     #[command(name = "se-mettre-a-jour", visible_alias = "self-update")]
     SeMettreAJour,
+    /// Retirer Vanguard de cet ordinateur : ce qu'il y a posé (surveillance, entretien, sauvegarde automatique,
+    /// fichiers-pièges, raccourci et icône, copie du programme, restes d'une version d'avant), retrouvé, montré puis
+    /// coché. Le dossier de données n'est retiré qu'après un second accord ; la clé USB n'est jamais touchée.
+    #[command(visible_alias = "uninstall")]
+    Desinstaller {
+        /// Montrer ce qui serait retiré, sans rien retirer.
+        #[arg(long, visible_alias = "list")]
+        liste: bool,
+    },
     /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
     #[command(visible_alias = "rules")]
     Regles,
@@ -1046,6 +1056,7 @@ enum Action {
     ProtegerDonnees,
     MettreAJour,
     VerifierSauvegarde,
+    Desinstaller,
     Guide,
     Depanner,
     Extensions,
@@ -1342,6 +1353,13 @@ const OUTILS: &[Outil] = &[
         titre: ["Vérifier ma sauvegarde", "Check my backup"],
         precision: ["relue pour de vrai", "really read back"],
         mots: "sauvegarde backup vérifier verify restauration restore test rsync time machine" },
+    // Au bout de Données, avec ce qui installe Vanguard ici (raccourci, mise à jour) : Paramètres ne montre que des
+    // réglages avec leur valeur, et aucune place annoncée ne bouge.
+    Outil { action: Action::Desinstaller, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Retirer Vanguard de cet ordinateur", "Remove Vanguard from this computer"],
+        precision: ["ce qu'il a posé, montré d'abord", "what it placed, shown first"],
+        mots: "désinstaller uninstall désinstallation retirer remove supprimer delete effacer erase installer install \
+               installé installed" },
     Outil { action: Action::Guide, groupe: Some(Groupe::Guide), lettre: "",
         titre: ["Guide des commandes", "Command guide"],
         precision: ["Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"],
@@ -1641,6 +1659,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::SauvegardeAuto => sauvegarde::menu(),
         Action::VerifierCopie => copier::verifier_copie(None),
         Action::VerifierSauvegarde => sauvegarde::verifier_sauvegarde(),
+        Action::Desinstaller => desinstaller::commande(false),
         Action::VerifierCle => verifier_cle::menu(),
         Action::Raccourci => raccourci::commande(None),
         Action::Ordinateurs => ordinateurs::menu(),
@@ -1763,6 +1782,10 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("se-mettre-a-jour", "Update Vanguard on this computer: from a newer VANGUARD key, or from the latest version \
                           published on GitHub, signed by the author and checked; always after your consent, never to \
                           an older version"),
+    ("desinstaller", "Remove Vanguard from this computer: what it placed there (monitoring, monthly check-up, \
+                      automatic backup, decoy files, shortcut and icon, program copy, leftovers of an earlier \
+                      version), found, shown, then checked. The data folder is removed only after a second consent; \
+                      the USB key is never touched"),
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
     ("traces", "Collect the traces after an infection, before cleaning up: processes, connections, what starts by \
@@ -1788,6 +1811,7 @@ const AIDES_EN: &[(&str, &str)] = &[
 #[rustfmt::skip]
 const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("nettoyer", "liste", "Show what could be cleaned up and the space to gain, deleting nothing"),
+    ("desinstaller", "liste", "Show what would be removed, without removing anything"),
     ("logiciels", "liste", "Show each program offered and its state, without installing anything"),
     ("logiciels", "recommandes", "Install the starter pack (browser, passwords, video, office, archives), after your \
                                   consent"),
@@ -2043,6 +2067,7 @@ async fn main() {
         Some(Commande::Raccourci { etat }) => raccourci::commande(etat.map(|e| e == "on")),
         Some(Commande::Ordinateurs) => ordinateurs::menu(),
         Some(Commande::SeMettreAJour) => mise_a_jour::commande(),
+        Some(Commande::Desinstaller { liste }) => desinstaller::commande(liste),
         Some(Commande::Regles) => machine::regles::afficher(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
         Some(Commande::Proche) => depanner::executer("proche"),
@@ -2211,6 +2236,7 @@ mod tests_menu {
         assert!(outil_au_chemin("12.1") == Some(Action::Extensions));
         // La place annoncée au menu, dans l'aide et l'historique des versions.
         assert_eq!(touche_de(Action::MettreAJour).as_deref(), Some("9.9"));
+        assert_eq!(touche_de(Action::Desinstaller).as_deref(), Some("9.11"));
         // Les places annoncées : 4.7, 4.8 et 9.2.
         assert!(outil_au_chemin("4.7") == Some(Action::Lenteur));
         assert!(outil_au_chemin("4.8") == Some(Action::Fiche));

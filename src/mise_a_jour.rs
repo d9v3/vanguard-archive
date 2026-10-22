@@ -43,7 +43,8 @@ fn entete() -> [u8; 17] {
 /// un peu plus de 200) : il n'est pas lu, la mémoire ne se remplit pas.
 const TAILLE_MAX: u64 = 512 << 20;
 
-const NOM: &str = if cfg!(windows) { "vanguard.exe" } else { "vanguard" };
+/// Le nom du programme copié dans bin/ (la désinstallation le retrouve aussi, avec ses restes `.ancien`, `.nouveau`).
+pub(crate) const NOM: &str = if cfg!(windows) { "vanguard.exe" } else { "vanguard" };
 
 /// Une version : majeure, mineure, correctif, puis la date de son commit en secondes (0 : inconnue). Entre deux
 /// publications, les compilations intermédiaires gardent le même numéro : la date les départage, et l'ordre des

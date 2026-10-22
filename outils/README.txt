@@ -132,6 +132,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Update Vanguard: the copy on this computer, from the key or from GitHub (d9v3/vanguard-officiel,
          each version signed by the author and checked)
        Check my backup: the rsync backup read back, random files compared with their original
+       Remove Vanguard from this computer: what it placed, shown then checked; data kept unless you agree
+         twice (vanguard uninstall)
  10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
        program, each one explained (⚠: it changes something), with step-by-step guides (update, repair, network,
        free up space…). Type what you are looking for: commands show up as

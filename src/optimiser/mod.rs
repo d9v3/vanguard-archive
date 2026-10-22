@@ -526,6 +526,12 @@ pub fn remettre_dns() {
     }
 }
 
+/// Le nombre de réglages changés par Vanguard dont la valeur d'avant est notée (ce que « Tout remettre comme avant »
+/// défait).
+pub(crate) fn reglages_notes() -> usize {
+    charger().reglages.len()
+}
+
 /// Annule tout ce que Vanguard a changé : les valeurs notées avant chaque changement reviennent.
 pub fn tout_annuler() {
     titre(tr!("Tout remettre comme avant", "Put everything back"));

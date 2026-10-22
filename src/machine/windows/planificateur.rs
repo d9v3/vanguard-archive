@@ -1,15 +1,17 @@
 //! Les tâches planifiées lues par le planificateur de Windows lui-même (ITaskService, COM), au lieu de
 //! Get-ScheduledTask : quelques millisecondes là où PowerShell prend une à plusieurs secondes.
 
+use windows::Win32::Foundation::VARIANT_BOOL;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::TaskScheduler::{
-    IExecAction, ITaskFolder, ITaskService, TASK_ACTION_EXEC, TASK_ACTION_TYPE, TASK_ENUM_HIDDEN, TASK_STATE_DISABLED,
-    TaskScheduler,
+    IExecAction, IRegisteredTask, ITaskFolder, ITaskService, TASK_ACTION_EXEC, TASK_ACTION_TYPE, TASK_ENUM_HIDDEN,
+    TASK_STATE_DISABLED, TASK_TRIGGER_LOGON, TASK_TRIGGER_TYPE2, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, Interface};
 
 use super::wmi;
+use crate::reseau::surveillance::Definition;
 
 /// Plus de dossiers qu'un vrai planificateur n'en a : au-delà, la lecture est refusée plutôt que laissée à moitié.
 const DOSSIERS_MAX: usize = 10_000;
@@ -112,7 +114,9 @@ pub(crate) fn etat(noms: &[&str]) -> Option<EtatTache> {
     let noms: Vec<String> = noms.iter().map(|n| n.to_lowercase()).collect();
     wmi::com("Tâches planifiées", "ITaskService", move || {
         let mut trouve = EtatTache::Absente;
-        parcourir(|nom, active| {
+        parcourir(|tache| {
+            // SAFETY : tâche vivante rendue par le planificateur, le temps de cet appel.
+            let (nom, active) = unsafe { (tache.Name()?.to_string(), tache.State()? != TASK_STATE_DISABLED) };
             if noms.contains(&nom.to_lowercase()) {
                 if active {
                     trouve = EtatTache::Active;
@@ -126,9 +130,72 @@ pub(crate) fn etat(noms: &[&str]) -> Option<EtatTache> {
     })
 }
 
-/// Chaque tâche hors \Microsoft\, cachées comprises, donnée à `voir` avec son nom et « pas désactivée » ; une erreur
-/// de `voir` ou du planificateur arrête tout. Erreur aussi sans le dossier \Microsoft (voir `taches`).
-fn parcourir(mut voir: impl FnMut(&str, bool) -> windows::core::Result<()>) -> windows::core::Result<()> {
+/// Les tâches nommées `noms`, où qu'elles soient hors \Microsoft\, désactivées comprises : ce qu'elles lancent et
+/// leurs réglages de rattrapage (`surveillance::Definition`). `None` si le planificateur ne répond pas ou ne montre
+/// pas le dossier \Microsoft (Wine) : PowerShell prend le relais.
+pub(crate) fn definitions(noms: &[&str]) -> Option<Vec<(String, Definition)>> {
+    let noms: Vec<String> = noms.iter().map(|n| n.to_lowercase()).collect();
+    wmi::com("Tâches planifiées", "ITaskService", move || {
+        let mut trouvees = Vec::new();
+        parcourir(|tache| {
+            // SAFETY : tâche vivante rendue par le planificateur, le temps de cet appel.
+            let nom = unsafe { tache.Name() }?.to_string();
+            if noms.contains(&nom.to_lowercase()) {
+                trouvees.push((nom, definition(tache)?));
+            }
+            Ok(())
+        })?;
+        Ok(trouvees)
+    })
+}
+
+/// Ce que lance une tâche (sa première action qui lance un programme), si elle part dès que possible après un
+/// passage manqué, si elle a un déclencheur à l'ouverture de session, et si elle est active.
+fn definition(tache: &IRegisteredTask) -> windows::core::Result<Definition> {
+    // SAFETY : tâche vivante ; chaque sortie est une variable locale valide pendant l'appel ; les collections sont
+    // indexées de 1 à Count, bornes lues avant chaque accès.
+    unsafe {
+        let active = tache.State()? != TASK_STATE_DISABLED;
+        let def = tache.Definition()?;
+        let mut des_que_possible = VARIANT_BOOL::default();
+        def.Settings()?.StartWhenAvailable(&raw mut des_que_possible)?;
+        let declencheurs = def.Triggers()?;
+        let mut nombre = 0;
+        declencheurs.Count(&raw mut nombre)?;
+        let mut a_l_ouverture = false;
+        for i in 1..=nombre {
+            let mut genre = TASK_TRIGGER_TYPE2::default();
+            declencheurs.get_Item(i)?.Type(&raw mut genre)?;
+            a_l_ouverture |= genre == TASK_TRIGGER_LOGON;
+        }
+        let actions = def.Actions()?;
+        let mut nombre = 0;
+        actions.Count(&raw mut nombre)?;
+        let mut programme = String::new();
+        for j in 1..=nombre {
+            let action = actions.get_Item(j)?;
+            let mut genre = TASK_ACTION_TYPE::default();
+            action.Type(&raw mut genre)?;
+            if genre == TASK_ACTION_EXEC {
+                let lancement: IExecAction = action.cast()?;
+                let mut chemin = BSTR::new();
+                lancement.Path(&raw mut chemin)?;
+                programme = chemin.to_string();
+                break;
+            }
+        }
+        Ok(Definition {
+            programme,
+            des_que_possible: des_que_possible.as_bool(),
+            a_l_ouverture,
+            active,
+        })
+    }
+}
+
+/// Chaque tâche hors \Microsoft\, cachées et désactivées comprises, donnée à `voir` ; une erreur de `voir` ou du
+/// planificateur arrête tout. Erreur aussi sans le dossier \Microsoft (voir `taches`).
+fn parcourir(mut voir: impl FnMut(&IRegisteredTask) -> windows::core::Result<()>) -> windows::core::Result<()> {
     // SAFETY : COM est initialisé dans ce fil (par `wmi::com`) ; TaskScheduler est la classe du planificateur.
     let service: ITaskService = unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }?;
     let vide = VARIANT::default();
@@ -153,8 +220,7 @@ fn parcourir(mut voir: impl FnMut(&str, bool) -> windows::core::Result<()>) -> w
         unsafe {
             let taches = dossier.GetTasks(TASK_ENUM_HIDDEN.0)?;
             for i in 1..=taches.Count()? {
-                let tache = taches.get_Item(&wmi::variant_entier(i))?;
-                voir(&tache.Name()?.to_string(), tache.State()? != TASK_STATE_DISABLED)?;
+                voir(&taches.get_Item(&wmi::variant_entier(i))?)?;
             }
             let sous = dossier.GetFolders(0)?;
             for i in 1..=sous.Count()? {
@@ -191,6 +257,22 @@ mod tests {
         if let Some(lignes) = lu {
             assert!(lignes.iter().all(|l| l.splitn(4, '|').count() == 4));
         }
+    }
+
+    /// Même règle pour ce que lancent les tâches : sous Wine, pas de réponse ; ailleurs, une tâche qui n'existe pas
+    /// n'est pas rendue.
+    #[test]
+    fn definitions_reelles() {
+        let wine = std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file();
+        let lu = definitions(&["vanguard - tâche qui n'existe pas"]);
+        assert!(
+            if wine {
+                lu.is_none()
+            } else {
+                lu.as_ref().is_none_or(Vec::is_empty)
+            },
+            "{lu:?}"
+        );
     }
 
     /// Même règle pour l'état d'une tâche : sous Wine, pas de réponse ; ailleurs, une tâche qui n'existe pas est absente.

@@ -335,7 +335,7 @@ Beyond defense: troubleshooting, optimization, data, then follow-up, tools and t
 | **Troubleshooting** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
 | **Optimizing, software and gaming** | Privacy and performance settings that can be reverted exactly, a cleanup checklist with the space gained measured, startup programs; the best software in 8 categories, from its official source, and updating everything at once; connection for gaming (ping, jitter, loss, speed and bufferbloat, compared with usual measurements), crowded Wi-Fi, NAT type, fastest DNS (without removing a DNS that protects you), settings for gaming. |
 | **Data and backup** | Automatic backup and check my backup (rsync copy actually read back), copy my files (checked copy) and check a copy. |
-| **Follow-up, tools and USB key** | HTML report with the grade curve, monthly check-up, learning on the computer, what Vanguard changed (each fix, dated), every setting in one place, custom extensions (plugins and scripts, checked before they run); a USB key write-protected anywhere but on its owner's computer, check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
+| **Follow-up, tools and USB key** | HTML report with the grade curve, monthly check-up, learning on the computer, what Vanguard changed (each fix, dated), every setting in one place, custom extensions (plugins and scripts, checked before they run); a USB key write-protected anywhere but on its owner's computer, check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), complete removal of Vanguard from a computer, command guide, search in every menu. |
 
 <details>
 <summary><b>The details, area by area</b></summary>
@@ -478,6 +478,11 @@ goes to GitHub.
 
 **Shortcut on this computer** — Vanguard copied here and started with one click.
 
+**Remove Vanguard from this computer** — everything it placed there (monitoring, monthly check-up, automatic backup,
+decoy files, shortcut and icon, program copy, leftovers of an earlier version) is found, shown with what will be done,
+then checked. The data folder is erased only after a second consent; changes made to the system are first undone by
+their own tools, or said with their command; the key is never touched.
+
 **Command guide** — the useful commands of Omarchy, Arch, Fedora, Debian and Ubuntu (and other Linux), Windows 11,
 macOS, and the ones typed the same way everywhere (Vanguard, ping, nslookup, ssh, curl, git…), each one explained; ⚠
 marks the ones that change something. Each distribution has its introduction, its “Step by step” guides (update,
@@ -581,6 +586,7 @@ Each menu entry is also a command.
 | `vanguard shortcut [on\|off]` | shortcut on this computer |
 | `vanguard computers` | my computers: those where the key ran a check, their grade and their remaining problems |
 | `vanguard self-update` | update Vanguard on this computer, from the key or from GitHub (versions signed by the author) |
+| `vanguard uninstall [--list]` | remove Vanguard from this computer: what it placed, found, shown then checked (data kept unless you agree twice, key never touched); `--list`: without removing anything |
 | `vanguard specs [--json]` | computer specs; `--json` without the serial numbers |
 | `vanguard copy-files [destination]` | copy my files to an external disk, checked copy |
 | `vanguard check-drive [folder]` | check my drive: real capacity, speeds, bad blocks (writes into the free space after your consent, then erases) |
@@ -635,7 +641,7 @@ Each menu entry is also a command.
 `memoire`, `isoler`, `courriel`, `motdepasse`, `navigateurs`, `sortantes`, `distance`, `lien`, `verifier-fichier`,
 `camera-micro`, `acces`, `quarantaine`, `conteneurs`, `parametres`, `blocage`, `sauvegarder`, `restaurer`, `nommer`,
 `lenteur`, `demarrage`, `fiche`, `copier-fichiers`, `verifier-copie`, `verifier-sauvegarde`, `verifier-cle`,
-`a-laisser`, `changements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`, `regles`, `traces`,
+`a-laisser`, `changements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`, `desinstaller`, `regles`, `traces`,
 `depanner`, `proche`, `verifier-moi`, `labo`, `extensions`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),

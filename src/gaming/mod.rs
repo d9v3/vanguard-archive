@@ -318,6 +318,16 @@ pub(crate) fn remettre(
     annulation::sauver(&notes);
 }
 
+/// Le nombre de réglages pour jouer changés par Vanguard, à remettre comme avant (choix 3 du menu). macOS n'a pas
+/// cette liste : rien à y remettre d'ici.
+pub(crate) fn reglages_notes() -> usize {
+    if cfg!(target_os = "macos") {
+        0
+    } else {
+        annulation::charger().reglages.len()
+    }
+}
+
 pub fn menu() {
     #[cfg(windows)]
     windows::menu();

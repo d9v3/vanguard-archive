@@ -89,7 +89,8 @@ A security flaw? No public issue or pull request: report it privately, see [SECU
 | `src/lenteur.rs`, `src/fiche.rs` | why it is slow (two-sample snapshot, startup); computer specs |
 | `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites; check a copy (restore test) |
 | `src/verifier_cle.rs` | check my drive: real capacity, speeds and bad blocks, written into the free space and read back without cache, then erased |
-| `src/passage.rs` | takeover of what a version from before the name change left (data, timers, shortcut, firewall rules); to be removed at 1.0 |
+| `src/passage.rs` | takeover of what a version from before the name change left (data, timers, shortcut, firewall rules), leftovers listed for the uninstall; to be removed at 1.0 |
+| `src/desinstaller.rs` | remove Vanguard from a computer: what it placed, recomputed without a register (with passage.rs for earlier names), shown, checked; data after a second consent |
 | `src/ordinateurs.rs` | my computers: each computer's visit noted on VANGUARDLOG (categories and levels only) |
 | `src/plugins/` | extensions: plugins (`mod.rs`: safe folder, approval by SHA-256, checked copy then run, `manifeste.rs`: plugin.toml read by a bounded home-made parser, `archive.rs`: .zip unpacked in Rust), lab (`labo.rs`), findings protocol (`sortie.rs`), restrictions switch (`reglages.rs`), menus (`menu.rs`); see the Extensions section |
 | `extensions/` | Rust library to write a plugin (`sdk/`, crate `vanguard-extension`, outside the workspace) and examples (`exemples/`); how-to (in French): `extensions/LISEZMOI.md` |

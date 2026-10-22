@@ -7,6 +7,25 @@ une seule publication par jour, qui regroupe le travail de la journée ; le 21 o
 la 0.84 au soir, qui reprend la 0.83 livrée juste avant elle. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## Prochaine version
+
+- **Retirer Vanguard de cet ordinateur.** `vanguard desinstaller` (menu Données) retrouve tout ce que Vanguard a posé
+  ici, sans registre : la surveillance horaire, l'entretien du mois, la sauvegarde automatique, les fichiers-pièges, le
+  raccourci et son icône, la copie du programme, et ce qu'une version d'avant le changement de nom avait laissé. Tout
+  est montré avec ce qui sera fait, puis coché ; le dossier de données (carnet des appareils, historique, apprentissage,
+  quarantaine) n'est jamais coché d'office et demande un second accord. Les changements faits sur le système se défont
+  d'abord par leurs outils, ou sont dits avec la commande qui les défait ; la clé USB n'est jamais touchée. À la fin :
+  ce qui est retiré, gardé, et ce qui a échoué. Sans droits d'administrateur.
+- **Raccourci retiré avec son icône** (Linux) : `raccourci off` laissait l'icône ; elle part aussi, si c'est bien celle
+  de Vanguard.
+- **Une surveillance qui ne tourne plus est dite.** Le bilan vérifie que le programme lancé par la surveillance horaire
+  et par l'entretien du mois existe encore (et rsync pour la sauvegarde), pas seulement la tâche, et dit comment la
+  remettre.
+- **Passes manquées rattrapées.** Activée maintenant, la surveillance rattrape sous Windows une heure manquée
+  (ordinateur éteint ou en veille) et passe cinq minutes après l'ouverture de session ; sous macOS, dès l'ouverture de
+  session. Une surveillance déjà en place n'est pas changée en silence : le bilan la dit « d'une version d'avant », et
+  `vanguard surveillance on` la met à jour.
+
 ## 22 octobre 2026 : version 0.84.1
 
 - **Serveurs d'IA ouverts au réseau, vus aussi sur Mac.** La règle qui repère un serveur d'IA local (Ollama, LM Studio,

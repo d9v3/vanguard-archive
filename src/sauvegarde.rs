@@ -21,10 +21,8 @@ use crate::ui::*;
 const DOSSIER: &str = "Sauvegarde-Vanguard";
 /// Les unités systemd posées par Vanguard (le nom contient « sauvegarde » : le bilan les reconnaît comme une vraie
 /// sauvegarde).
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const TIMER: &str = "vanguard-sauvegarde.timer";
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const SERVICE: &str = "vanguard-sauvegarde.service";
+pub(crate) const TIMER: &str = "vanguard-sauvegarde.timer";
+pub(crate) const SERVICE: &str = "vanguard-sauvegarde.service";
 /// L'heure du passage quotidien ; l'ordinateur éteint à cette heure-là, le passage se fait au prochain démarrage.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const HEURE: &str = "12:00:00";
@@ -268,7 +266,7 @@ fn sans_liens(systeme: &str) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn dossier_unites() -> PathBuf {
+pub(crate) fn dossier_unites() -> PathBuf {
     let maison = crate::nettoyer::maison();
     std::env::var_os("XDG_CONFIG_HOME")
         .map_or_else(|| maison.join(".config"), PathBuf::from)
@@ -454,16 +452,101 @@ fn historique_des_fichiers() -> Constat {
     }
 }
 
-/// Au bilan : Windows seulement (Linux et macOS ont déjà leur vérification des sauvegardes).
+/// Au bilan : l'Historique des fichiers sous Windows ; sous Linux, la minuterie rsync posée par Vanguard lance-t-elle
+/// encore un rsync qui existe (Linux et macOS ont déjà, ailleurs, leur vérification des sauvegardes).
 pub fn constats() -> Vec<Constat> {
     #[cfg(windows)]
     {
         vec![historique_des_fichiers()]
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        rsync_disparu().into_iter().collect()
+    }
+    #[cfg(target_os = "macos")]
     {
         Vec::new()
     }
+}
+
+/// La minuterie rsync de Vanguard en place, mais rsync parti (paquet désinstallé) : elle échoue chaque jour en silence.
+#[cfg(target_os = "linux")]
+fn rsync_disparu() -> Option<Constat> {
+    let Some(MiseEnPlace::Systemd { .. }) = charger_de(&fichier_notes()).mise_en_place else {
+        return None;
+    };
+    let texte = std::fs::read_to_string(dossier_unites().join(SERVICE)).ok()?;
+    let rsync = crate::reseau::surveillance::programme_d_une_unite(&texte)?;
+    juger_rsync(&rsync, rsync.is_file())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn juger_rsync(rsync: &Path, existe: bool) -> Option<Constat> {
+    let montre = chemin_affichable(rsync);
+    (!existe).then(|| {
+        crate::machine::alerte(
+            "Sauvegardes",
+            crate::risk::Niveau::Moyen,
+            trf!(
+                "La sauvegarde automatique lance {montre}, qui n'existe plus : elle ne copie plus rien.",
+                "The automatic backup starts {montre}, which no longer exists: it copies nothing any more."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Réinstaller rsync, ou l'annuler puis la remettre : « vanguard sauvegarde-auto »",
+                "Reinstall rsync, or undo it and set it up again: “vanguard auto-backup”"
+            ),
+            &[],
+        )
+    })
+}
+
+/// Ce que Vanguard a mis en place, d'après la note du dossier de données `donnees`.
+pub(crate) fn mise_en_place_de(donnees: &Path) -> Option<MiseEnPlace> {
+    charger_de(&donnees.join("sauvegarde.json")).mise_en_place
+}
+
+/// Retire ce que Vanguard a mis en place, sans question (la désinstallation l'a montré et fait accepter), puis oublie
+/// la note ; elle reste si une étape a échoué, pour réessayer.
+pub(crate) fn annuler_sans_question(m: &MiseEnPlace) -> bool {
+    let ok = annuler_mise_en_place(m);
+    if ok {
+        let _ = ecrire_dans(&fichier_notes(), &Notes::default());
+    }
+    ok
+}
+
+/// Les unités de la sauvegarde trouvées sans note (une note perdue) : retirées par leur nom exact, minuterie arrêtée.
+/// Dit si systemctl n'a pas répondu.
+pub(crate) fn retirer_sans_note(fichiers: &[PathBuf]) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let arretee = crate::reseau::surveillance::reussit("systemctl", &["--user", "disable", "--now", TIMER]);
+    #[cfg(not(target_os = "linux"))]
+    let arretee = false;
+    let mut echecs = Vec::new();
+    for f in fichiers {
+        if let Err(e) = std::fs::remove_file(f)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            echecs.push(format!("{} ({e})", chemin_affichable(f)));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    let recharge = crate::reseau::surveillance::reussit("systemctl", &["--user", "daemon-reload"]);
+    #[cfg(not(target_os = "linux"))]
+    let recharge = false;
+    if !echecs.is_empty() {
+        return Err(trf!("non retiré : {}", "not removed: {}", echecs.join(", ")));
+    }
+    if !(arretee && recharge) {
+        return Err(tr!(
+            "fichiers retirés, mais systemctl --user n'a pas répondu : la minuterie peut rester chargée jusqu'à la prochaine ouverture de session, où elle disparaît",
+            "files removed, but systemctl --user did not answer: the timer may stay loaded until the next sign-in, where it goes away"
+        )
+        .to_string());
+    }
+    Ok(())
 }
 
 // ───────────────────────────── Le menu ─────────────────────────────
@@ -1666,6 +1749,15 @@ mod tests {
         assert_eq!(age_filetime_jours(filetime, unix_2026_10_18 + 3 * 86_400), 3);
         assert_eq!(age_filetime_jours(filetime, unix_2026_10_18), 0);
         assert_eq!(age_filetime_jours(0, unix_2026_10_18), unix_2026_10_18 / 86_400);
+    }
+
+    /// La minuterie rsync de Vanguard qui lance un rsync parti : dit, avec la correction ; rsync là, rien à dire.
+    #[test]
+    fn rsync_parti_dit_au_bilan() {
+        let c = juger_rsync(Path::new("/usr/bin/rsync"), false).expect("constat");
+        assert_eq!(c.probleme, Some(crate::risk::Niveau::Moyen));
+        assert!(c.message.contains("/usr/bin/rsync") && !c.correctif.unwrap().automatique);
+        assert!(juger_rsync(Path::new("/usr/bin/rsync"), true).is_none());
     }
 
     #[test]

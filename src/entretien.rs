@@ -13,12 +13,11 @@ use crate::reseau::surveillance::{cle_alerte, executable};
 use crate::risk::Niveau;
 use crate::ui::*;
 
-#[cfg(target_os = "linux")]
-const NOM: &str = "vanguard-entretien";
-#[cfg(target_os = "macos")]
-const AGENT_MACOS: &str = "com.vanguard.entretien";
-#[cfg(windows)]
-const TACHE_WINDOWS: &str = "vanguard - entretien du mois";
+/// Les noms de ce que l'entretien pose sur chaque système (unités systemd, agent launchd, tâche du Planificateur) :
+/// connus partout, la désinstallation les cherche par leur nom exact.
+pub(crate) const NOM: &str = "vanguard-entretien";
+pub(crate) const AGENT_MACOS: &str = "com.vanguard.entretien";
+pub(crate) const TACHE_WINDOWS: &str = "vanguard - entretien du mois";
 
 /// Catégories de l'audit qui disent « des mises à jour attendent ».
 #[rustfmt::skip] // une ligne, que rustfmt étalerait sur huit
@@ -226,6 +225,44 @@ pub fn active() -> bool {
     ETAT.load(Ordering::Relaxed) == 2
 }
 
+/// Au bilan, si l'entretien est planifié : le programme qu'il lance existe-t-il encore ? Une tâche qui lance un
+/// programme effacé est là sans plus rien faire.
+pub fn constat() -> Option<crate::machine::Constat> {
+    use crate::reseau::surveillance::{Planifie, juger_tache, lire_planifie};
+    // Pas planifié (ou le planificateur muet) : rien à dire, plutôt qu'un « non vérifié » pour un entretien absent.
+    if !active() {
+        return None;
+    }
+    juger_tache(
+        Planifie::Entretien,
+        &lire_planifie(Planifie::Entretien),
+        std::path::Path::is_file,
+    )
+}
+
+/// Retire l'entretien sans rien demander (la désinstallation l'a déjà montré et fait accepter) ; rend la raison d'un
+/// échec.
+pub(crate) fn retirer() -> Result<(), String> {
+    let ok = desinstaller();
+    ETAT.store(0, Ordering::Relaxed);
+    if ok {
+        return Ok(());
+    }
+    Err(if cfg!(windows) {
+        tr!(
+            "PowerShell n'a pas pu retirer la tâche : « vanguard entretien off » pour réessayer",
+            "PowerShell could not remove the task: “vanguard maintenance off” to try again"
+        )
+        .to_string()
+    } else {
+        tr!(
+            "fichiers retirés, mais systemctl --user n'a pas répondu : la minuterie peut rester chargée jusqu'à la prochaine ouverture de session, où elle disparaît",
+            "files removed, but systemctl --user did not answer: the timer may stay loaded until the next sign-in, where it goes away"
+        )
+        .to_string()
+    })
+}
+
 /// Reprise d'un entretien actif sous l'ancien nom (`passage`).
 pub(crate) fn reprendre(exe: &str) -> bool {
     let ok = installer(exe);
@@ -268,7 +305,7 @@ fn unites_systemd(exe: &str) -> (String, &'static str) {
 
 #[cfg(target_os = "linux")]
 fn dossier_systemd() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user")
+    crate::reseau::surveillance::dossier_unites_maison()
 }
 
 #[cfg(target_os = "linux")]
@@ -362,8 +399,10 @@ fn installer(exe: &str) -> bool {
 
 #[cfg(windows)]
 fn desinstaller() -> bool {
+    // Arrêté d'abord : un examen en cours n'écrit plus dans le dossier de données qu'une désinstallation efface.
     crate::machine::windows::ps(&format!(
-        "Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
+        "Stop-ScheduledTask -TaskName '{TACHE_WINDOWS}' -ErrorAction SilentlyContinue; \
+         Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
     ))
     .is_some()
 }

@@ -6,6 +6,7 @@
 //! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows), agent launchd
 //! (macOS).
 
+use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Command;
 
@@ -15,8 +16,12 @@ use crate::reseau::{self, Options, upnp};
 use crate::risk::Niveau;
 use crate::ui::*;
 
-#[cfg(target_os = "linux")]
-const NOM: &str = "vanguard-surveillance";
+/// Les noms de ce que la surveillance pose sur chaque système : les unités systemd (Linux), l'agent launchd (macOS),
+/// la tâche du Planificateur (Windows). Connus partout : la désinstallation les cherche par leur nom exact.
+pub(crate) const NOM: &str = "vanguard-surveillance";
+pub(crate) const AGENT_MACOS: &str = "com.vanguard.surveillance";
+/// Nom lisible de la tâche dans le Planificateur de tâches Windows.
+pub(crate) const TACHE_WINDOWS: &str = "vanguard - surveillance du reseau";
 
 /// La commande réussit-elle ? Avec un délai : le menu demande l'état de la surveillance à chaque affichage, et un
 /// bus de session muet (systemctl --user) le figerait.
@@ -585,11 +590,21 @@ fn installee() -> bool {
     return reussit("launchctl", &["print", &format!("{}/{AGENT_MACOS}", domaine_launchd())]);
 }
 
-/// Au bilan : la surveillance voulue a disparu (minuterie ou tâche retirée, ou désactivée). Constat et proposition,
-/// rien de plus : Vanguard ne s'accroche pas.
+/// Au bilan : la surveillance voulue a disparu (minuterie ou tâche retirée, ou désactivée), ou elle est là mais le
+/// programme qu'elle lance n'existe plus, ou elle a été posée par une version d'avant. Constat et proposition, rien de
+/// plus : Vanguard ne s'accroche pas, et une tâche acceptée n'est jamais changée en silence.
 pub fn constat() -> Option<crate::machine::Constat> {
-    let voulue = fichier_voulue().is_file();
-    juger_disparition(voulue, voulue && installee())
+    if !fichier_voulue().is_file() {
+        return None;
+    }
+    if !installee() {
+        return juger_disparition(true, false);
+    }
+    juger_tache(
+        Planifie::Surveillance,
+        &lire_planifie(Planifie::Surveillance),
+        Path::is_file,
+    )
 }
 
 fn juger_disparition(voulue: bool, installee: bool) -> Option<crate::machine::Constat> {
@@ -612,17 +627,211 @@ fn juger_disparition(voulue: bool, installee: bool) -> Option<crate::machine::Co
     })
 }
 
-/// Reprise d'une surveillance active sous l'ancien nom (`passage`) : la minuterie recréée, le choix noté.
+/// Ce que Vanguard planifie : la surveillance horaire ou l'entretien du mois.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Planifie {
+    Surveillance,
+    Entretien,
+}
+
+impl Planifie {
+    /// (unités systemd, agent launchd, tâche du Planificateur).
+    pub(crate) fn noms(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Planifie::Surveillance => (NOM, AGENT_MACOS, TACHE_WINDOWS),
+            Planifie::Entretien => (
+                crate::entretien::NOM,
+                crate::entretien::AGENT_MACOS,
+                crate::entretien::TACHE_WINDOWS,
+            ),
+        }
+    }
+}
+
+/// Ce que le planificateur du système dit d'une tâche de Vanguard : absente, le programme qu'elle lance (et si elle
+/// a les réglages d'aujourd'hui), ou illisible.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Lecture {
+    Absente,
+    Lue { programme: PathBuf, a_jour: bool },
+    Illisible(String),
+}
+
+/// Lit la tâche planifiée `quoi` de cet ordinateur : le programme qu'elle lance. Linux : la ligne ExecStart= du
+/// service (le minuteur a déjà OnBootSec et Persistent : toujours à jour) ; macOS : le plist de l'agent, et son
+/// RunAtLoad ; Windows : le planificateur lui-même, PowerShell en secours, et ses deux réglages de rattrapage.
+pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
+    let (nom, agent, tache) = quoi.noms();
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (agent, tache);
+        let chemin = dossier_unites_maison().join(format!("{nom}.service"));
+        match std::fs::read_to_string(&chemin) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Lecture::Absente,
+            Err(e) => Lecture::Illisible(e.to_string()),
+            Ok(t) => programme_d_une_unite(&t).map_or_else(
+                || Lecture::Illisible(tr!("ligne ExecStart= illisible", "unreadable ExecStart= line").to_string()),
+                |programme| Lecture::Lue {
+                    programme,
+                    a_jour: true,
+                },
+            ),
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (nom, tache);
+        match std::fs::read(plist_agent_nomme(agent)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Lecture::Absente,
+            Err(e) => Lecture::Illisible(e.to_string()),
+            Ok(o) => lire_plist(&o).map_or_else(
+                || Lecture::Illisible(tr!("plist illisible", "unreadable plist").to_string()),
+                |(programme, au_lancement)| Lecture::Lue {
+                    programme,
+                    a_jour: au_lancement,
+                },
+            ),
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = (nom, agent);
+        match definitions_windows(&[tache]) {
+            None => Lecture::Illisible(tr!("planificateur non lu", "task scheduler not read").to_string()),
+            Some(lues) => {
+                lues.into_iter()
+                    .find(|(n, _)| n.eq_ignore_ascii_case(tache))
+                    .map_or(Lecture::Absente, |(_, d)| Lecture::Lue {
+                        programme: PathBuf::from(d.programme.trim().trim_matches('"')),
+                        a_jour: d.des_que_possible && d.a_l_ouverture,
+                    })
+            }
+        }
+    }
+}
+
+/// Le constat d'une tâche planifiée lue : rien si elle est absente (la disparition se juge à part) ou si tout va bien ;
+/// une alerte si le programme qu'elle lance n'existe plus (`existe`) : la tâche est là, mais elle ne tourne plus ; une
+/// information si la surveillance a été posée par une version d'avant ; « non vérifié » si rien n'a pu être lu.
+pub(crate) fn juger_tache(quoi: Planifie, l: &Lecture, existe: impl Fn(&Path) -> bool) -> Option<Constat> {
+    let (programme, a_jour) = match l {
+        Lecture::Absente => return None,
+        Lecture::Illisible(e) => {
+            return Some(crate::machine::impossible(
+                "Surveillance",
+                &trf!(
+                    "programme lancé par la tâche non lu : {e}",
+                    "program started by the task not read: {e}"
+                ),
+            ));
+        }
+        Lecture::Lue { programme, a_jour } => (programme, *a_jour),
+    };
+    // Un nom sans chemin (« vanguard », quand le programme n'a pas pu se situer) se cherche dans le PATH au lancement :
+    // d'ici, rien ne le confirme, et rien ne le dément.
+    if !programme.is_absolute() {
+        return Some(crate::machine::impossible(
+            "Surveillance",
+            &trf!(
+                "programme lancé par la tâche sans chemin : {}",
+                "program started by the task without a path: {}",
+                programme.display()
+            ),
+        ));
+    }
+    let chemin = chemin_affichable(programme);
+    if !existe(programme) {
+        return Some(match quoi {
+            Planifie::Surveillance => crate::machine::alerte(
+                "Surveillance",
+                Niveau::Eleve,
+                trf!(
+                    "La surveillance horaire est planifiée, mais le programme qu'elle lance n'existe plus ({chemin}) : elle ne tourne plus. Un dossier effacé, un antivirus, ou un logiciel malveillant qui coupe d'abord ce qui le surveille, peuvent l'avoir retiré.",
+                    "The hourly monitoring is scheduled, but the program it starts no longer exists ({chemin}): it no longer runs. A deleted folder, an antivirus, or malware that first cuts what watches it may have removed it."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "La remettre : « vanguard surveillance on » (Vanguard est recopié sur cet ordinateur et la tâche refaite) ; si tu n'en veux plus, « vanguard surveillance off »",
+                    "Turn it back on: “vanguard monitor on” (Vanguard is copied onto this computer again and the task redone); if you no longer want it, “vanguard monitor off”"
+                ),
+                &[],
+            ),
+            Planifie::Entretien => crate::machine::alerte(
+                "Surveillance",
+                Niveau::Moyen,
+                trf!(
+                    "L'entretien du mois est planifié, mais le programme qu'il lance n'existe plus ({chemin}) : il ne tourne plus.",
+                    "The monthly check-up is scheduled, but the program it starts no longer exists ({chemin}): it no longer runs."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "Le remettre : « vanguard entretien on » ; si tu n'en veux plus, « vanguard entretien off »",
+                    "Turn it back on: “vanguard maintenance on”; if you no longer want it, “vanguard maintenance off”"
+                ),
+                &[],
+            ),
+        });
+    }
+    // L'entretien a déjà son rattrapage (-StartWhenAvailable) ; et pas de RunAtLoad pour lui : il notifierait à
+    // chaque ouverture de session.
+    if a_jour || quoi == Planifie::Entretien {
+        return None;
+    }
+    let message = if cfg!(target_os = "macos") {
+        tr!(
+            "La surveillance horaire a été planifiée par une version d'avant : elle ne passe pas à l'ouverture de session, la première passe attend une heure.",
+            "The hourly monitoring was scheduled by an earlier version: it does not run at sign-in; the first run waits an hour."
+        )
+    } else {
+        tr!(
+            "La surveillance horaire a été planifiée par une version d'avant : elle ne rattrape pas une heure manquée (ordinateur éteint ou en veille) et ne passe pas à l'ouverture de session.",
+            "The hourly monitoring was scheduled by an earlier version: it does not catch up a missed hour (computer off or asleep) and does not run at sign-in."
+        )
+    };
+    Some(
+        crate::machine::alerte("Surveillance", Niveau::Info, message).manuel(
+            tr!(
+                "La mettre à jour, si tu veux : « vanguard surveillance on » refait la tâche avec ces réglages ; rien d'autre ne change",
+                "Update it if you want: “vanguard monitor on” redoes the task with these settings; nothing else changes"
+            ),
+            &[],
+        ),
+    )
+}
+
+/// Reprise d'une surveillance active sous l'ancien nom (`passage`) : la minuterie recréée avec ses réglages d'alors
+/// (acceptés tels quels), le choix noté.
 pub(crate) fn reprendre(exe: &str) -> bool {
-    let ok = installer(exe);
+    let ok = installer(exe, Reglages::DAvant);
     if ok {
         noter_voulue(true);
     }
     ok
 }
 
+/// Les réglages d'une tâche de surveillance : ceux d'aujourd'hui (une heure manquée rattrapée, une passe à
+/// l'ouverture de session), ou ceux d'une version d'avant, pour une tâche déjà acceptée qu'on reprend sans la changer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Reglages {
+    Aujourdhui,
+    DAvant,
+}
+
 pub fn activer(oui: bool) {
-    let reussi = if oui { installer(&executable()) } else { desinstaller() };
+    // Une tâche d'une version d'avant que la personne réactive : elle est refaite avec les réglages d'aujourd'hui, et
+    // c'est dit.
+    let d_avant = oui
+        && matches!(
+            lire_planifie(Planifie::Surveillance),
+            Lecture::Lue { a_jour: false, .. }
+        );
+    let reussi = if oui {
+        installer(&executable(), Reglages::Aujourdhui)
+    } else {
+        desinstaller()
+    };
     if !oui || reussi {
         noter_voulue(oui);
     }
@@ -632,6 +841,12 @@ pub fn activer(oui: bool) {
                 "  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive.",
                 "  {VERT}✔{RESET} Monitoring on: scan every hour, notification if an unknown device shows up."
             );
+            if d_avant {
+                trp!(
+                    "  La tâche d'une version d'avant est remplacée par celle d'aujourd'hui.",
+                    "  The task from an earlier version is replaced with today's."
+                );
+            }
             // Coupée, chaque passe s'arrête au début (`passe`) : « toutes les heures » ne vaut qu'à la reprise.
             crate::protection::temps_reel::dire_si_coupee(crate::protection::temps_reel::Ou::Surveillance);
         }
@@ -643,10 +858,39 @@ pub fn activer(oui: bool) {
     }
 }
 
+/// Retire la surveillance sans rien demander (la désinstallation l'a déjà montrée et fait accepter), et l'oublie.
+/// Rend la raison d'un échec, jamais un succès supposé.
+pub(crate) fn retirer() -> Result<(), String> {
+    let ok = desinstaller();
+    noter_voulue(false);
+    if ok {
+        return Ok(());
+    }
+    Err(if cfg!(windows) {
+        tr!(
+            "PowerShell n'a pas pu retirer la tâche : « vanguard surveillance off » pour réessayer",
+            "PowerShell could not remove the task: “vanguard monitor off” to try again"
+        )
+        .to_string()
+    } else {
+        tr!(
+            "fichiers retirés, mais systemctl --user n'a pas répondu : la minuterie peut rester chargée jusqu'à la prochaine ouverture de session, où elle disparaît",
+            "files removed, but systemctl --user did not answer: the timer may stay loaded until the next sign-in, where it goes away"
+        )
+        .to_string()
+    })
+}
+
+/// Le dossier des unités systemd de l'utilisateur où Vanguard pose la surveillance et l'entretien.
 #[cfg(target_os = "linux")]
-fn installer(exe: &str) -> bool {
-    let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
-    let _ = std::fs::create_dir_all(&dossier);
+pub(crate) fn dossier_unites_maison() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user")
+}
+
+/// Les deux unités systemd : le service, puis le minuteur (cinq minutes après le démarrage, puis toutes les heures ;
+/// une heure manquée, ordinateur éteint, est rattrapée).
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn unites_systemd(exe: &str) -> (String, &'static str) {
     // Chemin entre guillemets (un dossier personnel peut contenir une espace), « % » doublé (spécificateurs de
     // systemd).
     let exe = format!("\"{}\"", exe.replace('%', "%%").replace('"', "\\\""));
@@ -658,6 +902,50 @@ fn installer(exe: &str) -> bool {
         "[Unit]\nDescription=Vanguard : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
         "[Unit]\nDescription=Vanguard: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
     );
+    (service, timer)
+}
+
+/// Le programme que lance une unité systemd : le premier mot de sa ligne ExecStart=.
+pub(crate) fn programme_d_une_unite(texte: &str) -> Option<PathBuf> {
+    premier_mot_cite(texte.lines().find_map(|l| l.strip_prefix("ExecStart="))?)
+}
+
+/// Le premier mot d'une ligne de commande d'unité systemd ou de fichier .desktop. Entre guillemets, « \" » et « \\ »
+/// redeviennent « " » et « \ » ; partout, « %% » redevient « % » : l'inverse de ce qu'écrivent les unités de Vanguard,
+/// `sauvegarde::citer_systemd` et le raccourci.
+pub(crate) fn premier_mot_cite(valeur: &str) -> Option<PathBuf> {
+    let v = valeur.trim_start();
+    let brut = if let Some(reste) = v.strip_prefix('"') {
+        let mut mot = String::new();
+        let mut car = reste.chars();
+        loop {
+            match car.next()? {
+                '"' => break,
+                '\\' => match car.next()? {
+                    c @ ('"' | '\\') => mot.push(c),
+                    c => {
+                        mot.push('\\');
+                        mot.push(c);
+                    }
+                },
+                c => mot.push(c),
+            }
+        }
+        mot
+    } else {
+        v.split_whitespace().next()?.to_string()
+    };
+    let mot = brut.replace("%%", "%");
+    (!mot.is_empty()).then(|| PathBuf::from(mot))
+}
+
+#[cfg(target_os = "linux")]
+fn installer(exe: &str, r: Reglages) -> bool {
+    // Le minuteur a toujours eu OnBootSec et Persistent : rien ne distingue une tâche d'avant sous Linux.
+    let _ = r;
+    let dossier = dossier_unites_maison();
+    let _ = std::fs::create_dir_all(&dossier);
+    let (service, timer) = unites_systemd(exe);
     let _ = std::fs::write(dossier.join(format!("{NOM}.service")), service);
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
     reussit("systemctl", &["--user", "daemon-reload"])
@@ -671,16 +959,12 @@ fn desinstaller() -> bool {
 
 #[cfg(target_os = "linux")]
 fn retirer_minuterie(nom: &str) -> bool {
-    let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
+    let dossier = dossier_unites_maison();
     reussit("systemctl", &["--user", "disable", "--now", &format!("{nom}.timer")]);
     let _ = std::fs::remove_file(dossier.join(format!("{nom}.service")));
     let _ = std::fs::remove_file(dossier.join(format!("{nom}.timer")));
     reussit("systemctl", &["--user", "daemon-reload"])
 }
-
-/// Agent launchd de la surveillance sous macOS (~/Library/LaunchAgents/<nom>.plist).
-#[cfg(target_os = "macos")]
-const AGENT_MACOS: &str = "com.vanguard.surveillance";
 
 #[cfg(target_os = "macos")]
 fn plist_agent_nomme(nom: &str) -> std::path::PathBuf {
@@ -701,10 +985,15 @@ pub(crate) fn domaine_launchd() -> String {
     format!("gui/{uid}")
 }
 
-/// Agent launchd : relancé toutes les heures (StartInterval), et 5 minutes après l'ouverture de session.
+/// Agent launchd : relancé toutes les heures (StartInterval), et dès l'ouverture de session (RunAtLoad).
 #[cfg(any(target_os = "macos", test))]
-fn plist_surveillance(exe: &str, nom: &str) -> String {
+fn plist_surveillance(exe: &str, nom: &str, r: Reglages) -> String {
     let exe = exe.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let au_lancement = if r == Reglages::Aujourdhui {
+        "\t<key>RunAtLoad</key>\n\t<true/>\n"
+    } else {
+        ""
+    };
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
@@ -712,17 +1001,27 @@ fn plist_surveillance(exe: &str, nom: &str) -> String {
          \t<key>Label</key>\n\t<string>{nom}</string>\n\
          \t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>{exe}</string>\n\t\t<string>surveiller</string>\n\t</array>\n\
          \t<key>StartInterval</key>\n\t<integer>3600</integer>\n\
+         {au_lancement}\
          \t<key>LowPriorityIO</key>\n\t<true/>\n\
          \t<key>Nice</key>\n\t<integer>10</integer>\n\
          </dict>\n</plist>\n"
     )
 }
 
+/// Le programme que lance un agent launchd (le premier de ProgramArguments), et s'il passe à l'ouverture de session.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn lire_plist(octets: &[u8]) -> Option<(PathBuf, bool)> {
+    let v = crate::plist::lire(octets)?;
+    let programme = v.cle("ProgramArguments")?.tableau()?.first()?.texte()?;
+    let au_lancement = v.cle("RunAtLoad") == Some(&crate::plist::Valeur::Booleen(true));
+    Some((PathBuf::from(programme), au_lancement))
+}
+
 #[cfg(target_os = "macos")]
-fn installer(exe: &str) -> bool {
+fn installer(exe: &str, r: Reglages) -> bool {
     let plist = plist_agent();
     let _ = std::fs::create_dir_all(plist.parent().unwrap_or(&plist));
-    if std::fs::write(&plist, plist_surveillance(exe, AGENT_MACOS)).is_err() {
+    if std::fs::write(&plist, plist_surveillance(exe, AGENT_MACOS, r)).is_err() {
         return false;
     }
     let chemin = plist.display().to_string();
@@ -745,10 +1044,6 @@ fn desinstaller() -> bool {
     retirer_agent(&plist_agent());
     true
 }
-
-/// Nom lisible de la tâche dans le Planificateur de tâches Windows.
-#[cfg(windows)]
-const TACHE_WINDOWS: &str = "vanguard - surveillance du reseau";
 
 /// La tâche existe et n'est pas désactivée : une tâche désactivée ne surveille plus rien.
 #[cfg(windows)]
@@ -777,28 +1072,130 @@ pub(crate) fn tache_existe(noms: &[&str]) -> bool {
     .is_some_and(|s| s.trim() == "oui")
 }
 
+/// Ce que le Planificateur de Windows dit d'une tâche : le programme de sa première action, ses deux réglages de
+/// rattrapage (« dès que possible » après une heure manquée, un déclencheur à l'ouverture de session) et si elle est
+/// active.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Definition {
+    pub programme: String,
+    pub des_que_possible: bool,
+    pub a_l_ouverture: bool,
+    pub active: bool,
+}
+
+/// Les tâches nommées `noms` : le planificateur d'abord, PowerShell en secours ; `None` si aucun des deux ne répond.
 #[cfg(windows)]
-fn installer(exe: &str) -> bool {
-    use crate::machine::windows::ps;
+pub(crate) fn definitions_windows(noms: &[&str]) -> Option<Vec<(String, Definition)>> {
+    if let Some(lues) = crate::machine::windows::planificateur::definitions(noms) {
+        return Some(lues);
+    }
+    let liste = noms
+        .iter()
+        .map(|n| format!("'{}'", crate::commande::ps_texte(n)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sortie = crate::machine::windows::ps(&script_definitions(&liste))?;
+    Some(lire_definitions_ps(&sortie))
+}
+
+/// Le script de secours : une ligne « nom|programme|StartWhenAvailable|déclencheurs à l'ouverture|état » par tâche.
+#[cfg(any(windows, test))]
+fn script_definitions(liste: &str) -> String {
+    format!(
+        "Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -in @({liste}) }} | ForEach-Object {{ \
+         $o = @($_.Triggers | Where-Object {{ $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' }}).Count; \
+         \"$($_.TaskName)|$($_.Actions[0].Execute)|$($_.Settings.StartWhenAvailable)|$o|$($_.State)\" }}"
+    )
+}
+
+/// Les lignes du script de secours ; une ligne abîmée est sautée, jamais devinée.
+#[cfg(any(windows, test))]
+pub(crate) fn lire_definitions_ps(sortie: &str) -> Vec<(String, Definition)> {
+    sortie
+        .lines()
+        .filter_map(|l| {
+            let champs: Vec<&str> = l.trim().split('|').collect();
+            let [nom, programme, des_que_possible, ouverture, etat] = champs[..] else {
+                return None;
+            };
+            let des_que_possible = match des_que_possible {
+                "True" => true,
+                "False" => false,
+                _ => return None,
+            };
+            let ouverture = ouverture.parse::<u32>().ok()?;
+            (!nom.is_empty() && !etat.is_empty()).then(|| {
+                (
+                    nom.to_string(),
+                    Definition {
+                        programme: programme.to_string(),
+                        des_que_possible,
+                        a_l_ouverture: ouverture > 0,
+                        active: etat != "Disabled",
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+/// Le script qui pose la tâche. Aujourd'hui : rattrapée dès que possible après une heure manquée (ordinateur éteint
+/// ou en veille), et une passe cinq minutes après l'ouverture de session. Le déclencheur d'ouverture nomme le compte :
+/// sans lui, Windows demanderait l'administrateur ; s'il refuse quand même, la tâche est posée sans ce déclencheur, et
+/// le script le dit (« sans-ouverture »). Les réglages d'avant restent pour une tâche reprise telle qu'acceptée.
+#[cfg(any(windows, test))]
+fn script_tache(exe: &str, nom: &str, r: Reglages) -> String {
     let exe = crate::commande::ps_texte(exe);
-    // Tâche visible et décrite : on voit dans le Planificateur ce qu'elle fait et comment l'arrêter.
-    let script = trf!(
-        "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
-         $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
-         Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Scan du réseau local toutes les heures par Vanguard, notification si un appareil inconnu apparaît. Pour arrêter : vanguard surveillance off' | Out-Null",
-        "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
-         $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
-         Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Hourly local network scan by Vanguard, with a notification when an unknown device appears. To stop it: vanguard monitor off' | Out-Null"
-    );
-    ps(&script).is_some()
+    let nom = crate::commande::ps_texte(nom);
+    match r {
+        Reglages::DAvant => trf!(
+            "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
+             $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
+             Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger $t -Force \
+               -Description 'Scan du réseau local toutes les heures par Vanguard, notification si un appareil inconnu apparaît. Pour arrêter : vanguard surveillance off' | Out-Null",
+            "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
+             $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
+             Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger $t -Force \
+               -Description 'Hourly local network scan by Vanguard, with a notification when an unknown device appears. To stop it: vanguard monitor off' | Out-Null"
+        ),
+        Reglages::Aujourdhui => {
+            let description = tr!(
+                "Scan du réseau local toutes les heures par Vanguard, notification si un appareil inconnu apparaît, rattrapé au réveil et 5 minutes après l''ouverture de session. Pour arrêter : vanguard surveillance off",
+                "Hourly local network scan by Vanguard, with a notification when an unknown device appears, caught up after sleep and 5 minutes after sign-in. To stop it: vanguard monitor off"
+            );
+            format!(
+                "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
+                 $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
+                 $o = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name); $o.Delay = 'PT5M'; \
+                 $s = New-ScheduledTaskSettingsSet -StartWhenAvailable; \
+                 try {{ Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger @($t, $o) -Settings $s -Force -Description '{description}' -ErrorAction Stop | Out-Null }} \
+                 catch {{ Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger $t -Settings $s -Force -Description '{description}' | Out-Null; 'sans-ouverture' }}"
+            )
+        }
+    }
+}
+
+#[cfg(windows)]
+fn installer(exe: &str, r: Reglages) -> bool {
+    let Some(sortie) = crate::machine::windows::ps(&script_tache(exe, TACHE_WINDOWS, r)) else {
+        return false;
+    };
+    if sortie.lines().any(|l| l.trim() == "sans-ouverture") {
+        trp!(
+            "  Windows a refusé le passage à l'ouverture de session : la surveillance rattrape seulement les heures manquées.",
+            "  Windows refused the sign-in run: monitoring only catches up missed hours."
+        );
+    }
+    true
 }
 
 #[cfg(windows)]
 fn desinstaller() -> bool {
+    // Arrêtée d'abord : une passe en cours n'écrit plus dans le dossier de données qu'une désinstallation efface.
     crate::machine::windows::ps(&format!(
-        "Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
+        "Stop-ScheduledTask -TaskName '{TACHE_WINDOWS}' -ErrorAction SilentlyContinue; \
+         Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
     ))
     .is_some()
 }
@@ -833,13 +1230,164 @@ mod tests {
 
     #[test]
     fn agent_launchd() {
-        let p = plist_surveillance(
-            "/Users/a b/Library/Application Support/vanguard/bin/vanguard",
-            "com.vanguard.surveillance",
-        );
-        assert!(p.contains("<string>/Users/a b/Library/Application Support/vanguard/bin/vanguard</string>"));
+        let exe = "/Users/a b/Library/Application Support/vanguard & co/bin/<vanguard>";
+        let p = plist_surveillance(exe, "com.vanguard.surveillance", Reglages::Aujourdhui);
+        assert!(p.contains(
+            "<string>/Users/a b/Library/Application Support/vanguard &amp; co/bin/&lt;vanguard&gt;</string>"
+        ));
         assert!(p.contains("<key>StartInterval</key>\n\t<integer>3600</integer>"));
         assert!(p.contains("<string>surveiller</string>"));
+        assert!(p.contains("<key>RunAtLoad</key>\n\t<true/>"));
+        // Relu tel qu'écrit : le programme d'origine, et le passage à l'ouverture de session.
+        assert_eq!(lire_plist(p.as_bytes()), Some((PathBuf::from(exe), true)));
+        // Une tâche reprise d'une version d'avant garde ses réglages : sans RunAtLoad, et relue comme telle.
+        let avant = plist_surveillance(exe, "com.vanguard.surveillance", Reglages::DAvant);
+        assert!(!avant.contains("RunAtLoad"));
+        assert_eq!(lire_plist(avant.as_bytes()), Some((PathBuf::from(exe), false)));
+    }
+
+    #[test]
+    fn script_de_la_tache() {
+        let s = script_tache(
+            "C:\\Program Files\\L'outil\\vanguard.exe",
+            TACHE_WINDOWS,
+            Reglages::Aujourdhui,
+        );
+        for attendu in [
+            "-StartWhenAvailable",
+            "-AtLogOn -User",
+            "PT5M",
+            "-Trigger @($t, $o)",
+            "-Settings $s",
+            "catch {",
+            "'sans-ouverture'",
+            "-Argument 'surveiller'",
+            "-Execute 'C:\\Program Files\\L''outil\\vanguard.exe'",
+        ] {
+            assert!(s.contains(attendu), "{attendu} absent : {s}");
+        }
+        // Chaque chaîne entre apostrophes se ferme : leur nombre est pair (les doublées comptent deux).
+        assert_eq!(s.matches('\'').count() % 2, 0, "{s}");
+        // L'apostrophe typographique ferme aussi une chaîne PowerShell : doublée de même.
+        let t = script_tache(
+            "C:\\Users\\Zoé\\L’outil\\vanguard.exe",
+            TACHE_WINDOWS,
+            Reglages::Aujourdhui,
+        );
+        assert!(t.contains("-Execute 'C:\\Users\\Zoé\\L’’outil\\vanguard.exe'"), "{t}");
+        // Une tâche reprise d'une version d'avant : ses réglages d'alors, rien de neuf.
+        let avant = script_tache("C:\\vanguard.exe", TACHE_WINDOWS, Reglages::DAvant);
+        for absent in ["-StartWhenAvailable", "-AtLogOn", "PT5M", "catch", "-Settings"] {
+            assert!(!avant.contains(absent), "{absent} présent : {avant}");
+        }
+        assert!(avant.contains("-Argument 'surveiller'") && avant.contains(TACHE_WINDOWS));
+    }
+
+    #[test]
+    fn unites_et_programme_lu() {
+        let exe = "/home/a b/100%/van\"guard";
+        let (service, timer) = unites_systemd(exe);
+        assert!(
+            service.contains("ExecStart=\"/home/a b/100%%/van\\\"guard\" surveiller\n"),
+            "{service}"
+        );
+        assert!(timer.contains("OnBootSec=5min") && timer.contains("Persistent=true"));
+        // Aller-retour : le programme relu dans l'unité est celui qu'elle lance.
+        assert_eq!(programme_d_une_unite(&service), Some(PathBuf::from(exe)));
+        assert_eq!(programme_d_une_unite("[Service]\nType=oneshot\n"), None);
+        assert_eq!(
+            programme_d_une_unite("ExecStart=/usr/bin/vanguard surveiller\n"),
+            Some(PathBuf::from("/usr/bin/vanguard"))
+        );
+        // L'unité de la sauvegarde : rsync, écrit par citer_systemd.
+        let (_, sauvegarde) = crate::sauvegarde::unites(
+            Path::new("/usr/bin/rsync"),
+            Some(Path::new("/usr/bin/findmnt")),
+            Some("1234-ABCD"),
+            Path::new("/run/media/alice/Externe"),
+            Path::new("/run/media/alice/Externe/Sauvegarde-Vanguard/pc"),
+            &[PathBuf::from("/home/alice/Documents")],
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            programme_d_une_unite(&sauvegarde),
+            Some(PathBuf::from("/usr/bin/rsync"))
+        );
+    }
+
+    #[test]
+    fn programme_planifie_disparu_ou_d_avant() {
+        let lue = |a_jour| Lecture::Lue {
+            programme: PathBuf::from(if cfg!(windows) {
+                r"C:\vanguard\vanguard.exe"
+            } else {
+                "/opt/vanguard/vanguard"
+            }),
+            a_jour,
+        };
+        // Le programme parti : la tâche est là, mais ne tourne plus.
+        let c = juger_tache(Planifie::Surveillance, &lue(true), |_| false).expect("constat");
+        assert_eq!(c.probleme, Some(Niveau::Eleve));
+        assert!(c.verifie && !c.correctif.as_ref().unwrap().automatique);
+        assert!(
+            c.correctif.as_ref().unwrap().action.contains("surveillance on")
+                || c.correctif.as_ref().unwrap().action.contains("monitor on")
+        );
+        // Présent, posé par une version d'avant : une information, et la remise à jour proposée.
+        let c = juger_tache(Planifie::Surveillance, &lue(false), |_| true).expect("constat");
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        let action = &c.correctif.as_ref().unwrap().action;
+        assert!(
+            action.contains("surveillance on") || action.contains("monitor on"),
+            "{action}"
+        );
+        // Illisible : non vérifié, jamais compté comme sain.
+        let c = juger_tache(Planifie::Surveillance, &Lecture::Illisible("refus".into()), |_| true).expect("constat");
+        assert!(!c.verifie);
+        // Un nom sans chemin : non vérifié non plus.
+        let relatif = Lecture::Lue {
+            programme: PathBuf::from("vanguard"),
+            a_jour: true,
+        };
+        assert!(!juger_tache(Planifie::Surveillance, &relatif, |_| true).unwrap().verifie);
+        // Tout va bien, ou rien de planifié : rien à dire.
+        assert!(juger_tache(Planifie::Surveillance, &lue(true), |_| true).is_none());
+        assert!(juger_tache(Planifie::Surveillance, &Lecture::Absente, |_| false).is_none());
+        // L'entretien : moyen, et jamais « d'une version d'avant » (il a déjà son rattrapage).
+        let c = juger_tache(Planifie::Entretien, &lue(true), |_| false).expect("constat");
+        assert_eq!(c.probleme, Some(Niveau::Moyen));
+        assert!(c.message.contains("entretien") || c.message.contains("check-up"));
+        assert!(juger_tache(Planifie::Entretien, &lue(false), |_| true).is_none());
+    }
+
+    #[test]
+    fn definitions_lues_par_powershell() {
+        let sortie = "vanguard - surveillance du reseau|C:\\Users\\alice\\vanguard.exe|True|1|Ready\n\
+                      vanguard - entretien du mois|C:\\vanguard.exe|False|0|Disabled\n\
+                      abîmée|sans|champs\n\
+                      x|y|Peut-être|1|Ready\n";
+        let lues = lire_definitions_ps(sortie);
+        assert_eq!(lues.len(), 2, "{lues:?}");
+        assert_eq!(
+            lues[0],
+            (
+                "vanguard - surveillance du reseau".to_string(),
+                Definition {
+                    programme: "C:\\Users\\alice\\vanguard.exe".into(),
+                    des_que_possible: true,
+                    a_l_ouverture: true,
+                    active: true,
+                }
+            )
+        );
+        assert!(!lues[1].1.des_que_possible && !lues[1].1.a_l_ouverture && !lues[1].1.active);
+        // Le script de secours nomme les tâches et rend ces cinq champs.
+        let script = script_definitions("'a','b'");
+        assert!(script.contains("-in @('a','b')") && script.contains("MSFT_TaskLogonTrigger"));
+        assert!(
+            script.contains("$($_.TaskName)|$($_.Actions[0].Execute)|$($_.Settings.StartWhenAvailable)|$o|$($_.State)")
+        );
     }
 
     fn etat(score: u32, alertes: &[&str]) -> EtatMachine {

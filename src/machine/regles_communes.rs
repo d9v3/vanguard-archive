@@ -194,6 +194,15 @@ regle!(
 );
 
 regle!(
+    "COM-SUR-003",
+    Os::Tous,
+    702,
+    ("entretien du mois de cette machine", "monthly check-up of this machine"),
+    &[],
+    || crate::entretien::constat().into_iter().collect()
+);
+
+regle!(
     "COM-SUR-002",
     Os::Tous,
     701,

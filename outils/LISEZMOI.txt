@@ -134,6 +134,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Mettre Vanguard à jour : la copie de cet ordinateur, depuis la clé ou GitHub (d9v3/vanguard-officiel,
          chaque version signée par l'auteur et vérifiée)
        Vérifier ma sauvegarde : la sauvegarde rsync relue, des fichiers au hasard comparés à leur original
+       Retirer Vanguard de cet ordinateur : ce qu'il a posé, montré puis coché ; les données gardées sauf
+         second accord (vanguard desinstaller)
  10  Guide des commandes › les commandes utiles d'Omarchy, Arch, Fedora, Debian, Windows 11, macOS et de tous les
        systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose), avec des marches à suivre pas à
        pas (mettre à jour, réparer, réseau, faire de la place…). Les commandes paraissent au fil de
