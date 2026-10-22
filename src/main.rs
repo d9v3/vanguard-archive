@@ -144,6 +144,14 @@ enum Commande {
     /// Veilleur (Linux 6.6 et plus) : chaque programme lancé et chaque connexion fermée, vus sur le moment et jugés
     /// comme au bilan ; il observe et n'arrête rien. Coupé par défaut. Sans argument : son état, puis l'allumer ou le
     /// couper, après accord.
+    /// Sites dangereux bloqués par le fichier hosts : ceux d'URLhaus et les serveurs de commande de ThreatFox (clé
+    /// abuse.ch), après accord et avec les droits d'administrateur ; « off » les retire exactement. Sans argument :
+    /// leur état.
+    #[command(name = "sites-dangereux", visible_alias = "dangerous-sites")]
+    SitesDangereux {
+        #[arg(value_parser = ["on", "off"])]
+        etat: Option<String>,
+    },
     #[command(visible_alias = "watcher")]
     Veilleur {
         #[arg(value_parser = ["on", "off"])]
@@ -1729,6 +1737,9 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("surveillance", "Turn hourly network monitoring on or off (notification for unknown devices)"),
     ("tableau", "Monitoring dashboard in the browser: its state, the alerts day by day, the new devices and the \
                  suspicious connections. Local page, nothing is sent"),
+    ("sites-dangereux", "Dangerous sites blocked by the hosts file: URLhaus ones and ThreatFox command servers \
+                          (abuse.ch key), after your consent and with administrator rights; \"off\" removes them \
+                          exactly. Without argument: their state"),
     ("veilleur", "Watcher (Linux 6.6 and later): each program started and each connection closed, seen as they \
                    happen and judged as in the check; it observes and stops nothing. Off by default. Without \
                    argument: its state, then turning it on or off, after your consent"),
@@ -2015,6 +2026,7 @@ async fn main() {
         Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
         Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),
         Some(Commande::Veilleur { etat, servir }) => veilleur(etat.as_deref(), servir),
+        Some(Commande::SitesDangereux { etat }) => protection::sites_bloques::commande(etat.as_deref()),
         Some(Commande::Surveiller) => reseau::surveillance::surveiller().await,
         Some(Commande::Entretien { etat }) => match etat {
             Some(e) => entretien::activer(e == "on"),

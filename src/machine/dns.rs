@@ -542,6 +542,7 @@ pub fn dns() -> Vec<Constat> {
         Some(s) => {
             constats.push(constat_serveurs(&s));
             constats.extend(sans_blocage(&s));
+            constats.extend(crate::protection::sites_bloques::constat(CAT));
         }
         None => constats.push(super::impossible(
             CAT,

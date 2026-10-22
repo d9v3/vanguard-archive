@@ -27,6 +27,7 @@ pub(crate) mod outil;
 pub mod pieges;
 pub mod quarantaine;
 pub mod secrets_git;
+pub mod sites_bloques;
 pub mod sortantes;
 pub mod telechargement;
 pub(crate) mod temps_reel;

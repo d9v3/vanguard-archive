@@ -1030,6 +1030,15 @@ fn botnets() -> (Botnets, Vec<String>) {
     (botnets, absentes)
 }
 
+/// Les domaines des serveurs de commande de ThreatFox (export, avec la clé), pour le blocage par hosts. `Err` :
+/// pourquoi ils ne sont pas lus.
+pub(crate) fn domaines_de_commande() -> Result<Vec<String>, String> {
+    let (b, absentes) = botnets();
+    b.domaines
+        .map(|d| d.into_keys().collect())
+        .ok_or_else(|| absentes.join(" ; "))
+}
+
 /// Les serveurs de commande connus, pour qui n'a que l'adresse et le port d'une connexion (le veilleur, à la fin d'une
 /// connexion brève : le noyau n'y donne pas le programme).
 #[cfg(target_os = "linux")]

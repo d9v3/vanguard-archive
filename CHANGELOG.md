@@ -44,6 +44,12 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Un DNS qui ne bloque pas les sites dangereux est dit.** Le bilan le signale (information) et renvoie à « DNS le plus
   rapide », où le Bouclier canadien « Protégé » ou Quad9 se posent en un choix, annulable. Rien n'est dit quand un DNS
   protège déjà, ou quand rien ne permet de le savoir (NextDNS, Pi-hole).
+- **Sites dangereux bloqués** (`vanguard sites-dangereux on|off`). Les hôtes d'URLhaus et les domaines des serveurs
+  de commande de ThreatFox (clé abuse.ch) sont envoyés nulle part (0.0.0.0 et ::) par le fichier hosts, après accord
+  et avec les droits d'administrateur. Le bloc de Vanguard est entre deux marques datées : `off` le retire exactement,
+  le reste du fichier ne change jamais. L'écriture vérifie l'empreinte du fichier préparé et celle du hosts lu au
+  départ : rien n'est écrit si l'un a changé entre-temps. Le bilan dit quand la liste a plus d'une semaine. Sous
+  Windows, 5 000 noms au plus (au-delà, le client DNS ralentit).
 - **Site qui distribue des logiciels malveillants, signalé.** Les noms que l'ordinateur a demandés (mémoire DNS : sans
   droits sous Windows, en root sous Linux) sont comparés aux hôtes d'URLhaus, avec la clé abuse.ch : « Qui parle à
   Internet ? » le montre, et la surveillance horaire le notifie une fois (examen antivirus, fichiers téléchargés). Sans

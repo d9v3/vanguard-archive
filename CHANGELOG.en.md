@@ -42,6 +42,12 @@ delivered just before it. Only the latest version has its download page; every v
 - **A DNS that does not block dangerous sites is said.** The check-up reports it (information) and points to "Fastest
   DNS", where CIRA's Canadian Shield "Protected" or Quad9 is set in one choice, undoable. Nothing is said when a DNS
   already protects, or when nothing can tell (NextDNS, Pi-hole).
+- **Dangerous sites blocked** (`vanguard dangerous-sites on|off`). URLhaus hosts and ThreatFox command server domains
+  (abuse.ch key) are sent nowhere (0.0.0.0 and ::) by the hosts file, after your consent and with administrator
+  rights. Vanguard's block sits between two dated markers: `off` removes it exactly, the rest of the file never
+  changes. Writing checks the checksum of the prepared file and of the hosts file read at the start: nothing is
+  written if either changed in between. The check-up says when the list is more than a week old. On Windows, 5,000
+  names at most (beyond that, the DNS client slows down).
 - **Site that distributes malware, reported.** The names this computer asked for (DNS cache: no rights needed on
   Windows, root on Linux) are compared with URLhaus hosts, with the abuse.ch key: "Who talks to the Internet?" shows
   it, and hourly monitoring notifies it once (antivirus scan, downloaded files). Without the list, it is said; the exact

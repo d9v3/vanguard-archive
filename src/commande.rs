@@ -733,6 +733,16 @@ mod tests_sh_chaine {
     /// Les arguments relus un par un : (fichier, expression, pourquoi elle ne peut rien injecter).
     const RELUES: &[(&str, &str, &str)] = &[
         (
+            "protection/sites_bloques.rs",
+            "sha",
+            "constante : sha256sum ou shasum -a 256, choisie à la compilation",
+        ),
+        (
+            "protection/sites_bloques.rs",
+            "vider",
+            "constante : la commande qui vide le cache DNS, choisie à la compilation",
+        ),
+        (
             "gaming/linux.rs",
             "nom",
             "fichier_de_vanguard : liste blanche de chemins écrits par Vanguard",
