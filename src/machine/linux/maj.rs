@@ -498,12 +498,88 @@ pub(super) fn failles_connues() -> Constat {
             }
         }
     };
-    let constat = bilan_failles(gestion, &failles);
-    // Le catalogue n'est demandé que s'il y a des failles à juger.
+    let mut constat = bilan_failles(gestion, &failles);
+    // Les ports et le catalogue ne sont lus que s'il y a des failles à juger.
+    if failles.is_empty() {
+        return constat;
+    }
+    constat = avec_exposees(constat, &failles, &paquets_exposes(gestion));
     if failles.iter().all(|f| f.cves.is_empty()) {
         return constat;
     }
     avec_exploitees(constat, &failles, crate::protection::kev::exploitees())
+}
+
+/// Le fichier d'une unité systemd (« php-fpm.service » ; une instance d'un modèle, nom@instance, a pour fichier celui
+/// du modèle, nom@.service), là où les paquets les posent.
+fn fichier_d_unite(unite: &str) -> Option<PathBuf> {
+    let modele = match unite.split_once('@') {
+        Some((debut, _)) => format!("{debut}@.service"),
+        None => unite.to_string(),
+    };
+    ["/usr/lib/systemd/system", "/lib/systemd/system"]
+        .into_iter()
+        .map(|d| Path::new(d).join(&modele))
+        .find(|c| c.is_file())
+}
+
+/// Les paquets des programmes qui écoutent au-delà de cet ordinateur, avec un de leurs ports. Le programme quand il
+/// est de ce compte (/proc/<pid>/exe) ; sinon, sans root, le fichier de son service systemd, posé par le même paquet
+/// (php-fpm.service par php-fpm). Une bibliothèque qu'un serveur charge (openssl) n'est pas vue ici.
+fn paquets_exposes(gestion: Paquets) -> HashMap<String, u16> {
+    let Some(prises) = super::ecoute::prises_ou_ss() else {
+        return HashMap::new();
+    };
+    let pids = crate::protection::sortantes::proprietaires();
+    let mut fichiers: Vec<(PathBuf, u16)> = Vec::new();
+    for p in prises.iter().filter(|p| !p.adresse.to_canonical().is_loopback()) {
+        let programme = pids
+            .get(&p.inode)
+            .and_then(|pid| std::fs::read_link(format!("/proc/{pid}/exe")).ok());
+        let unite = || {
+            let groupe = p.groupe.as_deref()?;
+            fichier_d_unite(groupe.rsplit('/').next().filter(|u| u.ends_with(".service"))?)
+        };
+        if let Some(f) = programme.or_else(unite) {
+            fichiers.push((f, p.port));
+        }
+    }
+    let chemins: Vec<PathBuf> = fichiers.iter().map(|(f, _)| f.clone()).collect();
+    let mut exposes = HashMap::new();
+    for (paquet, (_, port)) in gestion.proprietaires(&chemins).into_iter().zip(&fichiers) {
+        if let Some(paquet) = paquet {
+            exposes.entry(paquet).or_insert(*port);
+        }
+    }
+    exposes
+}
+
+/// Les failles des paquets exposés au réseau, « paquet (port N) », chacune une fois.
+fn exposees(failles: &[Faille], exposes: &HashMap<String, u16>) -> Vec<String> {
+    let mut v: Vec<String> = failles
+        .iter()
+        .filter_map(|f| exposes.get(&f.paquet).map(|port| format!("{} (port {port})", f.paquet)))
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// Une faille dans un paquet dont un programme écoute au-delà de cet ordinateur : on la dit en tête, et le constat est
+/// au moins élevé. Pas critique d'office : un gros paquet (systemd) a d'autres programmes que celui qui écoute, et la
+/// faille peut être ailleurs ; une faille exploitée (catalogue KEV), elle, le rend critique.
+fn avec_exposees(mut constat: Constat, failles: &[Faille], exposes: &HashMap<String, u16>) -> Constat {
+    let ex = exposees(failles, exposes);
+    if !ex.is_empty() {
+        constat.message = trf!(
+            "Paquet dont un programme écoute sur le réseau : {}. {}",
+            "Package with a program listening on the network: {}. {}",
+            crate::ui::resume(&ex, 5, ", "),
+            constat.message
+        );
+        constat.probleme = constat.probleme.max(Some(Niveau::Eleve));
+    }
+    constat
 }
 
 /// Les failles que la CISA sait exploitées, « paquet (CVE-…) », chacune une fois.
@@ -1703,6 +1779,30 @@ mod tests {
             bilan_failles(Paquets::Apt, &[f("vim", Niveau::Info, true)]).probleme,
             Some(Niveau::Moyen)
         );
+    }
+
+    #[test]
+    fn failles_exposees_en_tete() {
+        let f = |paquet: &str, corrigee| Faille {
+            paquet: paquet.into(),
+            gravite: Niveau::Moyen,
+            corrigee,
+            cves: Vec::new(),
+        };
+        let failles = [f("php-fpm", true), f("libtiff", false)];
+        let exposes: HashMap<String, u16> = [("php-fpm".to_string(), 9000), ("nginx".to_string(), 80)].into();
+        assert_eq!(exposees(&failles, &exposes), ["php-fpm (port 9000)"]);
+        let c = avec_exposees(bilan_failles(Paquets::Pacman, &failles), &failles, &exposes);
+        assert_eq!(c.probleme, Some(Niveau::Eleve));
+        assert!(
+            c.message
+                .starts_with("Paquet dont un programme écoute sur le réseau : php-fpm (port 9000)")
+                && c.correctif.is_some()
+        );
+        // Rien d'exposé : le constat ne change pas.
+        let avant = bilan_failles(Paquets::Pacman, &failles);
+        let c = avec_exposees(bilan_failles(Paquets::Pacman, &failles), &failles, &HashMap::new());
+        assert_eq!((c.probleme, c.message), (avant.probleme, avant.message));
     }
 
     #[test]

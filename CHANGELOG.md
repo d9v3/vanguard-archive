@@ -47,7 +47,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Failles activement exploitées en tête** (Linux, Arch). Les CVE des failles connues des paquets installés sont
   comparées au catalogue KEV de la CISA (failles dont une attaque réelle est connue), téléchargé en entier : la liste des
   logiciels ne sort pas de l'ordinateur. Une faille exploitée rend le constat critique et passe en tête, même sans
-  correctif publié ; sans le catalogue, c'est dit. La surveillance horaire notifie une faille critique nouvelle
+  correctif publié ; sans le catalogue, c'est dit. Une faille dans un paquet dont un programme écoute sur le réseau
+  (un service par son unité systemd, sans droits root) est dite en tête, au moins élevée. La surveillance horaire notifie une faille critique nouvelle
   (exploitée, ou critique pour la distribution) ; les autres, qui changent chaque jour, restent au bilan.
 - **Sites dangereux bloqués** (`vanguard sites-dangereux on|off`). Les hôtes d'URLhaus et les domaines des serveurs
   de commande de ThreatFox (clé abuse.ch) sont envoyés nulle part (0.0.0.0 et ::) par le fichier hosts, après accord
