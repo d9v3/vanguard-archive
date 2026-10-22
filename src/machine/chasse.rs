@@ -258,9 +258,23 @@ fn tentatives_lues() -> Option<Result<Lues, Constat>> {
     let ecoutes =
         super::sortie("netstat", &["-an", "-p", "tcp"]).map(|netstat| super::unix::lire_netstat(&netstat, true));
     let services = std::fs::read_to_string("/etc/services").unwrap_or_default();
-    let sshd_en_marche =
+    let en_marche =
         programmes_en_marche().map(|(liste, _)| liste.iter().any(|p| p.nom == "sshd" || p.nom.starts_with("sshd-")));
-    tentatives_sans_journal(ecoutes.as_deref(), port_ssh(&services), sshd_en_marche)
+    // Un sshd lancé par launchd à chaque connexion, sur le port de sa propre plist (Session à distance recopiée dans
+    // /Library/LaunchDaemons) : aucun sshd ne tourne entre deux connexions, et /etc/services peut dire 22.
+    let lance_par_launchd = std::fs::read_dir("/Library/LaunchDaemons").is_ok_and(|dossier| {
+        dossier
+            .flatten()
+            .any(|f| std::fs::read(f.path()).is_ok_and(|o| plist_de_sshd(&o)))
+    });
+    let sshd = if lance_par_launchd { Some(true) } else { en_marche };
+    tentatives_sans_journal(ecoutes.as_deref(), port_ssh(&services), sshd)
+}
+
+/// Une plist de launchd qui lance sshd (XML ou binaire : le chemin du programme y reste en clair).
+#[cfg(any(target_os = "macos", test))]
+fn plist_de_sshd(octets: &[u8]) -> bool {
+    octets.windows(4).any(|m| m == b"sshd")
 }
 
 /// Le port du service « ssh » d'/etc/services : celui où launchd ouvre Session à distance, 22 sauf s'il a été changé.
@@ -274,21 +288,20 @@ fn port_ssh(services: &str) -> Option<u16> {
 }
 
 /// La décision de macOS, à part pour se tester partout. `ecoutes` : les ports TCP en écoute, `None` si netstat n'a
-/// pas répondu ; `port_ssh` : celui d'/etc/services ; `sshd_en_marche` : un sshd parmi les programmes en marche,
+/// pas répondu ; `port_ssh` : celui d'/etc/services ; `sshd` : un sshd en marche ou une plist de launchd qui le lance,
 /// `None` si ps n'a pas répondu. Rien à lire seulement si rien n'écoute sur 22 ni sur le port de ssh et qu'aucun sshd
-/// ne tourne (un sshd de Homebrew sur un autre port tourne sans arrêt). Un sshd qui n'écoute que la machine elle-même
+/// n'est là (un sshd de Homebrew sur un autre port tourne sans arrêt). Un sshd qui n'écoute que la machine elle-même
 /// compte aussi : ses échecs vont au journal non lu. netstat ou ps muets, ou sshd présent : non vérifié, jamais sain.
 #[cfg(any(target_os = "macos", test))]
 fn tentatives_sans_journal(
     ecoutes: Option<&[(String, u16)]>,
     port_ssh: Option<u16>,
-    sshd_en_marche: Option<bool>,
+    sshd: Option<bool>,
 ) -> Option<Result<Lues, Constat>> {
-    let raison = match (ecoutes, sshd_en_marche) {
-        (Some(ports), Some(false)) if !ports.iter().any(|(_, port)| *port == 22 || Some(*port) == port_ssh) => {
-            return None;
-        }
-        (Some(_), Some(_)) => tr!(
+    let ecoute_ssh = ecoutes.map(|ports| ports.iter().any(|(_, port)| *port == 22 || Some(*port) == port_ssh));
+    let raison = match (ecoute_ssh, sshd) {
+        (Some(false), Some(false)) => return None,
+        (Some(true), _) | (_, Some(true)) => tr!(
             "sshd écrit dans le journal unifié de macOS, que Vanguard ne lit pas",
             "sshd writes to macOS's unified log, which Vanguard does not read"
         ),
@@ -296,7 +309,7 @@ fn tentatives_sans_journal(
             "netstat n'a pas dit si sshd écoute",
             "netstat did not tell whether sshd is listening"
         ),
-        (Some(_), None) => tr!(
+        (Some(false), None) => tr!(
             "ps n'a pas dit si sshd tourne",
             "ps did not tell whether sshd is running"
         ),
@@ -1430,6 +1443,16 @@ mod tests {
             panic!("ps muet compté comme sain");
         };
         assert!(!c.verifie && c.message.contains("ps"), "{}", c.message);
+        // sshd en écoute sur 22 et ps muet : la raison est le journal non lu, pas ps.
+        let Some(Err(c)) = tentatives_sans_journal(Some(&ports(&[("*", 22)])), Some(22), None) else {
+            panic!("sshd en écoute compté comme lu");
+        };
+        assert!(
+            c.message.contains("sshd") && !c.message.starts_with("ps"),
+            "{}",
+            c.message
+        );
+        assert!(plist_de_sshd(b"<string>/usr/sbin/sshd</string>") && !plist_de_sshd(b"<string>/usr/bin/ssh</string>"));
     }
 
     #[test]

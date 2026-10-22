@@ -475,8 +475,18 @@ pub(crate) fn serveurs_ouverts(
 
 fn agents(t: &mut Trouvees) {
     use crate::machine::agents_ia;
-    match agents_ia::prises() {
-        Some(prises) => {
+    match agents_ia::prises_et_noms() {
+        Some((prises, noms)) => {
+            // macOS sans lsof : seuls les ports connus des serveurs d'IA se reconnaissent, comme le bilan le dit.
+            if noms == agents_ia::Noms::Aucun {
+                t.non_verifie.push(
+                    tr!(
+                        "serveurs d'IA : programmes en écoute non nommés (lsof), seuls les ports connus regardés",
+                        "AI servers: listening programs not named (lsof), only the known ports checked"
+                    )
+                    .to_string(),
+                );
+            }
             for (port, nom) in serveurs_ouverts(&prises, &agents_ia::ports_fermes()) {
                 let nom = affichable(&nom);
                 t.menaces.push(Menace {
