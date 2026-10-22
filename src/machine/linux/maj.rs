@@ -317,6 +317,8 @@ pub(super) struct Faille {
     gravite: Niveau,
     /// Une version corrigée est déjà dans les dépôts : la mise à jour suffit.
     corrigee: bool,
+    /// Ses CVE, quand le suivi les donne (Arch) : comparées au catalogue des failles exploitées.
+    cves: Vec<String>,
 }
 
 /// Gravité écrite par les distributions (anglais), en niveau de Vanguard. Inconnue : on ne minimise pas.
@@ -337,11 +339,18 @@ pub(super) fn failles_arch(json: &serde_json::Value) -> Vec<Faille> {
         .flat_map(|g| {
             let gravite = gravite(g["severity"].as_str().unwrap_or("unknown"));
             let corrigee = g["fixed"].as_str().is_some_and(|v| !v.is_empty());
+            let cves: Vec<String> = g["issues"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| Some(c.as_str()?.trim().to_uppercase()))
+                .collect();
             g["packages"].as_array().into_iter().flatten().filter_map(move |p| {
                 Some(Faille {
                     paquet: p.as_str()?.to_string(),
                     gravite,
                     corrigee,
+                    cves: cves.clone(),
                 })
             })
         })
@@ -360,6 +369,7 @@ pub(super) fn failles_apt(lignes: &[String]) -> Vec<Faille> {
                 paquet: nom.to_string(),
                 gravite: Niveau::Eleve,
                 corrigee: true,
+                cves: Vec::new(),
             })
         })
         .collect()
@@ -383,6 +393,7 @@ pub(super) fn failles_dnf(texte: &str) -> Vec<Faille> {
                 paquet: nom.to_string(),
                 gravite: gravite(gravite_txt),
                 corrigee: true,
+                cves: Vec::new(),
             })
         })
         .collect()
@@ -398,6 +409,7 @@ pub(super) fn failles_zypper(texte: &str) -> Vec<Faille> {
                 paquet: c[1].to_string(),
                 gravite: gravite(c[3]),
                 corrigee: true,
+                cves: Vec::new(),
             })
         })
         .collect()
@@ -486,7 +498,59 @@ pub(super) fn failles_connues() -> Constat {
             }
         }
     };
-    bilan_failles(gestion, &failles)
+    let constat = bilan_failles(gestion, &failles);
+    // Le catalogue n'est demandé que s'il y a des failles à juger.
+    if failles.iter().all(|f| f.cves.is_empty()) {
+        return constat;
+    }
+    avec_exploitees(constat, &failles, crate::protection::kev::exploitees())
+}
+
+/// Les failles que la CISA sait exploitées, « paquet (CVE-…) », chacune une fois.
+fn exploitees(failles: &[Faille], kev: &std::collections::HashSet<String>) -> Vec<String> {
+    let mut v: Vec<String> = failles
+        .iter()
+        .flat_map(|f| {
+            f.cves
+                .iter()
+                .filter(|c| kev.contains(*c))
+                .map(move |c| format!("{} ({c})", f.paquet))
+        })
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// Une faille exploitée passe en tête et rend le constat critique, avec ou sans correctif publié ; sans le catalogue,
+/// c'est dit, sans rien conclure.
+fn avec_exploitees(
+    mut constat: Constat,
+    failles: &[Faille],
+    kev: Result<std::collections::HashSet<String>, String>,
+) -> Constat {
+    match kev {
+        Ok(kev) => {
+            let ex = exploitees(failles, &kev);
+            if !ex.is_empty() {
+                constat.message = trf!(
+                    "Activement exploitée (catalogue KEV de la CISA) : {}. {}",
+                    "Actively exploited (CISA KEV catalog): {}. {}",
+                    crate::ui::resume(&ex, 5, ", "),
+                    constat.message
+                );
+                constat.probleme = Some(Niveau::Critique);
+            }
+        }
+        Err(raison) => {
+            constat.message = trf!(
+                "{} Failles exploitées (catalogue KEV) pas vérifiées : {raison}.",
+                "{} Exploited flaws (KEV catalog) not checked: {raison}.",
+                constat.message
+            );
+        }
+    }
+    constat
 }
 
 pub(super) fn bilan_failles(gestion: Paquets, failles: &[Faille]) -> Constat {
@@ -1589,7 +1653,8 @@ mod tests {
             [Faille {
                 paquet: "curl".into(),
                 gravite: Niveau::Eleve,
-                corrigee: true
+                corrigee: true,
+                cves: Vec::new()
             }]
         );
         let dnf5 = "Name             Type     Severity  Package                         Issued\n\
@@ -1616,6 +1681,7 @@ mod tests {
             paquet: paquet.into(),
             gravite,
             corrigee,
+            cves: Vec::new(),
         };
         assert!(bilan_failles(Paquets::Pacman, &[]).probleme.is_none());
         // Faille sans correctif : signalée, sans baisser la note ni proposer de correction.
@@ -1637,6 +1703,48 @@ mod tests {
             bilan_failles(Paquets::Apt, &[f("vim", Niveau::Info, true)]).probleme,
             Some(Niveau::Moyen)
         );
+    }
+
+    #[test]
+    fn failles_exploitees_en_tete() {
+        let php = Faille {
+            paquet: "php".into(),
+            gravite: Niveau::Eleve,
+            corrigee: true,
+            cves: vec!["CVE-2026-109618".into(), "CVE-2026-109619".into()],
+        };
+        let pam = Faille {
+            paquet: "pam".into(),
+            gravite: Niveau::Eleve,
+            corrigee: false,
+            cves: vec!["CVE-2025-6020".into()],
+        };
+        let failles = [php, pam];
+        let kev: std::collections::HashSet<String> = ["CVE-2026-109618".to_string()].into();
+        assert_eq!(exploitees(&failles, &kev), ["php (CVE-2026-109618)"]);
+        // Exploitée : critique, en tête, la correction gardée.
+        let c = avec_exploitees(bilan_failles(Paquets::Pacman, &failles), &failles, Ok(kev));
+        assert_eq!(c.probleme, Some(Niveau::Critique));
+        assert!(c.message.starts_with("Activement exploitée") && c.message.contains("php (CVE-2026-109618)"));
+        assert!(c.correctif.is_some());
+        // Rien d'exploité : le constat ne change pas ; sans le catalogue : dit, sans changer le niveau.
+        let avant = bilan_failles(Paquets::Pacman, &failles);
+        let c = avec_exploitees(
+            bilan_failles(Paquets::Pacman, &failles),
+            &failles,
+            Ok(std::collections::HashSet::default()),
+        );
+        assert_eq!(
+            (c.probleme, c.message.as_str()),
+            (avant.probleme, avant.message.as_str())
+        );
+        let c = avec_exploitees(
+            bilan_failles(Paquets::Pacman, &failles),
+            &failles,
+            Err("pas d'Internet ?".into()),
+        );
+        assert_eq!(c.probleme, avant.probleme);
+        assert!(c.message.contains("pas vérifiées : pas d'Internet ?"));
     }
 }
 

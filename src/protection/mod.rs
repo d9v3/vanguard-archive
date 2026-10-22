@@ -19,6 +19,9 @@ pub mod environnement;
 pub mod fuites;
 pub mod integrite;
 pub mod isoler;
+// Seul le suivi des paquets de Linux donne les CVE de chaque faille, pour l'instant.
+#[cfg(target_os = "linux")]
+pub(crate) mod kev;
 pub mod lien;
 pub mod manifeste;
 pub mod memoire;

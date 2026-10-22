@@ -44,6 +44,10 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Un DNS qui ne bloque pas les sites dangereux est dit.** Le bilan le signale (information) et renvoie à « DNS le plus
   rapide », où le Bouclier canadien « Protégé » ou Quad9 se posent en un choix, annulable. Rien n'est dit quand un DNS
   protège déjà, ou quand rien ne permet de le savoir (NextDNS, Pi-hole).
+- **Failles activement exploitées en tête** (Linux, Arch). Les CVE des failles connues des paquets installés sont
+  comparées au catalogue KEV de la CISA (failles dont une attaque réelle est connue), téléchargé en entier : la liste des
+  logiciels ne sort pas de l'ordinateur. Une faille exploitée rend le constat critique et passe en tête, même sans
+  correctif publié ; sans le catalogue, c'est dit.
 - **Sites dangereux bloqués** (`vanguard sites-dangereux on|off`). Les hôtes d'URLhaus et les domaines des serveurs
   de commande de ThreatFox (clé abuse.ch) sont envoyés nulle part (0.0.0.0 et ::) par le fichier hosts, après accord
   et avec les droits d'administrateur. Le bloc de Vanguard est entre deux marques datées : `off` le retire exactement,
