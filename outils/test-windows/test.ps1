@@ -831,37 +831,63 @@ if ($y -match "installer|install it|winget") { Bug 'Vanguard parle encore d''ins
 if ($y -match 'Aucun fichier ne correspond|No file matches') { Ok 'Dossier sans danger : rien trouvé, tout lu' }
 elseif ($y -match 'illisible|unreadable') { Bug 'Des fichiers du dossier d''essai n''ont pas pu être lus' }
 else { Bug 'Résultat de l''analyse YARA inattendu' }
-# 0.81 : les empreintes de MalwareBazaar, téléchargées par cette analyse puis gardées dans le dossier de Vanguard.
-if ($y -match '(?:ni aux|or the) ([0-9]+) (?:empreintes de MalwareBazaar|MalwareBazaar fingerprints)') { Ok "Empreintes de MalwareBazaar chargées : $($Matches[1])" }
-elseif ($y -match 'MalwareBazaar (?:fingerprints unavailable|indisponibles)') { Bug 'Empreintes de MalwareBazaar indisponibles (téléchargement en échec ?)' }
+# 0.84 : les empreintes de MalwareBazaar ne se téléchargent qu'avec la clé abuse.ch de la personne (Paramètres). Avec
+# elle, l'analyse les compte ; sans elle, elle doit dire qu'elles n'ont pas été vérifiées faute de clé, jamais se taire.
+# Une copie gardée d'avant sert encore sans clé : comptée, avec son rafraîchissement manqué dit.
+if ($y -match '(?:ni aux|or the) ([0-9]+) (?:empreintes de MalwareBazaar|MalwareBazaar fingerprints)') {
+    Ok "Empreintes de MalwareBazaar chargées : $($Matches[1])"
+    if ($y -match 'non rafraîchies, la copie gardée a servi|not refreshed, the saved copy was used') { Info 'Empreintes de MalwareBazaar : copie gardée, pas rafraîchie (raison dite dans yara.out.txt)' }
+}
+elseif ($y -match 'MalwareBazaar non vérifiées : clé abuse\.ch manquante|MalwareBazaar fingerprints not checked: abuse\.ch key missing') { Ok 'Sans clé abuse.ch : empreintes de MalwareBazaar dites non vérifiées, les 308 règles seules' }
+elseif ($y -match '(?:Empreintes de MalwareBazaar|MalwareBazaar fingerprints) (.+?) ?: (?:seules les 308|only the 308)') { Bug "Empreintes de MalwareBazaar pas utilisées : $($Matches[1])" }
 else { Bug 'Empreintes de MalwareBazaar : rien dit' }
-Etape 'Empreintes de MalwareBazaar (0.81) : un fichier d''essai reconnu par son empreinte exacte, quarantaine refusée'
-# L'empreinte du fichier d'essai ajoutée à la copie gardée des 48 dernières heures, puis l'analyse hors ligne : il
-# doit être reconnu sans aucune règle. La copie est remise ensuite telle quelle, heure comprise : Vanguard la
-# rafraîchit d'après cette heure.
+Etape 'Empreintes de MalwareBazaar : un fichier d''essai reconnu par son empreinte exacte, hors ligne, quarantaine refusée'
+# L'empreinte du fichier d'essai dans la copie gardée des 48 dernières heures, puis l'analyse hors ligne : il doit être
+# reconnu sans aucune règle. Sans clé, Vanguard ne télécharge rien mais lit cette copie : posée pour l'essai si elle
+# manque, puis retirée ; sinon complétée, puis remise telle quelle, heure comprise (Vanguard la rafraîchit d'après
+# cette heure).
 $recentes = Join-Path $env:LOCALAPPDATA 'vanguard\malwarebazaar\recentes.txt'
-if (Test-Path -LiteralPath $recentes) {
-    Ok 'Copie des empreintes récentes gardée dans le dossier de Vanguard'
-    $essaiEmpreinte = Join-Path $dossierYara 'facture.pdf.exe'
-    Set-Content -Path $essaiEmpreinte -Value "fichier d'essai de Vanguard $(Get-Date -Format o)" -Encoding UTF8
+$dossierRecentes = Split-Path -Parent $recentes
+$avaitRecentes = Test-Path -LiteralPath $recentes -PathType Leaf
+$avaitDossierRecentes = Test-Path -LiteralPath $dossierRecentes -PathType Container
+$essaiEmpreinte = Join-Path $dossierYara 'facture.pdf.exe'
+Set-Content -Path $essaiEmpreinte -Value "fichier d'essai de Vanguard $(Get-Date -Format o)" -Encoding UTF8
+if ($avaitRecentes) {
+    Info 'Copie des empreintes récentes déjà là : complétée pour l''essai, puis remise telle quelle'
     $copieRecentes = [IO.File]::ReadAllBytes($recentes)
     $heureRecentes = (Get-Item -LiteralPath $recentes).LastWriteTimeUtc
-    try {
-        # Une ligne à part même si la copie ne finit pas par un saut de ligne.
-        Add-Content -LiteralPath $recentes -Value ("`r`n" + (Get-FileHash $essaiEmpreinte -Algorithm SHA256).Hash.ToLower()) -Encoding ASCII
-        $env:VANGUARD_HORS_LIGNE = '1'
-        LancerAvec 'yara-empreinte' @('yara', $dossierYara) "n`n"
-    } finally {
-        Remove-Item Env:VANGUARD_HORS_LIGNE -ErrorAction SilentlyContinue
+} else {
+    Info 'Aucune copie des empreintes récentes (sans clé abuse.ch, rien ne se télécharge) : posée pour l''essai, puis retirée'
+    New-Item -ItemType Directory -Force $dossierRecentes | Out-Null
+}
+try {
+    # Une ligne à part même si la copie ne finit pas par un saut de ligne ; Add-Content crée la copie qui manque.
+    Add-Content -LiteralPath $recentes -Value ("`r`n" + (Get-FileHash $essaiEmpreinte -Algorithm SHA256).Hash.ToLower()) -Encoding ASCII
+    $env:VANGUARD_HORS_LIGNE = '1'
+    LancerAvec 'yara-empreinte' @('yara', $dossierYara) "n`n"
+} finally {
+    Remove-Item Env:VANGUARD_HORS_LIGNE -ErrorAction SilentlyContinue
+    if ($avaitRecentes) {
         [IO.File]::WriteAllBytes($recentes, $copieRecentes)
         (Get-Item -LiteralPath $recentes).LastWriteTimeUtc = $heureRecentes
+    } else {
+        Remove-Item -LiteralPath $recentes -Force -ErrorAction SilentlyContinue
+        # Le dossier posé pour l'essai, seulement s'il est resté vide : jamais ce que Vanguard y aurait mis entre-temps.
+        if (-not $avaitDossierRecentes -and -not (Get-ChildItem -LiteralPath $dossierRecentes -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $dossierRecentes -Force -ErrorAction SilentlyContinue
+        }
     }
-    $ye = (Sortie 'yara-empreinte') -replace '\s+', ' '
-    if ($ye -match 'facture\.pdf\.exe' -and $ye -match 'empreinte exacte|exact fingerprint') { Ok 'Fichier d''essai reconnu par son empreinte exacte' } else { Bug 'Fichier d''essai PAS reconnu par son empreinte' }
-    if ($ye -match "Rien n'a été fait|Nothing was done") { Ok 'Quarantaine refusée : rien fait' } else { Bug 'Refus de la quarantaine PAS respecté' }
-    if (Test-Path -LiteralPath $essaiEmpreinte) { Ok 'Fichier d''essai laissé en place' } else { Bug 'Fichier d''essai déplacé malgré le refus' }
-    if ((Get-FileHash -LiteralPath $recentes).Hash -eq (Get-FileHash -InputStream ([IO.MemoryStream]::new($copieRecentes))).Hash) { Ok 'Copie des empreintes remise comme avant' } else { Bug 'Copie des empreintes PAS remise comme avant' }
-} else { Bug "Copie des empreintes récentes ABSENTE ($recentes) : correspondance pas essayée" }
+}
+$ye = (Sortie 'yara-empreinte') -replace '\s+', ' '
+if ($ye -match 'facture\.pdf\.exe' -and $ye -match 'empreinte exacte|exact fingerprint') { Ok 'Fichier d''essai reconnu par son empreinte exacte' } else { Bug 'Fichier d''essai PAS reconnu par son empreinte' }
+if ($ye -match "Rien n'a été fait|Nothing was done") { Ok 'Quarantaine refusée : rien fait' } else { Bug 'Refus de la quarantaine PAS respecté' }
+if (Test-Path -LiteralPath $essaiEmpreinte) { Ok 'Fichier d''essai laissé en place' } else { Bug 'Fichier d''essai déplacé malgré le refus' }
+if ($avaitRecentes) {
+    $memeContenu = (Get-FileHash -LiteralPath $recentes).Hash -eq (Get-FileHash -InputStream ([IO.MemoryStream]::new($copieRecentes))).Hash
+    $memeHeure = (Get-Item -LiteralPath $recentes).LastWriteTimeUtc -eq $heureRecentes
+    if ($memeContenu -and $memeHeure) { Ok 'Copie des empreintes remise comme avant, heure comprise' } else { Bug "Copie des empreintes PAS remise comme avant (contenu : $memeContenu, heure : $memeHeure)" }
+} elseif (Test-Path -LiteralPath $recentes) { Bug "Copie des empreintes posée pour l'essai PAS retirée ($recentes)" }
+else { Ok 'Copie des empreintes posée pour l''essai retirée' }
 Remove-Item $dossierYara -Recurse -Force -ErrorAction SilentlyContinue
 
 Etape 'Collecter les traces (0.79) : dossier daté, LISEZMOI, manifeste juste, rien gardé'

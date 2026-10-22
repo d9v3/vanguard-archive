@@ -61,6 +61,40 @@ verifier() {
     printf '      \033[31m✗ %s\033[0m\n' "$d"
   fi
 }
+# contient_motif <fichier> <expression> : le texte replié à 76 colonnes est cherché mots remis bout à bout, couleurs
+# retirées, avec une expression régulière de Python.
+contient_motif() { python3 -c "import re,sys; t=' '.join(re.sub(r'\x1b\[[0-9;]*m', '', open(sys.argv[1],encoding='utf-8').read()).split()); sys.exit(0 if re.search(sys.argv[2], t) else 1)" "$1" "$2"; }
+
+# mettre_empreinte_essai <copie des empreintes> <empreinte> : l'empreinte ajoutée sur une ligne à part (même si la
+# copie ne finit pas par un saut de ligne). La copie d'avant est gardée à côté, heure comprise ; sans copie, elle est
+# posée pour l'essai. remettre_empreintes <copie> rend tout comme avant, et le vérifie.
+mettre_empreinte_essai() {
+  local copie=$1
+  EMPREINTES_AVANT=
+  DOSSIER_EMPREINTES_POSE=0
+  if [ -e "$copie" ]; then
+    EMPREINTES_AVANT=$(mktemp "${TMPDIR:-/tmp}/vanguard-empreintes-XXXXXX")
+    cp -p "$copie" "$EMPREINTES_AVANT"
+    note "empreintes : copie gardée déjà là, complétée pour l'essai"
+  else
+    [ -d "${copie%/*}" ] || { mkdir -p "${copie%/*}" && DOSSIER_EMPREINTES_POSE=1; }
+    note "empreintes : aucune copie gardée (sans clé abuse.ch, rien ne se télécharge), posée pour l'essai"
+  fi
+  { echo; echo "$2"; } >>"$copie"
+}
+remettre_empreintes() {
+  local copie=$1
+  if [ -n "$EMPREINTES_AVANT" ]; then
+    cp -p "$EMPREINTES_AVANT" "$copie"
+    verifier "empreintes : copie gardée remise comme avant, heure comprise" \
+      bash -c 'cmp -s "$1" "$2" && [ ! "$1" -nt "$2" ] && [ ! "$2" -nt "$1" ]' _ "$EMPREINTES_AVANT" "$copie"
+    rm -f "$EMPREINTES_AVANT"
+  else
+    rm -f "$copie"
+    [ "$DOSSIER_EMPREINTES_POSE" = 1 ] && rmdir "${copie%/*}" 2>/dev/null
+    verifier "empreintes : copie posée pour l'essai retirée" test ! -e "$copie"
+  fi
+}
 
 titre "Essai complet de Vanguard ($("$VANGUARD" --version)) sur $(. /etc/os-release && echo "$PRETTY_NAME")"
 lancer version 10 '' --version
@@ -189,6 +223,22 @@ lancer_maison yara 120 '' yara "$BAC/yara/dossier"
 verifier "yara : dossier lu en entier, rien trouvé" grep -q 'Aucun fichier ne correspond aux 308 règles' "$RES/yara.txt"
 verifier "yara : aucun moteur à installer" bash -c "! grep -qiE 'installer|winget' '$RES/yara.txt'"
 verifier "yara : fichiers laissés en place (lecture seule)" test -f "$BAC/yara/dossier/note.txt" -a -f "$BAC/yara/dossier/outil.exe"
+# Depuis la 0.84, les empreintes de MalwareBazaar ne se téléchargent qu'avec la clé abuse.ch, que ce dossier personnel
+# jetable n'a pas : avec elle, l'analyse les compte ; sans elle, elle doit dire qu'elles n'ont pas été vérifiées faute
+# de clé, jamais se taire.
+verifier "yara : empreintes comptées, ou dites non vérifiées faute de clé abuse.ch" contient_motif "$RES/yara.txt" \
+  'ni aux \d+ empreintes de MalwareBazaar|or the \d+ MalwareBazaar fingerprints|MalwareBazaar non vérifiées : clé abuse\.ch manquante|MalwareBazaar fingerprints not checked: abuse\.ch key missing'
+# L'empreinte d'un fichier d'essai dans la copie gardée des 48 dernières heures, puis l'analyse hors ligne : il doit
+# être reconnu par elle seule. Sans clé, Vanguard ne télécharge rien mais lit cette copie : posée pour l'essai si elle
+# manque, puis retirée ; sinon complétée, puis rendue telle quelle, heure comprise.
+echo "fichier d'essai de Vanguard $(date +%s)" >"$BAC/yara/dossier/facture.pdf.exe"
+EMPREINTES="$MAISON/.local/share/vanguard/malwarebazaar/recentes.txt"
+mettre_empreinte_essai "$EMPREINTES" "$(sha256sum "$BAC/yara/dossier/facture.pdf.exe" | cut -c1-64)"
+VANGUARD_HORS_LIGNE=1 lancer_maison yara-empreinte 120 'n\n' yara "$BAC/yara/dossier"
+remettre_empreintes "$EMPREINTES"
+verifier "empreintes : fichier reconnu par son empreinte exacte" grep -q 'empreinte exacte' "$RES/yara-empreinte.txt"
+verifier "empreintes : quarantaine refusée, rien fait" grep -q "Rien n'a été fait" "$RES/yara-empreinte.txt"
+verifier "empreintes : fichier laissé en place" test -f "$BAC/yara/dossier/facture.pdf.exe"
 
 lancer_maison appris 60 '' appris
 verifier "appris : aucun choix enregistré" grep -q "Rien pour l'instant" "$RES/appris.txt"
