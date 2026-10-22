@@ -522,6 +522,16 @@ pub(crate) fn annuler_sans_question(m: &MiseEnPlace) -> (bool, Vec<PathBuf>) {
     (ok, gardees)
 }
 
+/// Le fichier d'horodatage de la minuterie (« stamp-vanguard-sauvegarde.timer »), comme pour la surveillance et
+/// l'entretien : rend ce qui n'est pas parti.
+#[cfg(target_os = "linux")]
+fn retirer_horodatage() -> Vec<String> {
+    crate::reseau::surveillance::retirer_horodatage(
+        crate::reseau::surveillance::dossier_horodatages_maison().as_deref(),
+        TIMER.trim_end_matches(".timer"),
+    )
+}
+
 /// Les unités de la sauvegarde trouvées sans note (une note perdue) : retirées par leur nom exact, minuterie arrêtée.
 /// Dit si systemctl n'a pas répondu.
 pub(crate) fn retirer_sans_note(fichiers: &[PathBuf]) -> Result<(), String> {
@@ -537,6 +547,8 @@ pub(crate) fn retirer_sans_note(fichiers: &[PathBuf]) -> Result<(), String> {
             echecs.push(format!("{} ({e})", chemin_affichable(f)));
         }
     }
+    #[cfg(target_os = "linux")]
+    echecs.extend(retirer_horodatage());
     #[cfg(target_os = "linux")]
     let recharge = crate::reseau::surveillance::reussit("systemctl", &["--user", "daemon-reload"]);
     #[cfg(not(target_os = "linux"))]
@@ -999,6 +1011,11 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> (bool, Vec<PathBuf>) {
                     }
                 }
                 let _ = crate::machine::sortie("systemctl", &["--user", "daemon-reload"]);
+                // Sa minuterie (Persistent=true) a un fichier d'horodatage que systemd ne retire jamais : il part avec
+                // elle, et reste si elle reste.
+                if !gardees.contains(&dossier.join(TIMER)) && !retirer_horodatage().is_empty() {
+                    ok = false;
+                }
                 (ok, gardees)
             }
         }
@@ -1439,6 +1456,17 @@ pub fn verifier_sauvegarde() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Le fichier d'horodatage que systemd pose pour la minuterie : « stamp- » + le nom de l'unité. Le retrait lui-même
+    /// (surveillance::retirer_horodatage) est essayé sur un dossier jetable dans la surveillance ; ici, le nom.
+    #[test]
+    fn horodatage_de_la_sauvegarde_nomme() {
+        assert_eq!(TIMER.trim_end_matches(".timer"), "vanguard-sauvegarde");
+        assert_eq!(
+            format!("stamp-{}.timer", TIMER.trim_end_matches(".timer")),
+            "stamp-vanguard-sauvegarde.timer"
+        );
+    }
 
     /// Une sauvegarde rsync jouée dans un dossier jetable : copie identique, original modifié depuis (plus récent),
     /// copie abîmée (même heure, ou réécrite après la sauvegarde), fichier sans original.

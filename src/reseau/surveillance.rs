@@ -1264,7 +1264,7 @@ fn dossier_horodatages(donnees: Option<std::ffi::OsString>, maison: &Path) -> Op
 }
 
 #[cfg(target_os = "linux")]
-fn dossier_horodatages_maison() -> Option<PathBuf> {
+pub(crate) fn dossier_horodatages_maison() -> Option<PathBuf> {
     dossier_horodatages(std::env::var_os("XDG_DATA_HOME"), &crate::nettoyer::maison())
 }
 
@@ -1272,7 +1272,7 @@ fn dossier_horodatages_maison() -> Option<PathBuf> {
 /// minuterie Persistent=true et le touche à chaque passe, mais ne le retire jamais, même quand la minuterie part. Rend
 /// ce qui n'est pas parti, relu après le retrait ; un dossier inconnu (`None`) n'a rien à retirer.
 #[cfg(target_os = "linux")]
-fn retirer_horodatage(dossier: Option<&Path>, nom: &str) -> Vec<String> {
+pub(crate) fn retirer_horodatage(dossier: Option<&Path>, nom: &str) -> Vec<String> {
     let Some(dossier) = dossier else {
         return Vec::new();
     };
