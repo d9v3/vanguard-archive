@@ -159,15 +159,16 @@ pub fn ecran(jours: u32) {
     }
     println!();
     let touche_ici = liste.iter().any(|e| ici.as_ref().is_some_and(|i| i.contains(&e.cve)));
-    let fin = match ici {
-        Some(_) if touche_ici => tr!(
+    let fin = if touche_ici {
+        tr!(
             "✖ : touche un paquet de cet ordinateur (suivi de sécurité de la distribution). Le bilan (Failles connues) dit quoi mettre à jour.",
             "✖: affects a package on this computer (the distribution's security tracker). The check-up (Known flaws) says what to update."
-        ),
-        None => tr!(
+        )
+    } else {
+        tr!(
             "Ce qui touche vos logiciels : le bilan (Failles connues). Le catalogue ne liste que des failles dont une attaque réelle est connue.",
             "What affects your software: the check-up (Known flaws). The catalog only lists flaws with a known real attack."
-        ),
+        )
     };
     afficher_aligne("  ", fin, 2, GRIS);
 }
