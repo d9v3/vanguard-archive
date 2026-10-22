@@ -782,7 +782,7 @@ pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
 /// Les unités `nom` posées dans `dossier` : le programme du service, et, si `juger_minuterie`, si la minuterie est
 /// d'aujourd'hui. Une minuterie absente ne se dit pas d'avant (sa disparition se juge à part, `juger_disparition`) ;
 /// illisible, son âge n'est pas conclu (non vérifié, jamais compté comme à jour), mais le programme lu reste jugé.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(unix, test)))]
 fn lire_unites(dossier: &Path, nom: &str, juger_minuterie: bool) -> Lecture {
     let lire = |ext: &str| std::fs::read_to_string(dossier.join(format!("{nom}.{ext}")));
     let programme = match lire("service") {
@@ -1763,7 +1763,9 @@ mod tests {
     }
 
     /// Les unités relues dans un dossier jetable : le programme du service, et la minuterie d'avant reconnue pour la
-    /// surveillance seulement ; absente, elle ne se dit pas d'avant ; illisible, rien n'est conclu.
+    /// surveillance seulement ; absente, elle ne se dit pas d'avant ; illisible, rien n'est conclu. Unix seulement :
+    /// sous Windows, le chemin du programme (/home/…) n'est pas absolu, et le bilan dirait « sans chemin ».
+    #[cfg(unix)]
     #[test]
     fn unites_relues_d_aujourdhui_ou_d_avant() {
         let d = crate::reseau::dossier_local().join("unites-relues");
