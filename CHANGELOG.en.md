@@ -56,7 +56,8 @@ delivered just before it. Only the latest version has its download page; every v
   rights. Vanguard's block sits between two dated markers: `off` removes it exactly, the rest of the file never
   changes. Writing checks the checksum of the prepared file and of the hosts file read at the start: nothing is
   written if either changed in between. The check-up says when the list is more than a week old. On Windows, 5,000
-  names at most (beyond that, the DNS client slows down).
+  names at most (beyond that, the DNS client slows down); elsewhere, 20,000. In the Protection menu, with "Latest
+  exploited flaws"; `uninstall` reminds you to remove them first.
 - **Site that distributes malware, reported.** The names this computer asked for (DNS cache: no rights needed on
   Windows, root on Linux) are compared with URLhaus hosts, with the abuse.ch key: "Who talks to the Internet?" shows
   it, and hourly monitoring notifies it once (antivirus scan, downloaded files). Without the list, it is said; the exact

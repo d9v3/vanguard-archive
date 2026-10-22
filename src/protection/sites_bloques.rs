@@ -21,6 +21,8 @@ use crate::ui::*;
 
 const DEBUT: &str = "# >>> Vanguard";
 const FIN: &str = "# <<< Vanguard <<<";
+/// Dans la marque de début : le hosts ne finissait pas par une fin de ligne, Vanguard en a ajouté une, que `off` retire.
+const FDL_AJOUTEE: &str = "(fin de ligne ajoutée)";
 /// Au-delà, le bilan propose de rafraîchir : URLhaus et ThreatFox changent chaque jour.
 const VIEILLE_JOURS: i64 = 7;
 /// Sous Windows, un hosts de dizaines de milliers de lignes ralentit le client DNS : les noms au-delà ne sont pas
@@ -56,6 +58,15 @@ fn sans_bloc(hosts: &str) -> Option<String> {
                 return None;
             }
             dedans = true;
+            if t.contains(FDL_AJOUTEE) {
+                let fin = sortie
+                    .strip_suffix("\r\n")
+                    .or_else(|| sortie.strip_suffix('\n'))
+                    .map(str::len);
+                if let Some(n) = fin {
+                    sortie.truncate(n);
+                }
+            }
         } else if t == FIN {
             if !dedans {
                 return None;
@@ -97,11 +108,12 @@ fn bloc(noms: &BTreeSet<String>, date: NaiveDate) -> String {
     b
 }
 
-/// Le hosts sans bloc, puis le bloc.
+/// Le hosts sans bloc, puis le bloc ; une fin de ligne ajoutée à la dernière ligne est notée dans la marque.
 fn avec_bloc(sans: &str, bloc: &str) -> String {
     let mut h = sans.to_string();
     if !h.is_empty() && !h.ends_with('\n') {
         h.push_str(FIN_DE_LIGNE);
+        return h + &bloc.replacen(DEBUT, &format!("{DEBUT} {FDL_AJOUTEE}"), 1);
     }
     h + bloc
 }
@@ -115,6 +127,11 @@ fn bloc_pose(hosts: &str) -> Option<(Option<NaiveDate>, usize)> {
     let sans = sans_bloc(hosts).unwrap_or_default();
     let noms = hosts.lines().count().saturating_sub(sans.lines().count() + 2) / 2;
     Some((date, noms))
+}
+
+/// Le bloc de Vanguard est-il dans le hosts de cet ordinateur ? Illisible : non (rien à dire de plus).
+pub(crate) fn bloc_present() -> bool {
+    std::fs::read_to_string(fichier_hosts()).is_ok_and(|h| bloc_pose(&h).is_some())
 }
 
 fn empreinte(octets: &[u8]) -> String {
@@ -267,6 +284,20 @@ pub fn commande(etat: Option<&str>) {
     }
 }
 
+/// Depuis le menu : l'état, puis bloquer (ou rafraîchir), retirer, ou rien.
+pub fn menu() {
+    commande(None);
+    let choix = demander(tr!(
+        "\n  B : bloquer ou rafraîchir · R : retirer · Entrée : rien. Choix : ",
+        "\n  B: block or refresh · R: remove · Enter: nothing. Choice: "
+    ));
+    match choix.to_lowercase().as_str() {
+        "b" => commande(Some("on")),
+        "r" => commande(Some("off")),
+        _ => {}
+    }
+}
+
 fn poser(avant: &[u8], sans: &str) {
     let (noms, manquent) = noms_a_bloquer();
     for raison in &manquent {
@@ -386,7 +417,12 @@ mod tests {
         assert_eq!(repose.matches(DEBUT).count(), 1);
         assert_eq!(bloc_pose(&pose), Some((Some(jour("2026-10-22")), 2)));
         assert_eq!(bloc_pose(hosts), None);
-        // Un hosts sans fin de ligne finale garde sa dernière ligne entière.
+        // Un hosts sans fin de ligne finale garde sa dernière ligne entière, et `off` le rend tel quel.
+        let sans_fin = "127.0.0.1 localhost";
+        let pose = avec_bloc(sans_fin, &bloc(&noms, jour("2026-10-22")));
+        assert!(pose.starts_with(&format!("127.0.0.1 localhost{FIN_DE_LIGNE}{DEBUT} {FDL_AJOUTEE}")));
+        assert_eq!(sans_bloc(&pose).as_deref(), Some(sans_fin));
+        assert_eq!(bloc_pose(&pose), Some((Some(jour("2026-10-22")), 2)));
         assert_eq!(
             avec_bloc("127.0.0.1 localhost", "B"),
             format!("127.0.0.1 localhost{FIN_DE_LIGNE}B")

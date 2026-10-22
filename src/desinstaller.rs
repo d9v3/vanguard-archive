@@ -39,6 +39,8 @@ pub(crate) struct Lieux {
     pub programme: Option<PathBuf>,
     /// La clé VANGUARD branchée : jamais touchée.
     pub cle: Option<PathBuf>,
+    /// Des sites dangereux bloqués par Vanguard dans le fichier hosts : les retirer demande l'administrateur.
+    pub sites_bloques: bool,
 }
 
 /// Une tâche du Planificateur de Windows, lue.
@@ -114,6 +116,7 @@ impl Lieux {
             raccourci: crate::raccourci::chemin(),
             programme,
             cle: crate::reseau::cle_usb(),
+            sites_bloques: crate::protection::sites_bloques::bloc_present(),
         })
     }
 
@@ -129,6 +132,7 @@ impl Lieux {
             raccourci: Some(racine.join("donnees/applications/Vanguard.desktop")),
             programme: None,
             cle: Some(racine.join("cle")),
+            sites_bloques: false,
         }
     }
 }
@@ -481,6 +485,13 @@ pub(crate) fn recenser(l: &Lieux) -> Recensement {
     }
     for quoi in [Planifie::Surveillance, Planifie::Entretien] {
         r.elements.extend(planifie(l, quoi));
+    }
+    // Le hosts est au système : jamais réécrit d'ici, sans droits ; dit avec sa commande, à lancer avant.
+    if l.sites_bloques {
+        r.a_faire.push(tr!(
+            "Sites dangereux bloqués dans le fichier hosts : « vanguard sites-dangereux off » les retire (droits d'administrateur), avant de retirer Vanguard. Laissés, ils restent bloqués, sans autre effet.",
+            "Dangerous sites blocked in the hosts file: “vanguard dangerous-sites off” removes them (administrator rights), before removing Vanguard. Left there, they stay blocked, with no other effect."
+        ).to_string());
     }
     sauvegarde(l, &mut r);
     #[cfg(target_os = "linux")]
@@ -1921,6 +1932,14 @@ mod tests {
     fn ecrire(p: &Path, texte: impl AsRef<[u8]>) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, texte).unwrap();
+    }
+
+    #[test]
+    fn sites_bloques_dits_avec_leur_commande() {
+        let mut l = Lieux::jetable(&racine("sites-bloques"));
+        assert!(!recenser(&l).a_faire.iter().any(|x| x.contains("sites-dangereux off")));
+        l.sites_bloques = true;
+        assert!(recenser(&l).a_faire.iter().any(|x| x.contains("sites-dangereux off")));
     }
 
     /// Un ordinateur jetable où Vanguard, et une version d'avant, ont tout posé, avec à côté ce qui n'est pas à eux.

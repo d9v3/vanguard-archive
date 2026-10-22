@@ -58,7 +58,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   et avec les droits d'administrateur. Le bloc de Vanguard est entre deux marques datées : `off` le retire exactement,
   le reste du fichier ne change jamais. L'écriture vérifie l'empreinte du fichier préparé et celle du hosts lu au
   départ : rien n'est écrit si l'un a changé entre-temps. Le bilan dit quand la liste a plus d'une semaine. Sous
-  Windows, 5 000 noms au plus (au-delà, le client DNS ralentit).
+  Windows, 5 000 noms au plus (au-delà, le client DNS ralentit) ; ailleurs, 20 000. Dans le menu Protection, avec
+  « Dernières failles exploitées » ; `desinstaller` rappelle de les retirer avant.
 - **Site qui distribue des logiciels malveillants, signalé.** Les noms que l'ordinateur a demandés (mémoire DNS : sans
   droits sous Windows, en root sous Linux) sont comparés aux hôtes d'URLhaus, avec la clé abuse.ch : « Qui parle à
   Internet ? » le montre, et la surveillance horaire le notifie une fois (examen antivirus, fichiers téléchargés). Sans
