@@ -159,6 +159,10 @@ const CATEGORIES_SURVEILLEES: &[&str] = &[
     "Durcissement",
 ];
 
+/// Les failles connues changent presque chaque jour, comme les mises à jour : seules les critiques sont notifiées,
+/// une faille activement exploitée (catalogue KEV de la CISA) ou critique pour la distribution.
+const FAILLES_CRITIQUES: &str = "Failles connues";
+
 /// État de la machine au dernier passage de la surveillance.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct EtatMachine {
@@ -171,13 +175,19 @@ fn fichier_etat() -> std::path::PathBuf {
     reseau::dossier_local().join("surveillance-machine.json")
 }
 
+/// Un constat que la surveillance notifie quand il apparaît.
+fn machine_surveillee(c: &crate::machine::Constat) -> bool {
+    c.probleme.is_some_and(|n| n >= Niveau::Moyen) && CATEGORIES_SURVEILLEES.contains(&c.categorie)
+        || c.probleme == Some(Niveau::Critique) && c.categorie == FAILLES_CRITIQUES
+}
+
 fn etat_machine(a: &crate::machine::Audit) -> EtatMachine {
     EtatMachine {
         score: a.fiable().then_some(a.score),
         alertes: a
             .constats
             .iter()
-            .filter(|c| c.probleme.is_some_and(|n| n >= Niveau::Moyen) && CATEGORIES_SURVEILLEES.contains(&c.categorie))
+            .filter(|c| machine_surveillee(c))
             .map(|c| format!("{} : {}", c.categorie, c.message))
             .collect(),
     }
@@ -2155,6 +2165,19 @@ mod tests {
         assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Maison", "bb:bb:bb:bb:bb:bb")).is_some());
         // Autre Wi-Fi (chez un ami) avec la même adresse de box : pas une alerte.
         assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Ami", "bb:bb:bb:bb:bb:bb")).is_none());
+    }
+
+    #[test]
+    fn failles_notifiees_si_critiques() {
+        let faille = |n| crate::machine::alerte("Failles connues", n, "php : faille".to_string());
+        assert!(machine_surveillee(&faille(Niveau::Critique)));
+        // Corrigées dans les dépôts, chaque jour d'autres : comme les mises à jour, pas notifiées.
+        assert!(!machine_surveillee(&faille(Niveau::Eleve)) && !machine_surveillee(&faille(Niveau::Moyen)));
+        assert!(machine_surveillee(&crate::machine::alerte(
+            "Pare-feu",
+            Niveau::Moyen,
+            "coupé".to_string()
+        )));
     }
 
     #[test]

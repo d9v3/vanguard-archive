@@ -45,7 +45,8 @@ delivered just before it. Only the latest version has its download page; every v
 - **Actively exploited flaws first** (Linux, Arch). The CVEs of known flaws in installed packages are compared with
   CISA's KEV catalog (flaws with a known real attack), downloaded whole: the software list does not leave the computer.
   An exploited flaw makes the finding critical and comes first, even without a published fix; without the catalog, it
-  is said.
+  is said. Hourly monitoring notifies a new critical flaw (exploited, or critical for the distribution); the others,
+  which change every day, stay in the check-up.
 - **Dangerous sites blocked** (`vanguard dangerous-sites on|off`). URLhaus hosts and ThreatFox command server domains
   (abuse.ch key) are sent nowhere (0.0.0.0 and ::) by the hosts file, after your consent and with administrator
   rights. Vanguard's block sits between two dated markers: `off` removes it exactly, the rest of the file never
