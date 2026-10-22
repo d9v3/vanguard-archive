@@ -395,6 +395,7 @@ fn sous_menu_protection() {
         "Qui parle à Internet ?",
         "Ce lien est-il dangereux ?",
         "Vérifier un fichier téléchargé",
+        "Ce courriel est-il une arnaque ?",
     ] {
         assert!(t.contains(outil), "{outil} absent : {t}");
     }
@@ -430,6 +431,75 @@ fn lien_examine_sans_rien_envoyer() {
     assert!(t.contains("Looks like PayPal") && t.contains("Nothing was sent"), "{t}");
     let aide = vanguard("en", &["lien", "--help"], "", 30);
     assert!(aide.texte.contains("The link you received"), "{}", aide.texte);
+}
+
+/// Un hameçonnage inventé (domaines réservés aux exemples) : nom affiché d'une marque, réponses vers une messagerie
+/// gratuite, lien qui montre une adresse et mène à une autre, objet démesuré et nom piégé pour la largeur de l'écran.
+fn courriel_piege(dossier: &Path) -> PathBuf {
+    let objet = "Votre compte est suspendu ".repeat(20);
+    let texte = format!(
+        "Received: from envoi.paypa1-secure.example by mx.example.net\r\n\
+Authentication-Results: mx.example.net; spf=pass smtp.mailfrom=paypa1-secure.example; dkim=none; dmarc=none\r\n\
+From: \"PayPal Service =?utf-8?B?4oCu?=\" <service@paypa1-secure.example>\r\n\
+Reply-To: noreply@gmail.com\r\nTo: alice@example.com\r\nSubject: {objet}\r\nMIME-Version: 1.0\r\n\
+Content-Type: multipart/alternative; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\n\
+Confirmez sur https://paypa1-secure.example/login\r\n--b\r\nContent-Type: text/html\r\n\r\n\
+<a href=\"https://paypa1-secure.example/login\">https://www.paypal.com/{}</a>\r\n--b--\r\n",
+        "x".repeat(300)
+    );
+    let chemin = dossier.join("hamecon.eml");
+    std::fs::write(&chemin, texte).unwrap();
+    chemin
+}
+
+/// Ce courriel est-il une arnaque ? : refus de la vérification en ligne, rien ne sort ; le verdict vient de l'examen
+/// sur l'ordinateur. Chaque ligne tient dans 76 colonnes, même avec un objet démesuré.
+#[test]
+fn courriel_suspect_sans_rien_envoyer() {
+    let dossier = maison_jetable();
+    let eml = courriel_piege(&dossier);
+    let s = vanguard("fr", &["courriel-suspect", eml.to_str().unwrap()], "n\n", 60);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    assert!(
+        t.contains("Arnaque probable") && t.contains("messagerie gratuite") && t.contains("Le lien affiche"),
+        "{t}"
+    );
+    // Sans Internet (passe hors ligne de verifier.sh), la question n'est pas posée et c'est dit.
+    assert!(
+        t.contains("Rien n'a été envoyé") || (hors_ligne() && t.contains("Mode hors ligne")),
+        "{t}"
+    );
+    assert!(!t.contains('\u{202e}'), "caractère piège montré tel quel");
+    let longues: Vec<&str> = t.lines().filter(|l| l.chars().count() > 76).collect();
+    assert_eq!(longues, Vec::<&str>::new(), "lignes trop longues");
+    let en = vanguard("en", &["suspicious-email", eml.to_str().unwrap()], "n\n", 60);
+    let t = sans_couleurs(&en.texte);
+    assert!(t.contains("Probably a scam"), "{t}");
+    assert!(
+        t.contains("Nothing was sent") || (hors_ligne() && t.contains("Offline mode")),
+        "{t}"
+    );
+    // Pas un courriel, ou un message Outlook : dit, rien d'analysé.
+    let png = dossier.join("image.eml");
+    std::fs::write(&png, b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").unwrap();
+    let s = vanguard("fr", &["courriel-suspect", png.to_str().unwrap()], "", 30);
+    assert!(
+        sans_couleurs(&s.texte).contains("pas un courriel reconnu"),
+        "{}",
+        s.texte
+    );
+    let msg = dossier.join("message.msg");
+    std::fs::write(&msg, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1rien").unwrap();
+    let s = vanguard("fr", &["courriel-suspect", msg.to_str().unwrap()], "", 30);
+    assert!(
+        sans_couleurs(&s.texte).contains("message Outlook (.msg)"),
+        "{}",
+        s.texte
+    );
+    let aide = vanguard("en", &["courriel-suspect", "--help"], "", 30);
+    assert!(aide.texte.contains("The saved email (.eml)"), "{}", aide.texte);
+    let _ = std::fs::remove_dir_all(&dossier);
 }
 
 #[test]
@@ -532,7 +602,9 @@ fn sans_internet_chaque_outil_le_dit() {
     if !hors_ligne() || cfg!(not(target_os = "linux")) {
         return;
     }
-    let cas: [(&[&str], &str, &str); 6] = [
+    let dossier = maison_jetable();
+    let eml = courriel_piege(&dossier);
+    let cas: [(&[&str], &str, &str); 7] = [
         (&["listes-noires"], "o\n", "Adresse publique introuvable"),
         (&["nat"], "", "Aucun serveur n'a répondu"),
         (&["dns-rapide"], "", "ne répond pas"),
@@ -542,6 +614,11 @@ fn sans_internet_chaque_outil_le_dit() {
             &["lien", "https://exemple.com/a"],
             "n\n",
             "listes et âge du domaine non vérifiés",
+        ),
+        (
+            &["courriel-suspect", eml.to_str().unwrap()],
+            "o\n",
+            "listes publiques non vérifiés",
         ),
     ];
     for (args, entree, attendu) in cas {
@@ -557,6 +634,7 @@ fn sans_internet_chaque_outil_le_dit() {
             debut.elapsed()
         );
     }
+    let _ = std::fs::remove_dir_all(&dossier);
     // Le scan sans réseau local : une erreur claire, pas une attente.
     let s = vanguard("fr", &["reseau"], "", 60);
     assert_eq!(s.code, Some(1), "{}", s.texte);

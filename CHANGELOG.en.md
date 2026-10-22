@@ -9,6 +9,19 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Release repository renamed** `d9v3/vanguard-update` (formerly vanguard-officiel). The old address redirects:
+  Vanguard copies already installed still update.
+- **Is this email a scam?** `vanguard suspicious-email <file.eml>` (Antivirus and protection menu, last) reads a saved
+  email without opening anything: no link followed, no image loaded, no attachment run. It looks at the real sender
+  (display name imitating a brand or hiding another address, replies sent elsewhere, look-alike domain), the SPF,
+  DKIM and DMARC result written by the receiving provider — never one a sender slips further down, and a “pass” only
+  counts when it surely comes from the provider —, each link (shown text against real address, offline link check,
+  links rewritten by Safe Links unwrapped), the attachments (program, double extension, macros, web page, disk image,
+  shortcut, password-protected archive, PDF that runs code) written under a neutral name in a disposable folder for
+  YARA and the antivirus, never opened. After your consent, only the domain names leave the computer for their age
+  and the public lists. MIME parsing written for Vanguard, bounded in size, depth and number of parts (a trapped email
+  is marked incomplete, never said to be read). An Outlook .msg: the steps to save it as .eml. The verdict is never
+  “safe”, and says what could not be checked.
 - **The watcher (Linux).** Between two hourly monitoring runs, a program or a connection lasting a few minutes went
   unnoticed. The watcher, off by default and turned on only after its unit is shown (`vanguard watcher on`, or the
   Network and Internet menu), listens to two streams that Linux 6.6 and later opens to ordinary accounts: each

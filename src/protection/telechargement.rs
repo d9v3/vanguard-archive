@@ -209,7 +209,7 @@ pub(crate) fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
 
 /// Ce que disent le nom et les premiers octets : programme déguisé en document, double extension, caractère qui
 /// retourne la fin du nom.
-fn nature(nom: &str, debut: &[u8]) -> Vec<(Niveau, String)> {
+pub(crate) fn nature(nom: &str, debut: &[u8]) -> Vec<(Niveau, String)> {
     let mut signes = Vec::new();
     // U+202E retourne l'écriture : « facture[U+202E]fdp.exe » s'affiche « facture exe.pdf ».
     if nom.contains('\u{202e}') {
@@ -293,7 +293,7 @@ fn sans_prefixe_etendu(chemin: &str) -> String {
 }
 
 /// « 3,4 Mo », « 812 o ».
-fn taille(octets: u64) -> String {
+pub(crate) fn taille(octets: u64) -> String {
     #[allow(clippy::cast_precision_loss)] // un ordre de grandeur, pour l'œil
     let o = octets as f64;
     match octets {

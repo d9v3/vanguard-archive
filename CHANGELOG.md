@@ -9,6 +9,20 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Dépôt des versions renommé** `d9v3/vanguard-update` (avant : vanguard-officiel). L'ancienne adresse redirige : les
+  Vanguard déjà installés se mettent encore à jour.
+- **Ce courriel est-il une arnaque ?** `vanguard courriel-suspect <fichier.eml>` (menu Antivirus et protection, en
+  dernier) lit un courriel enregistré sans rien ouvrir : aucun lien suivi, aucune image chargée, aucune pièce jointe
+  lancée. Il regarde le vrai expéditeur (nom affiché qui imite une marque ou cache une autre adresse, réponses envoyées
+  ailleurs, domaine qui imite), le résultat SPF, DKIM et DMARC écrit par le fournisseur de réception — jamais celui
+  qu'un expéditeur glisse plus bas, et un « réussi » ne compte que s'il vient sûrement du fournisseur —, chaque lien
+  (texte affiché contre vraie adresse, examen du lien hors ligne, liens réécrits par Safe Links déballés), les pièces
+  jointes (programme, double extension, macros, page web, image disque, raccourci, archive à mot de passe, PDF qui
+  lance du code) écrites sous un nom neutre dans un dossier jetable pour YARA et l'antivirus, jamais ouvertes. Après
+  accord, seuls les noms de domaine sortent pour leur âge et les listes publiques. Analyse MIME écrite pour Vanguard,
+  bornée en taille, profondeur et nombre de parties (un courriel piégé est marqué incomplet, jamais dit lu). Un .msg
+  d'Outlook : la marche pour l'enregistrer en .eml. Le verdict n'est jamais « sûr », et dit ce qui n'a pas pu être
+  vérifié.
 - **Le veilleur (Linux).** Entre deux passes de la surveillance horaire, un programme ou une connexion de quelques
   minutes passait inaperçu. Le veilleur, coupé par défaut et allumé seulement après avoir montré son unité
   (`vanguard veilleur on`, ou menu Réseau et Internet), écoute deux flux que Linux 6.6 et plus ouvre aux comptes

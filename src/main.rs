@@ -305,6 +305,15 @@ enum Commande {
         /// L'empreinte publiée par le site (SHA-256 de préférence). Sinon : un SHA256SUMS ou .sha256 à côté.
         empreinte: Option<String>,
     },
+    /// Ce courriel est-il une arnaque ? Un courriel enregistré (.eml) examiné sans rien ouvrir : l'expéditeur et son
+    /// authentification écrite par ton fournisseur, les liens, les pièces jointes ; après accord, l'âge des domaines et
+    /// leur présence dans des listes publiques.
+    #[command(name = "courriel-suspect", visible_alias = "suspicious-email")]
+    CourrielSuspect {
+        /// Le courriel enregistré (.eml) : « Enregistrer sous » de Thunderbird, « Télécharger le message » de Gmail,
+        /// « Télécharger » d'Outlook sur le web.
+        fichier: std::path::PathBuf,
+    },
     /// Caméra et micro : qui s'en sert ? Sous Windows, chaque programme et la dernière fois ; sous Linux, ce qui les
     /// tient en ce moment. Lecture seule.
     #[command(name = "camera-micro", visible_alias = "camera-mic")]
@@ -1066,6 +1075,7 @@ enum Action {
     Blocage,
     SitesDangereux,
     DernieresFailles,
+    CourrielSuspect,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -1312,6 +1322,11 @@ const OUTILS: &[Outil] = &[
         precision: ["catalogue de la CISA, 7 jours", "CISA catalog, 7 days"],
         mots: "failles flaws vulnérabilités vulnerabilities cve kev cisa exploitées exploited récentes latest \
                nouvelles new rançongiciel ransomware" },
+    Outil { action: Action::CourrielSuspect, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Ce courriel est-il une arnaque ?", "Is this email a scam?"],
+        precision: ["examiné sans rien ouvrir", "checked without opening anything"],
+        mots: "courriel email mail eml arnaque scam hameçonnage phishing expéditeur sender pièce jointe attachment \
+               spf dkim dmarc thunderbird outlook gmail msg usurpation spoofing" },
     Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
@@ -1710,6 +1725,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Acces => protection::acces::afficher_tout(),
         Action::Distance => protection::distance::menu(),
         Action::Lien => protection::lien::verifier(None),
+        Action::CourrielSuspect => protection::courriel_suspect::verifier(None),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
         Action::Quarantaine => protection::quarantaine::menu(),
         Action::SecretsGit => protection::secrets_git::analyser(),
@@ -1821,6 +1837,10 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("lien", "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists"),
     ("verifier-fichier", "Check a downloaded file: checksum compared with the site's, name and content, YARA and \
                           antivirus"),
+    ("courriel-suspect", "Is this email a scam? A saved email (.eml) examined without opening anything: the sender \
+                          and its authentication (SPF, DKIM, DMARC) as written by your provider, the links (shown \
+                          text against real address) and the attachments (name, content, YARA, antivirus); after \
+                          your consent, the domains' age and public lists"),
     ("camera-micro", "Camera and microphone: who uses them? On Windows, each program and the last time; on Linux, \
                       what holds them right now. Read-only"),
     ("acces", "Privacy check: the apps that have access to the location, contacts, camera and microphone, and their \
@@ -1921,6 +1941,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("nommer", "surnom", "The nickname; empty to remove it"),
     ("lien", "adresse", "The link you received (in quotes if it contains “&” or “?”)"),
     ("verifier-fichier", "fichier", "The downloaded file"),
+    ("courriel-suspect", "fichier", "The saved email (.eml): Thunderbird “Save As”, Gmail “Download message”, \
+                                     Outlook on the web “Download”"),
     ("verifier-fichier", "empreinte", "The checksum published by the site (preferably SHA-256). Otherwise: a \
                                        SHA256SUMS or .sha256 next to it"),
     ("guide", "quoi", "A system (omarchy, arch, fedora, debian, windows, macos, all; linux: the common programs; tldr), \
@@ -2102,6 +2124,7 @@ async fn main() {
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
         }
+        Some(Commande::CourrielSuspect { fichier }) => protection::courriel_suspect::verifier(Some(&fichier)),
         Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
         Some(Commande::Acces) => protection::acces::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),

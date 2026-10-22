@@ -56,3 +56,10 @@ path = "fuzz_targets/igd.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "courriel_mime"
+path = "fuzz_targets/courriel_mime.rs"
+test = false
+doc = false
+bench = false

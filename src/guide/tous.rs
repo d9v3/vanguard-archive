@@ -220,6 +220,13 @@ pub const PROGRAMMES: &[Programme] = &[
                 false,
             ),
             traduite(
+                "vanguard courriel-suspect <fichier>",
+                "vanguard suspicious-email <file>",
+                "Ce courriel est-il une arnaque ? Lu sans rien ouvrir : expéditeur, liens, pièces jointes.",
+                "Is this email a scam? Read without opening anything: sender, links, attachments.",
+                false,
+            ),
+            traduite(
                 "vanguard camera-micro",
                 "vanguard camera-mic",
                 "Qui se sert de la caméra et du micro.",

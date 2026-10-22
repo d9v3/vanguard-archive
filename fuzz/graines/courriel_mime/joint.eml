@@ -1,0 +1,16 @@
+From: alice@example.com
+Content-Type: multipart/mixed; boundary=m
+
+--m
+Content-Type: message/rfc822
+
+From: bob@example.org
+Content-Type: multipart/mixed; boundary=n
+
+--n
+Content-Type: application/zip; name*0*=utf-8%27%27fac; name*1="ture.zip"
+Content-Transfer-Encoding: base64
+
+UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==
+--n--
+--m--

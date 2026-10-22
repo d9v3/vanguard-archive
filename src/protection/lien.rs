@@ -59,7 +59,7 @@ Microsoft | microsoft outlook office365 onedrive hotmail sharepoint microsoftonl
 Google | google gmail youtube | google.com google.ca google.fr gmail.com youtube.com youtu.be googleapis.com \
     gstatic.com
 Meta | facebook instagram whatsapp messenger | facebook.com fb.com instagram.com whatsapp.com messenger.com \
-    meta.com wa.me
+    meta.com wa.me facebookmail.com
 Amazon | amazon | amazon.com amazon.ca amazon.fr amazon.co.uk amazon.de amzn.to amazonaws.com
 Netflix | netflix | netflix.com
 Steam | steam steampowered steamcommunity | steampowered.com steamcommunity.com steamstatic.com \
@@ -224,6 +224,11 @@ fn decouper(adresse: &str) -> Option<Lien> {
         }
     };
     let hote = hote.trim_end_matches('.').to_lowercase();
+    // Un nom DNS fait au plus 253 octets : au-delà, ce n'est pas un site joignable, et l'examiner (chaque étiquette
+    // pour chaque marque) coûterait des secondes par lien fabriqué pour ça.
+    if hote.len() > 253 {
+        return None;
+    }
     // Un nom de site a au moins un point, ou c'est une adresse IP (parfois déguisée en un seul nombre) ; « bonjour »
     // n'est pas un lien.
     if hote.is_empty() || (!hote.contains('.') && !adresse_ip(&hote)) || hote.contains(char::is_whitespace) {
@@ -657,6 +662,12 @@ fn lettres_deguisees(hote: &str) -> Option<Signe> {
 
 /// Marque imitée, sous-domaine trompeur, raccourcisseur, hébergement gratuit, extension à risque.
 fn examiner_marques(hote: &str, domaine: &str) -> Vec<Signe> {
+    examiner_marques_de(hote, domaine, true)
+}
+
+/// `examiner_marques`, avec ou sans le « Domaine officiel de… » : ce texte parle d'un lien reçu, il serait faux pour
+/// l'adresse d'un expéditeur.
+fn examiner_marques_de(hote: &str, domaine: &str, dire_officiel: bool) -> Vec<Signe> {
     let mut signes = Vec::new();
     let etiquettes: Vec<&str> = hote.split('.').collect();
     let n_domaine = domaine.split('.').count();
@@ -666,6 +677,9 @@ fn examiner_marques(hote: &str, domaine: &str) -> Vec<Signe> {
     let mut marque_imitee = false;
     for marque in marques() {
         if officiel(hote, marque) {
+            if !dire_officiel {
+                continue;
+            }
             signes.push(signe(
                 Niveau::Info,
                 trf!(
@@ -1275,6 +1289,153 @@ fn verdict(pire: Option<Niveau>, en_ligne: &EnLigne) -> String {
     t
 }
 
+/// Les vérifications en ligne d'un lien, affichées : le pire de ce qu'elles disent (au-dessus d'une information), les
+/// listes qui n'ont pas pu répondre, et combien ont été tentées. Le site n'est jamais contacté.
+fn afficher_en_ligne(lien: &Lien, adresse: &str) -> (Option<Niveau>, Vec<String>, usize) {
+    let verifications = en_ligne(lien, adresse);
+    let mut pire = None;
+    let mut manquent = Vec::new();
+    for v in &verifications {
+        match &v.signe {
+            Some(s) => {
+                afficher_signe(s);
+                pire = pire.max(Some(s.niveau).filter(|n| *n > Niveau::Info));
+            }
+            None => afficher_reponse(&v.liste, &v.reponse, v.note.as_deref()),
+        }
+        match &v.reponse {
+            Inscription::Inscrit(_, n) => pire = pire.max(Some(*n)),
+            Inscription::Impossible(_) => manquent.push(v.liste.clone()),
+            Inscription::Absent => {}
+        }
+    }
+    (pire, manquent, verifications.len())
+}
+
+// ───────────────────────────── Pour les autres outils ─────────────────────────────
+// Le courriel suspect (`courriel_suspect`) juge ses liens et ses expéditeurs avec les mêmes règles et les mêmes
+// tables : deux outils qui ne diraient pas la même chose d'un même nom perdraient la confiance des deux.
+
+/// Un lien trouvé ailleurs (dans un courriel) : son site (vide pour « javascript: » et pareils) et ce qu'on y voit,
+/// sans rien demander à personne. `None` : ce n'est pas un lien.
+pub(crate) fn examiner_lien(texte: &str) -> Option<(String, Vec<(Niveau, String)>)> {
+    let lien = decouper(&nettoyer(texte))?;
+    let site = if lien.hote.is_empty() {
+        String::new()
+    } else {
+        site(&lien)
+    };
+    Some((site, examiner(&lien).into_iter().map(|s| (s.niveau, s.texte)).collect()))
+}
+
+/// Le domaine d'une adresse de courriel : lettres déguisées, marque imitée, sous-domaine trompeur, hébergement
+/// gratuit, extension à risque ; sans le « domaine officiel » des liens.
+pub(crate) fn examiner_domaine(hote: &str) -> Vec<(Niveau, String)> {
+    // Il vient d'un en-tête écrit par l'expéditeur et reparaît dans les messages : rien qui pilote le terminal.
+    let hote = affichable(hote.trim_end_matches('.')).to_lowercase();
+    if hote.is_empty() || adresse_ip(&hote) {
+        return Vec::new();
+    }
+    if hote.len() > 253 {
+        return vec![(
+            Niveau::Moyen,
+            tr!(
+                "Nom de domaine impossible (plus de 253 caractères) : fabriqué, aucun serveur ne porte ce nom.",
+                "Impossible domain name (over 253 characters): made up, no server has this name."
+            )
+            .to_string(),
+        )];
+    }
+    let domaine = domaine_enregistrable(&hote);
+    // Un « � » (caractère piège neutralisé, déjà signalé par l'appelant) n'est pas une lettre d'un autre alphabet.
+    let deguisees = if hote.contains('\u{fffd}') {
+        None
+    } else {
+        lettres_deguisees(&hote)
+    };
+    deguisees
+        .into_iter()
+        .chain(examiner_marques_de(&hote, &domaine, false))
+        .map(|s| (s.niveau, s.texte))
+        .collect()
+}
+
+/// La marque dont `hote` est un vrai domaine (ou un sous-domaine).
+pub(crate) fn marque_officielle(hote: &str) -> Option<&'static str> {
+    let hote = hote.trim_end_matches('.').to_lowercase();
+    marques().iter().find(|m| officiel(&hote, m)).map(|m| m.nom)
+}
+
+/// La marque que nomme un texte (le nom affiché d'un expéditeur : « PayPal Service ») et son vrai domaine. Mots entiers,
+/// sans tenir compte de la casse ; les noms de trois lettres ou moins (TD, UPS, BMO…) seulement en majuscules, sinon le
+/// « ups » d'un « Oups » crierait.
+/// Les lettres déguisées comptent aussi (`marque_nommee_telle_quelle` pour les mots tels qu'écrits).
+pub(crate) fn marque_nommee(texte: &str) -> Option<(&'static str, &'static str)> {
+    marque_nommee_telle_quelle(texte).or_else(|| marque_dans(texte, true))
+}
+
+/// `marque_nommee`, mots pris tels qu'écrits : « LinkedIn » reste LinkedIn, alors que sa lecture rapide (I pris pour
+/// l) ne le serait plus.
+pub(crate) fn marque_nommee_telle_quelle(texte: &str) -> Option<(&'static str, &'static str)> {
+    marque_dans(texte, false)
+}
+
+/// `lu` : chaque mot ramené à ce qu'on voit à l'écran ; un I majuscule au milieu de minuscules se lit l (« PayPaI »),
+/// une lettre d'un autre alphabet se lit comme la latine qu'elle imite (« PаyPаl » en а cyrillique).
+fn marque_dans(texte: &str, lu: bool) -> Option<(&'static str, &'static str)> {
+    let mots: Vec<&str> = texte
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|m| !m.is_empty())
+        .collect();
+    let lire = |m: &str| -> String {
+        if !lu {
+            return m.to_lowercase();
+        }
+        let mixte = m.chars().any(char::is_lowercase);
+        m.chars()
+            .map(|c| if mixte && c == 'I' { 'l' } else { c })
+            .flat_map(char::to_lowercase)
+            .map(|c| latine(c).unwrap_or(c))
+            .collect()
+    };
+    let minuscules: Vec<String> = mots.iter().map(|m| lire(m)).collect();
+    let suite = format!(" {} ", minuscules.join(" "));
+    marques()
+        .iter()
+        .find(|m| {
+            let nom: Vec<String> = m
+                .nom
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|x| !x.is_empty())
+                .map(&lire)
+                .collect();
+            let nom_present = if nom.len() > 1 {
+                suite.contains(&format!(" {} ", nom.join(" ")))
+            } else {
+                nom.first().is_some_and(|n| present(&mots, &minuscules, n))
+            };
+            nom_present || m.mots.iter().any(|cle| present(&mots, &minuscules, cle))
+        })
+        .map(|m| (m.nom, m.domaines[0]))
+}
+
+/// Un mot parmi `mots` ; une clé courte seulement écrite en majuscules.
+fn present(mots: &[&str], minuscules: &[String], cle: &str) -> bool {
+    minuscules
+        .iter()
+        .zip(mots)
+        .any(|(m, original)| m == cle && (cle.chars().count() > 3 || original.chars().all(|c| !c.is_lowercase())))
+}
+
+/// Les vérifications en ligne d'un nom de domaine (âge, URLhaus, Spamhaus DBL, SURBL), affichées comme dans « Ce
+/// lien est-il dangereux ? » : le pire, les listes qui n'ont pas répondu, combien ont été tentées. Seul le nom sort.
+pub(crate) fn verifier_en_ligne(domaine: &str) -> (Option<Niveau>, Vec<String>, usize) {
+    match decouper(&nettoyer(domaine)).filter(|l| !l.hote.is_empty()) {
+        Some(lien) => afficher_en_ligne(&lien, &format!("https://{}/", lien.hote)),
+        None => (None, Vec::new(), 0),
+    }
+}
+
 /// Menu Antivirus et protection › Ce lien est-il dangereux ?, ou `vanguard lien <adresse>`.
 pub fn verifier(adresse: Option<&str>) {
     titre(tr!("Ce lien est-il dangereux ?", "Is this link dangerous?"));
@@ -1334,25 +1495,11 @@ pub fn verifier(adresse: Option<&str>) {
         ));
         if demander(tr!("  Continuer ? [o/N] : ", "  Continue? [y/N]: ")).oui() {
             println!();
-            let verifications = en_ligne(&lien, &propre);
-            let mut manquent = Vec::new();
-            for v in &verifications {
-                match &v.signe {
-                    Some(s) => {
-                        afficher_signe(s);
-                        pire = pire.max(Some(s.niveau).filter(|n| *n > Niveau::Info));
-                    }
-                    None => afficher_reponse(&v.liste, &v.reponse, v.note.as_deref()),
-                }
-                match &v.reponse {
-                    Inscription::Inscrit(_, n) => pire = pire.max(Some(*n)),
-                    Inscription::Impossible(_) => manquent.push(v.liste.clone()),
-                    Inscription::Absent => {}
-                }
-            }
+            let (pire_en_ligne, manquent, faites) = afficher_en_ligne(&lien, &propre);
+            pire = pire.max(pire_en_ligne);
             fait_en_ligne = if manquent.is_empty() {
                 EnLigne::Faites
-            } else if manquent.len() == verifications.len() {
+            } else if manquent.len() == faites {
                 EnLigne::Aucune
             } else {
                 EnLigne::Incompletes(manquent)
@@ -1400,6 +1547,33 @@ mod tests {
                 .all(|m| !m.nom.is_empty() && !m.mots.is_empty() && !m.domaines.is_empty())
         );
         assert_eq!(marques()[0].domaines[0], "paypal.com");
+    }
+
+    #[test]
+    fn hote_trop_long() {
+        // Un nom DNS fait au plus 253 octets.
+        assert!(decouper(&format!("https://{}example.com/", "a.".repeat(200))).is_none());
+        assert!(decouper(&format!("https://{}example.com/", "a.".repeat(100))).is_some());
+        assert_eq!(pire_domaine(&"a.".repeat(200)), Some(Niveau::Moyen));
+    }
+
+    fn pire_domaine(d: &str) -> Option<Niveau> {
+        examiner_domaine(d).into_iter().map(|(n, _)| n).max()
+    }
+
+    #[test]
+    fn marques_aux_lettres_deguisees() {
+        assert_eq!(marque_nommee("P\u{430}yP\u{430}l Service").map(|m| m.0), Some("PayPal"));
+        assert_eq!(marque_nommee("PayPaI").map(|m| m.0), Some("PayPal"));
+        assert_eq!(marque_nommee_telle_quelle("PayPaI"), None);
+        assert_eq!(marque_nommee("LinkedIn").map(|m| m.0), Some("LinkedIn"));
+        assert_eq!(marque_nommee("Alice Martin"), None);
+        // Un nom de domaine piégé ne pilote pas le terminal.
+        assert!(
+            examiner_domaine("paypal.com.x\u{1b}[8mcache.example")
+                .iter()
+                .all(|(_, t)| !t.contains('\u{1b}'))
+        );
     }
 
     #[test]

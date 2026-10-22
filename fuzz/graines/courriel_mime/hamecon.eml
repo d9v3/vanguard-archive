@@ -1,0 +1,16 @@
+From: "PayPal" <service@paypa1.example>
+Reply-To: aide@example.org
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain
+Content-Transfer-Encoding: quoted-printable
+
+Confirmez =
+ici=3A https://paypa1.example/
+--b1
+Content-Type: text/html
+Content-Transfer-Encoding: base64
+
+PGEgaHJlZj0iaHR0cHM6Ly9wYXlwYTEuZXhhbXBsZSI+cGF5cGFsLmNvbTwvYT4=
+--b1--
