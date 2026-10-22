@@ -40,6 +40,8 @@ ecran_commande() { # ecran_commande <code> <secondes> <arguments…>
 }
 # contient <fichier> <texte> : le texte replié à 76 colonnes est cherché mots remis bout à bout, couleurs retirées.
 contient() { python3 -c "import re,sys; t=' '.join(re.sub(r'\x1b\[[0-9;]*m', '', open(sys.argv[1],encoding='utf-8').read()).split()); sys.exit(0 if sys.argv[2] in t else 1)" "$1" "$2"; }
+# contient_motif <fichier> <expression> : de même, pour une expression régulière de Python.
+contient_motif() { python3 -c "import re,sys; t=' '.join(re.sub(r'\x1b\[[0-9;]*m', '', open(sys.argv[1],encoding='utf-8').read()).split()); sys.exit(0 if re.search(sys.argv[2], t) else 1)" "$1" "$2"; }
 # macOS n'a pas la commande timeout : perl s'en charge (alarme puis exec).
 delai() { perl -e 'alarm shift; exec @ARGV' "$@"; }
 
@@ -63,6 +65,37 @@ verifier() { # verifier <description> <commande…>
   else
     echo "ÉCHEC   $d" >>"$JOURNAL"
     printf '      \033[31m✗ %s\033[0m\n' "$d"
+  fi
+}
+
+# mettre_empreinte_essai <copie des empreintes> <empreinte> : l'empreinte ajoutée sur une ligne à part (même si la
+# copie ne finit pas par un saut de ligne). La copie d'avant est gardée à côté, heure comprise ; sans copie, elle est
+# posée pour l'essai. remettre_empreintes <copie> rend tout comme avant, et le vérifie.
+mettre_empreinte_essai() {
+  local copie=$1
+  EMPREINTES_AVANT=
+  DOSSIER_EMPREINTES_POSE=0
+  if [ -e "$copie" ]; then
+    EMPREINTES_AVANT=$(mktemp "${TMPDIR:-/tmp}/vanguard-empreintes-XXXXXX")
+    cp -p "$copie" "$EMPREINTES_AVANT"
+    note "empreintes : copie gardée déjà là, complétée pour l'essai"
+  else
+    [ -d "${copie%/*}" ] || { mkdir -p "${copie%/*}" && DOSSIER_EMPREINTES_POSE=1; }
+    note "empreintes : aucune copie gardée (sans clé abuse.ch, rien ne se télécharge), posée pour l'essai"
+  fi
+  { echo; echo "$2"; } >>"$copie"
+}
+remettre_empreintes() {
+  local copie=$1
+  if [ -n "$EMPREINTES_AVANT" ]; then
+    cp -p "$EMPREINTES_AVANT" "$copie"
+    verifier "empreintes : copie gardée remise comme avant, heure comprise" \
+      bash -c 'cmp -s "$1" "$2" && [ ! "$1" -nt "$2" ] && [ ! "$2" -nt "$1" ]' _ "$EMPREINTES_AVANT" "$copie"
+    rm -f "$EMPREINTES_AVANT"
+  else
+    rm -f "$copie"
+    [ "$DOSSIER_EMPREINTES_POSE" = 1 ] && rmdir "${copie%/*}" 2>/dev/null
+    verifier "empreintes : copie posée pour l'essai retirée" test ! -e "$copie"
   fi
 }
 
@@ -440,19 +473,24 @@ verifier "antivirus : EICAR détecté" grep -qi 'eicar' "$RES/antivirus.txt"
 verifier "antivirus : message « NULL X509 store » de ClamAV masqué" bash -c "! grep -q 'ERROR: NULL X509' '$RES/antivirus.txt'"
 verifier "antivirus : refus de la quarantaine annoncé" grep -q 'Rien n.a été fait' "$RES/antivirus.txt"
 
-section "YARA et empreintes de MalwareBazaar (0.81) : téléchargement, puis une vraie correspondance"
+section "YARA et empreintes de MalwareBazaar : comptées avec la clé abuse.ch, sinon dites non vérifiées ; une vraie correspondance"
 ESSAI_YARA="$RES/dossier-yara"
 mkdir -p "$ESSAI_YARA"
 echo "fichier d'essai de Vanguard $(date +%s)" >"$ESSAI_YARA/facture.pdf.exe"
 lancer yara 600 '' yara "$ESSAI_YARA"
-# Le texte est replié à 76 colonnes : les mots se cherchent remis bout à bout.
-verifier "yara : 308 règles et empreintes chargées, rien trouvé" python3 -c "import re,sys; t=' '.join(open('$RES/yara.txt',encoding='utf-8').read().split()); sys.exit(0 if re.search(r'ni aux \d+ empreintes de MalwareBazaar', t) else 1)"
-# L'empreinte du fichier d'essai ajoutée à la copie gardée des 48 dernières heures : il doit être reconnu, hors ligne.
-EMPREINTES="$HOME/Library/Application Support/vanguard/malwarebazaar/recentes.txt"
-verifier "empreintes : copie gardée dans le dossier de Vanguard" test -s "$EMPREINTES"
-# Une ligne à part même si la copie ne finit pas par un saut de ligne.
-{ echo; shasum -a 256 "$ESSAI_YARA/facture.pdf.exe" | cut -c1-64; } >>"$EMPREINTES"
+# Depuis la 0.84, les empreintes ne se téléchargent qu'avec la clé abuse.ch, que le Mac de GitHub n'a pas : avec elle,
+# l'analyse les compte ; sans elle, elle doit dire qu'elles n'ont pas été vérifiées faute de clé, jamais se taire.
+verifier "yara : empreintes comptées, ou dites non vérifiées faute de clé abuse.ch" contient_motif "$RES/yara.txt" \
+  'ni aux \d+ empreintes de MalwareBazaar|or the \d+ MalwareBazaar fingerprints|MalwareBazaar non vérifiées : clé abuse\.ch manquante|MalwareBazaar fingerprints not checked: abuse\.ch key missing'
+contient "$RES/yara.txt" 'clé abuse.ch manquante' && note "yara : sans clé abuse.ch, aucune empreinte téléchargée"
+# L'empreinte du fichier d'essai dans la copie gardée des 48 dernières heures, puis l'analyse hors ligne : il doit être
+# reconnu par elle seule. Sans clé, Vanguard ne télécharge rien mais lit cette copie : posée pour l'essai si elle
+# manque, puis retirée ; sinon complétée, puis rendue telle quelle, heure comprise (Vanguard la rafraîchit d'après
+# cette heure).
+EMPREINTES="$DOSSIER_VANGUARD/malwarebazaar/recentes.txt"
+mettre_empreinte_essai "$EMPREINTES" "$(shasum -a 256 "$ESSAI_YARA/facture.pdf.exe" | cut -c1-64)"
 VANGUARD_HORS_LIGNE=1 lancer yara-empreinte 300 'n\n' yara "$ESSAI_YARA"
+remettre_empreintes "$EMPREINTES"
 verifier "empreintes : fichier reconnu par son empreinte exacte" grep -q 'empreinte exacte' "$RES/yara-empreinte.txt"
 verifier "empreintes : quarantaine refusée, rien fait" grep -q 'Rien n.a été fait' "$RES/yara-empreinte.txt"
 verifier "empreintes : fichier laissé en place" test -f "$ESSAI_YARA/facture.pdf.exe"
