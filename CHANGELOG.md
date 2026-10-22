@@ -32,9 +32,10 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   et par l'entretien du mois existe encore (et rsync pour la sauvegarde), pas seulement la tâche, et dit comment la
   remettre.
 - **Passes manquées rattrapées.** Activée maintenant, la surveillance rattrape sous Windows une heure manquée
-  (ordinateur éteint ou en veille) et passe cinq minutes après l'ouverture de session ; sous macOS, dès l'ouverture de
-  session. Une surveillance déjà en place n'est pas changée en silence : le bilan la dit « d'une version d'avant », et
-  `vanguard surveillance on` la met à jour.
+  (ordinateur éteint ou en veille) et passe cinq minutes après l'ouverture de session ; sous Linux, elle rattrape au
+  réveil l'heure manquée pendant une veille et passe cinq minutes après l'ouverture de session ; sous macOS, dès
+  l'ouverture de session. Une surveillance déjà en place n'est pas changée en silence : le bilan la dit « d'une version
+  d'avant », et `vanguard surveillance on` la met à jour.
 
 ## 22 octobre 2026 : version 0.84.1
 

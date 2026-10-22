@@ -692,26 +692,15 @@ pub(crate) enum Lecture {
 }
 
 /// Lit la tâche planifiée `quoi` de cet ordinateur : le programme qu'elle lance. Linux : la ligne ExecStart= du
-/// service ; le minuteur n'a pas changé d'une version à l'autre (OnBootSec, puis toutes les heures), donc rien ne
-/// distingue une minuterie d'avant : toujours « à jour ». macOS : le plist de l'agent, et son RunAtLoad ; Windows :
-/// le planificateur lui-même, PowerShell en secours, et son réglage de rattrapage.
+/// service, et, pour la surveillance, sa minuterie relue telle que posée (`minuterie_d_avant`) ; celle de l'entretien
+/// n'a jamais changé. macOS : le plist de l'agent, et son RunAtLoad ; Windows : le planificateur lui-même, PowerShell
+/// en secours, et son réglage de rattrapage.
 pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
     let (nom, agent, tache) = quoi.noms();
     #[cfg(target_os = "linux")]
     {
         let _ = (agent, tache);
-        let chemin = dossier_unites_maison().join(format!("{nom}.service"));
-        match std::fs::read_to_string(&chemin) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Lecture::Absente,
-            Err(e) => Lecture::Illisible(e.to_string()),
-            Ok(t) => programme_d_une_unite(&t).map_or_else(
-                || Lecture::Illisible(tr!("ligne ExecStart= illisible", "unreadable ExecStart= line").to_string()),
-                |programme| Lecture::Lue {
-                    programme,
-                    a_jour: true,
-                },
-            ),
-        }
+        lire_unites(&dossier_unites_maison(), nom, quoi == Planifie::Surveillance)
     }
     #[cfg(target_os = "macos")]
     {
@@ -743,6 +732,36 @@ pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
             }
         }
     }
+}
+
+/// Les unités `nom` posées dans `dossier` : le programme du service, et, si `juger_minuterie`, si la minuterie est
+/// d'aujourd'hui. Une minuterie absente ne se dit pas d'avant (sa disparition se juge à part, `juger_disparition`) ;
+/// illisible, rien n'est conclu : non vérifié, jamais compté comme à jour.
+#[cfg(any(target_os = "linux", test))]
+fn lire_unites(dossier: &Path, nom: &str, juger_minuterie: bool) -> Lecture {
+    let lire = |ext: &str| std::fs::read_to_string(dossier.join(format!("{nom}.{ext}")));
+    let programme = match lire("service") {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Lecture::Absente,
+        Err(e) => return Lecture::Illisible(e.to_string()),
+        Ok(t) => match programme_d_une_unite(&t) {
+            Some(p) => p,
+            None => {
+                return Lecture::Illisible(tr!("ligne ExecStart= illisible", "unreadable ExecStart= line").to_string());
+            }
+        },
+    };
+    let a_jour = if juger_minuterie {
+        match lire("timer") {
+            Ok(t) => !minuterie_d_avant(&t),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => {
+                return Lecture::Illisible(trf!("minuterie illisible ({e})", "unreadable timer ({e})"));
+            }
+        }
+    } else {
+        true
+    };
+    Lecture::Lue { programme, a_jour }
 }
 
 /// Une tâche de Windows est-elle d'aujourd'hui ? Jugé sur « dès que possible » seul : les tâches d'avant ne l'ont
@@ -904,7 +923,14 @@ pub(crate) fn juger_tache(
     if a_jour || quoi == Planifie::Entretien {
         return None;
     }
-    let message = if cfg!(target_os = "macos") {
+    let message = if cfg!(target_os = "linux") {
+        // La minuterie d'avant passe déjà après un arrêt et à l'ouverture de session (OnBootSec échu) : seule la veille
+        // lui manque.
+        tr!(
+            "La surveillance horaire a été planifiée par une version d'avant : elle ne rattrape pas une heure manquée pendant une veille, la passe suivante attend la fin de l'heure entamée au réveil.",
+            "The hourly monitoring was scheduled by an earlier version: it does not catch up an hour missed during sleep; the next run waits for the rest of the hour after wake-up."
+        )
+    } else if cfg!(target_os = "macos") {
         tr!(
             "La surveillance horaire a été planifiée par une version d'avant : elle ne passe pas à l'ouverture de session, la première passe attend une heure.",
             "The hourly monitoring was scheduled by an earlier version: it does not run at sign-in; the first run waits an hour."
@@ -952,6 +978,24 @@ pub fn activer(oui: bool) {
             lire_planifie(Planifie::Surveillance),
             Lecture::Lue { a_jour: false, .. }
         );
+    // Sous Linux, la minuterie qui la remplace est montrée avant d'être posée : c'est elle que la personne accepte en
+    // demandant la remise à jour.
+    #[cfg(target_os = "linux")]
+    if d_avant {
+        trp!(
+            "  La minuterie d'une version d'avant est refaite ainsi :",
+            "  The timer from an earlier version is redone as follows:"
+        );
+        // Les réglages de la minuterie ne dépendent pas du programme lancé : pas besoin de le situer deux fois.
+        let (_, minuterie) = unites_systemd("", Reglages::Aujourdhui);
+        for l in minuterie.lines().filter(|l| l.starts_with("On")) {
+            println!("    {GRIS}{l}{RESET}");
+        }
+        trp!(
+            "  {GRIS}(toutes les heures pile, rattrapée au réveil, 5 min après l'ouverture){RESET}",
+            "  {GRIS}(every hour on the hour, caught up on wake-up, 5 min after sign-in){RESET}"
+        );
+    }
     let retrait = if oui { Ok(()) } else { desinstaller() };
     let reussi = if oui {
         installer(&executable(), Reglages::Aujourdhui)
@@ -1140,12 +1184,26 @@ pub(crate) fn dossier_unites_maison() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user")
 }
 
-/// Les deux unités systemd : le service, puis le minuteur (cinq minutes après le démarrage, puis une heure après
-/// chaque passe). Persistent= n'agit que sur un OnCalendar= : il ne rattrape rien ici. Après un arrêt, c'est
-/// OnBootSec qui fait la passe ; après une veille, l'horloge du minuteur s'est arrêtée avec l'ordinateur, et la passe
-/// vient au bout du reste de l'heure entamée, sans rattrapage au réveil.
+/// Les deux unités systemd : le service, puis la minuterie (`r`).
+///
+/// D'aujourd'hui : toutes les heures pile (OnCalendar=hourly) et cinq minutes après le démarrage du gestionnaire de
+/// l'utilisateur (OnStartupSec=5min). Une heure de l'horloge murale continue d'avancer pendant une veille, et systemd
+/// fait au réveil la passe d'une heure échue pendant le sommeil (une seule, même si plusieurs sont passées :
+/// systemd.timer(5), OnCalendar=). Après un arrêt ou une fermeture de session, le gestionnaire de l'utilisateur repart
+/// à l'ouverture suivante, et OnStartupSec y fait la passe cinq minutes plus tard, le temps que le réseau se monte ; à
+/// l'activation, il est déjà échu et passe tout de suite (« already in the past … will immediately elapse »). Pas de
+/// Persistent= : il ne ferait que doubler cette passe à l'ouverture (il rattrape au démarrage de la minuterie, comme
+/// OnStartupSec), et laisserait un fichier d'horodatage à retirer à la désinstallation. Pas de RandomizedDelaySec= :
+/// une seule minuterie de ce genre par ordinateur, rien à étaler ; la précision par défaut (AccuracySec=1min) suffit à
+/// la regrouper avec les autres réveils.
+///
+/// D'avant : cinq minutes après le démarrage (OnBootSec, déjà échu à une ouverture de session plus tardive, donc
+/// immédiat), puis une heure après chaque passe (OnUnitActiveSec). Son Persistent= n'agit que sur un OnCalendar= : il
+/// ne rattrapait rien. Après une veille, l'horloge de OnUnitActiveSec s'arrête avec l'ordinateur : la passe vient au
+/// bout du reste de l'heure entamée, sans rattrapage au réveil. Gardée à l'identique pour une surveillance reprise
+/// telle qu'acceptée (`reprendre`), et reconnue à ces réglages (`minuterie_d_avant`).
 #[cfg(any(target_os = "linux", test))]
-pub(crate) fn unites_systemd(exe: &str) -> (String, &'static str) {
+pub(crate) fn unites_systemd(exe: &str, r: Reglages) -> (String, &'static str) {
     // Chemin entre guillemets (un dossier personnel peut contenir une espace), « % » doublé (spécificateurs de
     // systemd).
     let exe = format!("\"{}\"", exe.replace('%', "%%").replace('"', "\\\""));
@@ -1153,11 +1211,32 @@ pub(crate) fn unites_systemd(exe: &str) -> (String, &'static str) {
         "[Unit]\nDescription=Vanguard : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
         "[Unit]\nDescription=Vanguard: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
     );
-    let timer = tr!(
-        "[Unit]\nDescription=Vanguard : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
-        "[Unit]\nDescription=Vanguard: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
-    );
+    let timer = match r {
+        Reglages::Aujourdhui => tr!(
+            "[Unit]\nDescription=Vanguard : scan du réseau toutes les heures, rattrapé au réveil\n\n[Timer]\nOnCalendar=hourly\nOnStartupSec=5min\n\n[Install]\nWantedBy=timers.target\n",
+            "[Unit]\nDescription=Vanguard: network scan every hour, caught up after sleep\n\n[Timer]\nOnCalendar=hourly\nOnStartupSec=5min\n\n[Install]\nWantedBy=timers.target\n"
+        ),
+        Reglages::DAvant => tr!(
+            "[Unit]\nDescription=Vanguard : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+            "[Unit]\nDescription=Vanguard: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+        ),
+    };
     (service, timer)
+}
+
+/// La minuterie de la surveillance a-t-elle été posée par une version d'avant ? Reconnue à ce qui les distingue : une
+/// heure comptée depuis la passe précédente (OnUnitActiveSec=), sans heure de l'horloge (OnCalendar=). Une minuterie
+/// d'aujourd'hui, ou retouchée par la personne pour suivre l'horloge, n'en est pas une : rien à lui proposer.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn minuterie_d_avant(texte: &str) -> bool {
+    let a = |cle: &str| {
+        texte.lines().any(|l| {
+            l.trim_start()
+                .split_once('=')
+                .is_some_and(|(k, v)| k.trim() == cle && !v.trim().is_empty())
+        })
+    };
+    a("OnUnitActiveSec") && !a("OnCalendar")
 }
 
 /// Le programme que lance une unité systemd : le premier mot de sa ligne ExecStart=.
@@ -1196,15 +1275,18 @@ pub(crate) fn premier_mot_cite(valeur: &str) -> Option<PathBuf> {
 
 #[cfg(target_os = "linux")]
 fn installer(exe: &str, r: Reglages) -> bool {
-    // Le minuteur n'a pas changé depuis les versions d'avant : rien ne distingue une tâche d'avant sous Linux.
-    let _ = r;
     let dossier = dossier_unites_maison();
     let _ = std::fs::create_dir_all(&dossier);
-    let (service, timer) = unites_systemd(exe);
+    let (service, timer) = unites_systemd(exe, r);
     let _ = std::fs::write(dossier.join(format!("{NOM}.service")), service);
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
+    let minuterie = format!("{NOM}.timer");
+    // Redémarrée plutôt que « enable --now » : une minuterie déjà en marche (une réactivation qui remplace celle d'une
+    // version d'avant) ne serait pas relancée par start, et rien ici ne vérifie que daemon-reload lui fait prendre ses
+    // nouveaux réglages ; redémarrée, elle les prend à coup sûr. Arrêtée, restart la démarre, comme start.
     reussit("systemctl", &["--user", "daemon-reload"])
-        && reussit("systemctl", &["--user", "enable", "--now", &format!("{NOM}.timer")])
+        && reussit("systemctl", &["--user", "enable", &minuterie])
+        && reussit("systemctl", &["--user", "restart", &minuterie])
 }
 
 #[cfg(target_os = "macos")]
@@ -1502,12 +1584,14 @@ mod tests {
     #[test]
     fn unites_et_programme_lu() {
         let exe = "/home/a b/100%/van\"guard";
-        let (service, timer) = unites_systemd(exe);
+        let (service, timer) = unites_systemd(exe, Reglages::Aujourdhui);
         assert!(
             service.contains("ExecStart=\"/home/a b/100%%/van\\\"guard\" surveiller\n"),
             "{service}"
         );
-        assert!(timer.contains("OnBootSec=5min") && timer.contains("Persistent=true"));
+        assert!(timer.contains("\nOnCalendar=hourly\n") && timer.contains("\nOnStartupSec=5min\n"));
+        // Le service ne change pas d'une version à l'autre : seule la minuterie diffère.
+        assert_eq!(unites_systemd(exe, Reglages::DAvant).0, service);
         // Aller-retour : le programme relu dans l'unité est celui qu'elle lance.
         assert_eq!(programme_d_une_unite(&service), Some(PathBuf::from(exe)));
         assert_eq!(programme_d_une_unite("[Service]\nType=oneshot\n"), None);
@@ -1530,6 +1614,87 @@ mod tests {
             programme_d_une_unite(&sauvegarde),
             Some(PathBuf::from("/usr/bin/rsync"))
         );
+    }
+
+    /// La minuterie d'aujourd'hui suit l'horloge (rattrapée au réveil) et passe après l'ouverture de session ; celle
+    /// d'avant reste octet pour octet celle des versions d'avant, pour une surveillance reprise telle qu'acceptée.
+    #[test]
+    fn minuteries_d_aujourdhui_et_d_avant() {
+        let (_, aujourdhui) = unites_systemd("/usr/bin/vanguard", Reglages::Aujourdhui);
+        for absent in ["OnUnitActiveSec", "OnBootSec", "Persistent", "RandomizedDelaySec"] {
+            assert!(!aujourdhui.contains(absent), "{absent} présent : {aujourdhui}");
+        }
+        assert!(aujourdhui.contains("[Install]\nWantedBy=timers.target\n"));
+        let (_, avant) = unites_systemd("/usr/bin/vanguard", Reglages::DAvant);
+        let fin =
+            "\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
+        assert!(
+            avant == format!("[Unit]\nDescription=Vanguard : scan du réseau toutes les heures{fin}")
+                || avant == format!("[Unit]\nDescription=Vanguard: network scan every hour{fin}"),
+            "{avant}"
+        );
+        // Reconnues à leur contenu, dans les deux langues, sans faux positif sur celle d'aujourd'hui.
+        assert!(minuterie_d_avant(avant));
+        assert!(!minuterie_d_avant(aujourdhui));
+        for t in [
+            "[Unit]\nDescription=Vanguard : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n",
+            "[Unit]\nDescription=Vanguard: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n",
+            "[Timer]\n  OnUnitActiveSec = 1h\n",
+        ] {
+            assert!(minuterie_d_avant(t), "{t}");
+        }
+        // Retouchée pour suivre l'horloge, vide, ou une clé vidée : rien d'une version d'avant à proposer.
+        for t in [
+            "[Timer]\nOnUnitActiveSec=1h\nOnCalendar=*:30\n",
+            "",
+            "[Timer]\nOnUnitActiveSec=\nOnCalendar=hourly\n",
+            "[Timer]\nOnUnitActiveSec=\n",
+        ] {
+            assert!(!minuterie_d_avant(t), "{t}");
+        }
+    }
+
+    /// Les unités relues dans un dossier jetable : le programme du service, et la minuterie d'avant reconnue pour la
+    /// surveillance seulement ; absente, elle ne se dit pas d'avant ; illisible, rien n'est conclu.
+    #[test]
+    fn unites_relues_d_aujourdhui_ou_d_avant() {
+        let d = crate::reseau::dossier_local().join("unites-relues");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let exe = "/home/alice/.local/share/vanguard/bin/vanguard";
+        assert_eq!(lire_unites(&d, NOM, true), Lecture::Absente);
+        let ecrire = |r| {
+            let (service, timer) = unites_systemd(exe, r);
+            std::fs::write(d.join(format!("{NOM}.service")), service).unwrap();
+            std::fs::write(d.join(format!("{NOM}.timer")), timer).unwrap();
+        };
+        let lue = |a_jour| Lecture::Lue {
+            programme: PathBuf::from(exe),
+            a_jour,
+        };
+        ecrire(Reglages::Aujourdhui);
+        assert_eq!(lire_unites(&d, NOM, true), lue(true));
+        ecrire(Reglages::DAvant);
+        assert_eq!(lire_unites(&d, NOM, true), lue(false));
+        // L'entretien ne juge pas sa minuterie : elle n'a jamais changé.
+        assert_eq!(lire_unites(&d, NOM, false), lue(true));
+        // Le bilan qui en sort : une information, et la commande qui la met à jour.
+        let c = juger_tache(Planifie::Surveillance, &lire_unites(&d, NOM, true), None, |_| true).expect("constat");
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        let action = &c.correctif.as_ref().unwrap().action;
+        assert!(
+            action.contains("surveillance on") || action.contains("monitor on"),
+            "{action}"
+        );
+        // La minuterie retirée : sa disparition se juge à part, pas de « version d'avant » ici.
+        std::fs::remove_file(d.join(format!("{NOM}.timer"))).unwrap();
+        assert_eq!(lire_unites(&d, NOM, true), lue(true));
+        // Un dossier à la place de la minuterie : illisible, donc non vérifié.
+        std::fs::create_dir_all(d.join(format!("{NOM}.timer"))).unwrap();
+        assert!(matches!(lire_unites(&d, NOM, true), Lecture::Illisible(_)));
+        let c = juger_tache(Planifie::Surveillance, &lire_unites(&d, NOM, true), None, |_| true).expect("constat");
+        assert!(!c.verifie);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -1930,7 +1930,8 @@ mod tests {
         let unites = &l.unites[0];
         let bin = l.donnees.join("bin");
         let exe = bin.join(crate::mise_a_jour::NOM);
-        let (service, timer) = surveillance::unites_systemd(&exe.display().to_string());
+        let (service, timer) =
+            surveillance::unites_systemd(&exe.display().to_string(), surveillance::Reglages::Aujourdhui);
         ecrire(&unites.join("vanguard-surveillance.service"), service);
         ecrire(&unites.join("vanguard-surveillance.timer"), timer);
         ecrire(&unites.join("vanguard-entretien.timer"), "[Timer]\n");

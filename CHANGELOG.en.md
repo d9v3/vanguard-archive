@@ -31,7 +31,8 @@ delivered just before it. Only the latest version has its download page; every v
 - **Monitoring that no longer runs is said.** The check-up verifies that the program started by the hourly monitoring
   and by the monthly check-up still exists (and rsync for the backup), not only the task, and says how to put it back.
 - **Missed runs caught up.** Turned on now, monitoring catches up a missed hour on Windows (computer off or asleep) and
-  runs five minutes after sign-in; on macOS, right at sign-in. Monitoring already in place is not changed silently: the
+  runs five minutes after sign-in; on Linux, it catches up on wake-up the hour missed during sleep and runs five
+  minutes after sign-in; on macOS, right at sign-in. Monitoring already in place is not changed silently: the
   check-up says it is "from an earlier version", and `vanguard monitor on` updates it.
 
 ## October 22, 2026: version 0.84.1
