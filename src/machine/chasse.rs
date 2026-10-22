@@ -252,29 +252,53 @@ fn tentatives_lues() -> Option<Result<Lues, Constat>> {
 }
 
 /// Sous macOS : sshd écrit dans le journal unifié, qui ne se lit qu'en lançant « log show » (des minutes, pour une
-/// journée). Sans sshd en écoute (Session à distance coupée, le cas courant), rien à lire, comme sous Linux sans
-/// serveur SSH.
+/// journée). Sans sshd (Session à distance coupée, le cas courant), rien à lire, comme sous Linux sans serveur SSH.
 #[cfg(target_os = "macos")]
 fn tentatives_lues() -> Option<Result<Lues, Constat>> {
     let ecoutes =
         super::sortie("netstat", &["-an", "-p", "tcp"]).map(|netstat| super::unix::lire_netstat(&netstat, true));
-    tentatives_sans_journal(ecoutes.as_deref())
+    let services = std::fs::read_to_string("/etc/services").unwrap_or_default();
+    let sshd_en_marche =
+        programmes_en_marche().map(|(liste, _)| liste.iter().any(|p| p.nom == "sshd" || p.nom.starts_with("sshd-")));
+    tentatives_sans_journal(ecoutes.as_deref(), port_ssh(&services), sshd_en_marche)
+}
+
+/// Le port du service « ssh » d'/etc/services : celui où launchd ouvre Session à distance, 22 sauf s'il a été changé.
+#[cfg(any(target_os = "macos", test))]
+fn port_ssh(services: &str) -> Option<u16> {
+    services.lines().find_map(|l| {
+        let mut mots = l.split('#').next()?.split_whitespace();
+        (mots.next()? == "ssh").then_some(())?;
+        mots.next()?.strip_suffix("/tcp")?.parse().ok()
+    })
 }
 
 /// La décision de macOS, à part pour se tester partout. `ecoutes` : les ports TCP en écoute, `None` si netstat n'a
-/// pas répondu. Un sshd qui n'écoute que la machine elle-même compte aussi : ses échecs vont au journal non lu.
-/// netstat muet ou sshd en écoute : non vérifié, jamais compté comme sain.
+/// pas répondu ; `port_ssh` : celui d'/etc/services ; `sshd_en_marche` : un sshd parmi les programmes en marche,
+/// `None` si ps n'a pas répondu. Rien à lire seulement si rien n'écoute sur 22 ni sur le port de ssh et qu'aucun sshd
+/// ne tourne (un sshd de Homebrew sur un autre port tourne sans arrêt). Un sshd qui n'écoute que la machine elle-même
+/// compte aussi : ses échecs vont au journal non lu. netstat ou ps muets, ou sshd présent : non vérifié, jamais sain.
 #[cfg(any(target_os = "macos", test))]
-fn tentatives_sans_journal(ecoutes: Option<&[(String, u16)]>) -> Option<Result<Lues, Constat>> {
-    let raison = match ecoutes {
-        Some(ports) if !ports.iter().any(|(_, port)| *port == 22) => return None,
-        Some(_) => tr!(
+fn tentatives_sans_journal(
+    ecoutes: Option<&[(String, u16)]>,
+    port_ssh: Option<u16>,
+    sshd_en_marche: Option<bool>,
+) -> Option<Result<Lues, Constat>> {
+    let raison = match (ecoutes, sshd_en_marche) {
+        (Some(ports), Some(false)) if !ports.iter().any(|(_, port)| *port == 22 || Some(*port) == port_ssh) => {
+            return None;
+        }
+        (Some(_), Some(_)) => tr!(
             "sshd écrit dans le journal unifié de macOS, que Vanguard ne lit pas",
             "sshd writes to macOS's unified log, which Vanguard does not read"
         ),
-        None => tr!(
+        (None, _) => tr!(
             "netstat n'a pas dit si sshd écoute",
             "netstat did not tell whether sshd is listening"
+        ),
+        (Some(_), None) => tr!(
+            "ps n'a pas dit si sshd tourne",
+            "ps did not tell whether sshd is running"
         ),
     };
     Some(Err(impossible("Comptes", raison)))
@@ -1372,29 +1396,52 @@ mod tests {
         assert!(!c.message.contains('\x1b') && !c.correctif.unwrap().action.contains('\x1b'));
     }
 
-    /// macOS : sans port 22 en écoute, rien à lire, comme sous Linux sans serveur SSH. sshd en écoute, même sur la
-    /// machine elle-même, ou netstat muet : non vérifié, jamais sain.
+    /// macOS : rien n'écoute sur 22 ni sur le port de ssh et aucun sshd ne tourne : rien à lire, comme sous Linux sans
+    /// serveur SSH. sshd en écoute, même sur la machine elle-même ou sur un autre port, sshd en marche, ou netstat ou
+    /// ps muets : non vérifié, jamais sain.
     #[test]
     fn mac_sans_sshd() {
         let ports = |liste: &[(&str, u16)]| -> Vec<(String, u16)> {
             liste.iter().map(|(a, p)| ((*a).to_string(), *p)).collect()
         };
-        assert!(tentatives_sans_journal(Some(&[])).is_none());
-        assert!(tentatives_sans_journal(Some(&ports(&[("*", 5900), ("127.0.0.1", 631), ("*", 2222)]))).is_none());
-        for ecoute in [
-            ports(&[("*", 22)]),
-            ports(&[("127.0.0.1", 22)]),
-            ports(&[("::1", 22), ("*", 5900)]),
+        let autres = ports(&[("*", 5900), ("127.0.0.1", 631), ("*", 2222)]);
+        assert!(tentatives_sans_journal(Some(&[]), Some(22), Some(false)).is_none());
+        assert!(tentatives_sans_journal(Some(&autres), Some(22), Some(false)).is_none());
+        assert!(tentatives_sans_journal(Some(&autres), None, Some(false)).is_none());
+        for (ecoute, port_ssh, en_marche) in [
+            (ports(&[("*", 22)]), Some(22), Some(false)),
+            (ports(&[("127.0.0.1", 22)]), Some(22), Some(false)),
+            (ports(&[("::1", 22), ("*", 5900)]), Some(22), Some(false)),
+            // Session à distance déplacée par /etc/services : launchd écoute sur 2222.
+            (autres.clone(), Some(2222), Some(false)),
+            // Un sshd de Homebrew lancé avec -p 2222 : il tourne.
+            (autres.clone(), Some(22), Some(true)),
         ] {
-            let Some(Err(c)) = tentatives_sans_journal(Some(&ecoute)) else {
-                panic!("sshd en écoute compté comme lu : {ecoute:?}");
+            let Some(Err(c)) = tentatives_sans_journal(Some(&ecoute), port_ssh, en_marche) else {
+                panic!("sshd compté comme lu : {ecoute:?} {port_ssh:?} {en_marche:?}");
             };
             assert!(!c.verifie && c.message.contains("sshd"), "{}", c.message);
         }
-        let Some(Err(c)) = tentatives_sans_journal(None) else {
+        let Some(Err(c)) = tentatives_sans_journal(None, Some(22), Some(false)) else {
             panic!("netstat muet compté comme sain");
         };
         assert!(!c.verifie && c.message.contains("netstat"), "{}", c.message);
+        let Some(Err(c)) = tentatives_sans_journal(Some(&autres), Some(22), None) else {
+            panic!("ps muet compté comme sain");
+        };
+        assert!(!c.verifie && c.message.contains("ps"), "{}", c.message);
+    }
+
+    #[test]
+    fn port_ssh_d_etc_services() {
+        let services = "# Network services\n\
+                        sshell 614/tcp\n\
+                        ssh              2222/udp     # SSH Remote Login Protocol\n\
+                        ssh              2222/tcp     # SSH Remote Login Protocol\n\
+                        telnet 23/tcp\n";
+        assert_eq!(port_ssh(services), Some(2222));
+        assert_eq!(port_ssh("#ssh 22/tcp\nssh 22/tcp\n"), Some(22));
+        assert_eq!(port_ssh(""), None);
     }
 
     /// Une lecture qui a atteint sa borne (les 2 000 échecs les plus récents sous Windows) : sain, jamais sans le dire.
