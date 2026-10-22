@@ -145,7 +145,38 @@ pub(crate) fn prises() -> Option<Vec<Prise>> {
     )
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+/// macOS : `netstat -an -p tcp`, lu comme pour le bilan des ports ; les noms viennent de lsof, qui sans droits admin ne
+/// nomme que les programmes de la personne (ceux d'IA le sont : ils tournent sous son compte).
+#[cfg(target_os = "macos")]
+pub(crate) fn prises() -> Option<Vec<Prise>> {
+    let netstat = super::sortie("netstat", &["-an", "-p", "tcp"])?;
+    Some(prises_netstat(&netstat, &super::programmes_en_ecoute()))
+}
+
+/// Les ports TCP en écoute du netstat des BSD, dans la forme que `juger_exposition` attend. « * » (toutes les
+/// adresses, tcp4 comme tcp6) devient 0.0.0.0 : la même ligne pour les deux, ouverte au réseau. Une adresse de lien
+/// de la boucle (« fe80::1%lo0 ») devient ::1, pour rester locale ; celle d'une vraie interface (« %en0 ») garde sa
+/// zone, que l'analyse d'adresse refuse : ouverte, puisque les voisins du Wi-Fi la joignent.
+#[cfg(unix)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn prises_netstat(netstat: &str, programmes: &std::collections::HashMap<u16, String>) -> Vec<Prise> {
+    super::unix::lire_netstat(netstat, true)
+        .into_iter()
+        .map(|(adresse, port)| Prise {
+            adresse: if adresse == "*" {
+                "0.0.0.0".to_string()
+            } else if adresse.split_once('%').is_some_and(|(_, zone)| zone.starts_with("lo")) {
+                "::1".to_string()
+            } else {
+                adresse
+            },
+            port,
+            programme: programmes.get(&port).cloned().unwrap_or_default(),
+        })
+        .collect()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub(crate) fn prises() -> Option<Vec<Prise>> {
     None
 }
@@ -710,6 +741,48 @@ mod tests {
         assert!(un_ferme.probleme.is_some() && !un_ferme.message.contains("11434"));
         let fermes = juger_exposition(&ouvert, &[11434, 8188].into());
         assert!(fermes.probleme.is_none() && fermes.message.contains("Ollama (0.0.0.0:11434)"));
+    }
+
+    /// macOS : netstat → prises, jugées comme sous Linux et Windows.
+    #[cfg(unix)]
+    #[test]
+    fn prises_du_netstat_des_bsd() {
+        let netstat = "Active Internet connections (including servers)\n\
+                       Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)\n\
+                       tcp46      0      0  *.11434                *.*                    LISTEN\n\
+                       tcp6       0      0  *.11434                *.*                    LISTEN\n\
+                       tcp4       0      0  127.0.0.1.1234         *.*                    LISTEN\n\
+                       tcp6       0      0  ::1.8188               *.*                    LISTEN\n\
+                       tcp6       0      0  fe80::1%lo0.7860       *.*                    LISTEN\n\
+                       tcp4       0      0  192.168.1.20.9000      *.*                    LISTEN\n\
+                       tcp4       0      0  10.0.0.20.51234        17.57.146.20.443       ESTABLISHED\n";
+        let programmes = [(11434, "ollama".to_string()), (9000, "llama-server".to_string())].into();
+        let p = prises_netstat(netstat, &programmes);
+        let vues: Vec<(&str, u16, &str)> = p
+            .iter()
+            .map(|p| (p.adresse.as_str(), p.port, p.programme.as_str()))
+            .collect();
+        assert_eq!(
+            vues,
+            [
+                ("0.0.0.0", 11434, "ollama"),
+                ("0.0.0.0", 11434, "ollama"),
+                ("127.0.0.1", 1234, ""),
+                ("::1", 8188, ""),
+                ("::1", 7860, ""),
+                ("192.168.1.20", 9000, "llama-server"),
+            ]
+        );
+        // Ollama sur toutes les adresses (une seule ligne pour tcp46 et tcp6) et llama-server sur le Wi-Fi : ouverts ;
+        // les trois autres restent sur la boucle.
+        let c = juger_exposition(&p, &HashSet::new());
+        assert_eq!(c.probleme, Some(Niveau::Eleve));
+        assert_eq!(c.message.matches("Ollama (0.0.0.0:11434)").count(), 1);
+        assert!(c.message.contains("llama-server (192.168.1.20:9000)"));
+        assert!(!c.message.contains("LM Studio") && !c.message.contains("ComfyUI") && !c.message.contains("Gradio"));
+        // Zone d'une vraie interface : ouverte.
+        let lien = prises_netstat("tcp6  0  0  fe80::1c2:3%en0.11434  *.*  LISTEN\n", &programmes);
+        assert!(juger_exposition(&lien, &HashSet::new()).probleme.is_some());
     }
 
     #[test]

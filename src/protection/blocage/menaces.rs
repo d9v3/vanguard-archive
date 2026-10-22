@@ -491,8 +491,6 @@ fn agents(t: &mut Trouvees) {
                 });
             }
         }
-        // macOS : les ports en écoute ne se lisent pas ici (le bilan le dit déjà).
-        None if cfg!(target_os = "macos") => {}
         None => t.non_verifie.push(
             tr!(
                 "serveurs d'IA : ports en écoute illisibles",

@@ -203,26 +203,6 @@ fn mode_furtif() -> Option<Constat> {
     )
 }
 
-/// Ports en écoute de `netstat -an -p tcp|udp` : « tcp4  0  0  *.22  *.*  LISTEN » → (adresse, port).
-/// L'adresse et le port sont séparés par le dernier point (« 127.0.0.1.631 », « ::1.631 », « *.5900 »).
-fn lire_netstat(sortie: &str, tcp: bool) -> Vec<(String, u16)> {
-    sortie
-        .lines()
-        .filter(|l| {
-            if tcp {
-                l.contains("LISTEN")
-            } else {
-                l.starts_with("udp")
-            }
-        })
-        .filter_map(|l| {
-            let local = l.split_whitespace().nth(3)?;
-            let (adresse, port) = local.rsplit_once('.')?;
-            Some((adresse.to_string(), port.parse().ok()?))
-        })
-        .collect()
-}
-
 /// Service de partage de macOS derrière un port, et où le couper.
 fn partage(port: u16) -> Option<&'static str> {
     Some(match port {
@@ -241,7 +221,7 @@ fn partage(port: u16) -> Option<&'static str> {
 /// Serveur SSH (Remote Login) : jugé seulement s'il écoute le réseau sur le port 22.
 fn ssh_serveur() -> Option<Constat> {
     let netstat = sortie("netstat", &["-an", "-p", "tcp"])?;
-    let ecoute = lire_netstat(&netstat, true)
+    let ecoute = super::unix::lire_netstat(&netstat, true)
         .iter()
         .any(|(adresse, port)| *port == 22 && !(adresse.starts_with("127.") || adresse == "::1"));
     if !ecoute {
@@ -261,7 +241,7 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
                 tr!("netstat indisponible", "netstat unavailable"),
             )];
         };
-        for (adresse, port) in lire_netstat(&netstat, tcp) {
+        for (adresse, port) in super::unix::lire_netstat(&netstat, tcp) {
             let local = adresse.starts_with("127.") || adresse == "::1" || adresse.starts_with("fe80:");
             let i = info_port(port);
             // UDP : Bonjour (5353) et le service de noms NetBIOS (137, 138, netbiosd) font partie de macOS ; ports
@@ -913,22 +893,6 @@ mod tests {
         );
         assert_eq!(lire_pare_feu("Firewall is disabled. (State = 0)"), Some(false));
         assert_eq!(lire_pare_feu(""), None);
-    }
-
-    #[test]
-    fn lecture_de_netstat() {
-        let tcp = "Active Internet connections (including servers)\n\
-                   Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)\n\
-                   tcp4       0      0  *.22                   *.*                    LISTEN\n\
-                   tcp4       0      0  127.0.0.1.631          *.*                    LISTEN\n\
-                   tcp6       0      0  *.5900                 *.*                    LISTEN\n\
-                   tcp4       0      0  10.0.0.20.51234        17.57.146.20.443       ESTABLISHED\n";
-        assert_eq!(
-            lire_netstat(tcp, true),
-            [("*".into(), 22), ("127.0.0.1".into(), 631), ("*".into(), 5900)]
-        );
-        let udp = "udp4       0      0  *.5353                 *.*\nudp6       0      0  ::1.123  *.*\n";
-        assert_eq!(lire_netstat(udp, false), [("*".into(), 5353), ("::1".into(), 123)]);
     }
 
     #[test]
