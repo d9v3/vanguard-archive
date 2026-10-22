@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vanguard 0.84</title>
+<title>Vanguard 0.85</title>
 <meta name="description" content="Vanguard : cyberdéfense portable des postes et des réseaux, depuis une clé USB. Durcissement, détection, blocage et réponse aux incidents pour Windows, Linux et macOS ; le dépannage en plus. Fonctions, fiche technique et commandes.">
 <meta name="theme-color" content="#0b1220">
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -202,7 +202,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <a class="marque" href="#haut" id="haut">
 <span class="plaque" aria-hidden="true"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path fill="#ffffff" d="M8 12h22l20 52 20-52h22L60 90H40z"/><path fill="#0d0f12" d="M30 12h6l14 37 14-37h6L50 66z"/></svg></span>
 <b>VANGUARD</b>
-<span class="version">0.84.1</span>
+<span class="version">0.85.0</span>
 </a>
 <nav class="nav" aria-label="Sections">
 <a href="#comment">Comment ça marche</a>
@@ -228,13 +228,13 @@ main { gap: 3.5rem; padding-block: 3rem; }
 </div>
 <div class="faits">
 <div class="fait"><b>A → F</b><span>une note pour l'ordinateur, une par domaine du réseau</span></div>
-<div class="fait"><b>130</b><span>règles du bilan, 32 fiches d'audit du réseau</span></div>
+<div class="fait"><b>132</b><span>règles du bilan, 32 fiches d'audit du réseau</span></div>
 <div class="fait"><b>0</b><span>changement sans accord</span></div>
 </div>
 </div>
 <div class="fenetre" role="navigation" aria-label="Menu principal de Vanguard">
 <div class="titre-fenetre"><i></i><i></i><i></i><span>vanguard</span></div>
-<pre><span class="boite">  <b>VANGUARD 0.84            </b>sécurise et optimise ta machine et ton réseau</span>
+<pre><span class="boite">  <b>VANGUARD 0.85            </b>sécurise et optimise ta machine et ton réseau</span>
 
   <span class="filet">BILAN DE SÉCURITÉ</span>
  <span class="c">►</span>  1  <a href="#bilan">Bilan complet : machine + réseau</a>     <span class="c">← commencer ici</span>
@@ -324,6 +324,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <li><b>Antivirus, 308 règles YARA et les empreintes</b> de logiciels malveillants connus de MalwareBazaar (clé abuse.ch gratuite ; la dernière copie sert hors ligne) ; quarantaine réversible.</li>
 <li><b>Blocage des menaces</b> d'un clic : programme arrêté et mis en quarantaine, connexion fermée au pare-feu, lancement retiré, tout annulable sauf l'arrêt ; la <b>protection active</b>, une fois mise en marche, bloque toute seule ce qui ne fait aucun doute et prévient. <span class="nouveau">nouveau</span></li>
 <li><b>Chasse aux menaces en direct</b> : un mot de passe deviné (une connexion réussie juste après une rafale d'échecs), un outil d'attaque en marche, une commande qui télécharge ce qu'elle lance. <span class="nouveau">nouveau</span></li>
+<li><b>Le veilleur</b> (Linux) : chaque programme lancé et chaque connexion fermée vus sur le moment, même de quelques millisecondes ; il observe et n'arrête rien ; coupé par défaut. <span class="nouveau">nouveau</span></li>
 <li><b>La mémoire des programmes</b> qui tournent, passée aux règles YARA à la demande : un logiciel malveillant « sans fichier » ne vit que là. <span class="nouveau">nouveau</span></li>
 <li><b>Ce qui se lance en cachette</b>, portes dérobées, rootkit, connexions vers des serveurs de botnets, voleur de mots de passe (Responder) démasqué sur le réseau.</li>
 <li><b>Portes cachées de Windows</b> (paquets de LSA, moniteurs d'impression, Winsock…) et <b>pilotes vulnérables</b> du noyau, d'après la liste LOLDrivers. <span class="nouveau">nouveau</span></li>
@@ -393,8 +394,9 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <li><b>Paramètres</b> au même endroit : langue, travail sans Internet, protection en temps réel, surveillance, entretien, blocage, restrictions des extensions ; « s » au menu principal. <span class="nouveau">nouveau</span></li>
 <li><b>Extensions personnelles</b> dans Vanguard, sans toucher à son code : un plugin (un dossier avec <code>plugin.toml</code>, ajouté depuis un dossier ou une archive .zip) ou un script du labo posé tel quel ; leurs constats à part, hors de la note. <span class="nouveau">nouveau</span></li>
 <li><b>Vérifiées avant de tourner</b> : tout le dossier analysé (YARA, MalwareBazaar) et approuvé par ses empreintes SHA-256 ; c'est la copie vérifiée qui tourne, sans terminal, bornée, jamais toute seule en administrateur ; un plugin en Rust s'écrit avec la bibliothèque <code>extensions/sdk</code>. <span class="nouveau">nouveau</span></li>
-<li><b>1 088 commandes expliquées</b> pour Omarchy, Arch, Fedora, Debian, Ubuntu, Windows et macOS, plus de 30 000 exemples.</li>
+<li><b>1 090 commandes expliquées</b> pour Omarchy, Arch, Fedora, Debian, Ubuntu, Windows et macOS, plus de 30 000 exemples.</li>
 <li><b>La clé USB</b> : protégée en écriture ailleurs que sur l'ordinateur du propriétaire ; Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur). Une clé qui démarre aussi les ordinateurs en panne (Omarchy, SystemRescue, Windows 11…) est en développement.</li>
+<li><b>Retirer Vanguard</b> de cet ordinateur : tout ce qu'il a posé, retrouvé, montré puis coché ; les données gardées sauf accord à part, la clé jamais touchée. <span class="nouveau">nouveau</span></li>
 </ul>
 </article>
 </div>
@@ -422,10 +424,10 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <p>Pour qui veut connaître le fonctionnement interne : les règles du bilan, les interfaces du système lues directement en Rust, les sources de menaces, la chaîne de confiance des mises à jour, et chaque commande.</p>
 </div>
 <dl class="specs">
-<div><dt>Langage</dt><dd>Rust, édition 2024 · ≈ 142 200 lignes ; aucun programme externe pour lire le système ; calculs vérifiés contre les dépassements dans la version publiée</dd></div>
+<div><dt>Langage</dt><dd>Rust, édition 2024 · ≈ 155 500 lignes ; aucun programme externe pour lire le système ; calculs vérifiés contre les dépassements dans la version publiée</dd></div>
 <div><dt>Programme</dt><dd>Un seul exécutable, rien à installer : Linux x86_64 (statique, musl), Windows x86_64, macOS Apple Silicon et Intel</dd></div>
-<div><dt>Règles du bilan</dt><dd>130 règles à identifiant stable (<code>LNX-SSH-006</code>) : 72 sous Linux, 59 sous Windows, 57 sous macOS, communes comprises ; 32 fiches d'audit du réseau</dd></div>
-<div><dt>Interface</dt><dd>Menu au clavier, ou 68 commandes en ligne ; sorties <code>--json</code>, rapport HTML ou Markdown</dd></div>
+<div><dt>Règles du bilan</dt><dd>132 règles à identifiant stable (<code>LNX-SSH-006</code>) : 74 sous Linux, 60 sous Windows, 58 sous macOS, communes comprises ; 32 fiches d'audit du réseau</dd></div>
+<div><dt>Interface</dt><dd>Menu au clavier, ou 73 commandes en ligne ; sorties <code>--json</code>, rapport HTML ou Markdown</dd></div>
 <div><dt>Moteurs intégrés</dt><dd>YARA-X 1.22 (règles YARA), reqwest + rustls/ring (HTTPS sans OpenSSL), tokio (scan asynchrone), lecteur de plist et client UPnP maison ; chaque bibliothèque vérifiée par cargo deny (failles connues, licences, provenance)</dd></div>
 <div><dt>Cryptographie</dt><dd>Ed25519 (versions signées), SHA-256, BLAKE3 (intégrité), XChaCha20-Poly1305 + Argon2 (carnet chiffré)</dd></div>
 <div><dt>Blocage</dt><dd>Par les outils du système, montrés avant d'agir : ufw ou une table nftables sous Linux, le Pare-feu Windows par PowerShell, une ancre pf sous macOS ; le programme revérifié dans la commande même de l'arrêt ; la liste des pilotes vulnérables de Microsoft écrite par Vanguard lui-même</dd></div>
@@ -435,7 +437,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <h3 class="sous-titre">Lu directement dans le système, en Rust</h3>
 <div class="os">
 <article>
-<h4>Linux <span>43 + 29 communes</span></h4>
+<h4>Linux <span>44 + 30 communes</span></h4>
 <ul>
 <li><b>Noyau (sysctl)</b> : redirections ICMP, <code>rp_filter</code>, BPF non privilégié, espaces de noms utilisateur, lockdown et signature des modules, attributs HSI de fwupd.</li>
 <li><b>SSH</b> : <code>sshd_config</code> lu dans l'ordre exact des <code>Include</code>, algorithmes cassés (SHA-1, CBC, 3DES, arcfour, DSA), <code>GatewayPorts</code>, X11 ; correction validée par <code>sshd -t</code>.</li>
@@ -445,7 +447,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 </ul>
 </article>
 <article>
-<h4>Windows <span>30 + 29 communes</span></h4>
+<h4>Windows <span>30 + 30 communes</span></h4>
 <ul>
 <li><b>Registre</b> : WPAD, IFEO et SilentProcessExit, <code>Winlogon</code>, AppInit_DLLs, clés Run, SMBv1, bail DHCP et DoH, programmes installés ; paquets de LSA, AppCertDlls, moniteurs d'impression, fournisseurs de temps, catalogue Winsock, pilotes du noyau.</li>
 <li><b>API Win32</b> : comptes et administrateurs (<code>NetUserEnum</code>), processus (Toolhelp32), connexions par PID, partages (<code>NetShareEnum</code>), certificats, Wi-Fi (WLAN API), raccourcis .lnk lus sans COM.</li>
@@ -456,7 +458,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 </ul>
 </article>
 <article>
-<h4>macOS <span>28 + 29 communes</span></h4>
+<h4>macOS <span>28 + 30 communes</span></h4>
 <ul>
 <li><b>Système</b> : FileVault, SIP et Gatekeeper, volume système signé, extensions du noyau de tiers, pare-feu et mode furtif, AirDrop.</li>
 <li><b>Lecteur de plist maison</b> (XML et binaire, borné contre un fichier piégé) : préférences, agents de launchd, version, à la place de <code>defaults</code> et <code>plutil</code>.</li>
@@ -510,7 +512,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 </ol>
 <h3 class="sous-titre">Toutes les commandes</h3>
 <details class="cli">
-<summary>68 commandes en ligne <span>· le nom anglais marche aussi · sans argument, le menu · liste tirée de <code>vanguard --help</code></span></summary>
+<summary>73 commandes en ligne <span>· le nom anglais marche aussi · sans argument, le menu · liste tirée de <code>vanguard --help</code></span></summary>
 <dl class="cli-liste">
 <div><dt>complet <i>full</i></dt><dd>Bilan complet : cette machine puis le réseau</dd></div>
 <div><dt>machine <i>audit</i></dt><dd>Audit de cette machine (pare-feu, ports, SSH, mises à jour, chiffrement…)</dd></div>
@@ -520,6 +522,9 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <div><dt>antivirus</dt><dd>Recherche de malwares : ClamAV (Linux, macOS) ou Microsoft Defender (Windows)</dd></div>
 <div><dt>surveillance <i>monitor</i></dt><dd>Active ou désactive la surveillance horaire du réseau (notification si appareil inconnu)</dd></div>
 <div><dt>tableau <i>dashboard</i></dt><dd>Tableau de bord de la surveillance dans le navigateur : son état, les alertes jour par jour, les nouveaux…</dd></div>
+<div><dt>dernieres-failles <i>latest-flaws</i></dt><dd>Veilleur (Linux 6.6 et plus) : chaque programme lancé et chaque connexion fermée, vus sur le moment et…</dd></div>
+<div><dt>sites-dangereux <i>dangerous-sites</i></dt><dd></dd></div>
+<div><dt>veilleur <i>watcher</i></dt><dd></dd></div>
 <div><dt>entretien <i>maintenance</i></dt><dd>Entretien du mois : une fois par mois, en silence, la note, les mises à jour en attente, la place à libérer…</dd></div>
 <div><dt>maj <i>update</i></dt><dd>Mises à jour : système, programmes, pilotes et firmware vérifiés d&#x27;un coup, puis installés après accord</dd></div>
 <div><dt>reparer <i>repair</i></dt><dd>Réparations courantes : réseau, navigation détournée, pare-feu, antivirus, fichiers système, disque, place,…</dd></div>
@@ -548,6 +553,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <div><dt>distance <i>remote-access</i></dt><dd>Quelqu&#x27;un contrôle mon ordinateur ?</dd></div>
 <div><dt>lien <i>link</i></dt><dd>Ce lien est-il dangereux ?</dd></div>
 <div><dt>verifier-fichier <i>check-file</i></dt><dd>Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA et antivirus</dd></div>
+<div><dt>courriel-suspect <i>suspicious-email</i></dt><dd>Ce courriel est-il une arnaque ?</dd></div>
 <div><dt>camera-micro <i>camera-mic</i></dt><dd>Caméra et micro : qui s&#x27;en sert ?</dd></div>
 <div><dt>acces <i>permissions</i></dt><dd>Bilan de confidentialité : les applications qui ont accès à la position, aux contacts, à la caméra et au…</dd></div>
 <div><dt>quarantaine <i>quarantine</i></dt><dd>Quarantaine : les fichiers isolés par l&#x27;antivirus ou YARA, à remettre à leur place (faux positif) ou à…</dd></div>
@@ -572,6 +578,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <div><dt>raccourci <i>shortcut</i></dt><dd>Raccourci sur cet ordinateur : Vanguard copié ici et lancé d&#x27;un clic (menu des applications sous Linux,…</dd></div>
 <div><dt>ordinateurs <i>computers</i></dt><dd>Mes ordinateurs : ceux où la clé VANGUARD a fait un bilan, leur note et leurs problèmes restants (sur la…</dd></div>
 <div><dt>se-mettre-a-jour <i>self-update</i></dt><dd>Mettre Vanguard à jour sur cet ordinateur : depuis une clé VANGUARD plus récente, ou depuis la dernière…</dd></div>
+<div><dt>desinstaller <i>uninstall</i></dt><dd>Retirer Vanguard de cet ordinateur : ce qu&#x27;il y a posé (surveillance, entretien, sauvegarde automatique,…</dd></div>
 <div><dt>regles <i>rules</i></dt><dd>Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement</dd></div>
 <div><dt>traces <i>evidence</i></dt><dd>Collecter les traces après une infection, avant de nettoyer : processus, connexions, ce qui se lance tout…</dd></div>
 <div><dt>depanner <i>troubleshoot</i></dt><dd>Dépanner pas à pas : pas d&#x27;Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein…</dd></div>
@@ -591,7 +598,7 @@ vanguard yara --complet</pre>
 </section>
 <section id="nouveautes">
 <div class="tete-section">
-<p class="surtitre">Nouveautés de la version 0.84</p>
+<p class="surtitre">Nouveautés de la version 0.85</p>
 <h2>Ce qui vient d'arriver</h2>
 <p>Et celles de la 0.83, livrée juste avant, sans page à elle.</p>
 </div>
@@ -628,9 +635,9 @@ vanguard yara --complet</pre>
 <h2>Écrit en Rust, testé à chaque version</h2>
 </div>
 <div class="chiffres">
-<div class="chiffre"><b>≈ 142 200</b><span>lignes de code Rust</span></div>
-<div class="chiffre"><b>1 205</b><span>tests sous Linux</span></div>
-<div class="chiffre"><b>1 052</b><span>tests sous Windows (Wine)</span></div>
+<div class="chiffre"><b>≈ 155 500</b><span>lignes de code Rust</span></div>
+<div class="chiffre"><b>1 344</b><span>tests sous Linux</span></div>
+<div class="chiffre"><b>1 154</b><span>tests sous Windows (Wine)</span></div>
 <div class="chiffre"><b>212</b><span>vérifications sur un vrai Windows</span></div>
 </div>
 <p class="note">Chaque version passe par des relectures de sécurité indépendantes, par un vrai Windows qui se teste tout seul et par un vrai Mac. Cette page est refaite par le script de publication à chaque version.</p>
@@ -682,7 +689,7 @@ vanguard yara --complet</pre>
 </section>
 </main>
 <footer>
-<div class="cadre"><span>Vanguard 0.84.1 · 22 octobre 2026</span><span><a href="https://github.com/d9v3/vanguard-beta">Logiciel libre · GPL-3.0-or-later</a></span></div>
+<div class="cadre"><span>Vanguard 0.85.0 · 22 octobre 2026</span><span><a href="https://github.com/d9v3/vanguard-beta">Logiciel libre · GPL-3.0-or-later</a></span></div>
 </footer>
 </body>
 </html>
