@@ -14,9 +14,11 @@ Un modèle de format! ({nom} à remplir) n'est qu'analysé, ses trous remplacés
     python3 outils/rejouer-ps.py [--pwsh CHEMIN] [-v]
 """
 import argparse
+import base64
 import concurrent.futures
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
@@ -121,7 +123,9 @@ def scripts():
         code = src if t < 0 else src[:t]
         message = False
         for debut, texte in litteraux(code):
-            avant = code[:debut].rstrip()
+            # Les macros cherchées finissent juste avant le texte : leurs expressions, ancrées à la fin, parcouraient
+            # sinon tout le début du fichier pour chacun de ses textes (18 des 24 s de ce script).
+            avant = code[:debut].rstrip()[-200:]
             # Un texte affiché (tr!, println!…) peut citer une commande à taper : ce n'est pas un script. Le second
             # texte d'un tr!("fr", "en") suit le premier, après une virgule.
             message = bool(MESSAGE.search(avant)) or (message and avant.endswith(","))
@@ -138,20 +142,53 @@ def rempli(texte: str, valeur: str = "'x'") -> str:
     return TROU.sub(valeur, protege).replace("\x00", "{").replace("\x01", "}")
 
 
-def analyser(pwsh: Path, texte: str) -> str:
-    """Les erreurs de syntaxe, vides si le script s'analyse."""
-    code = ("$e = $null; $t = $null; [void][System.Management.Automation.Language.Parser]::ParseInput("
-            "[Console]::In.ReadToEnd(), [ref]$t, [ref]$e); $e | ForEach-Object { $_.Message }")
-    # pwsh plante parfois lui-même sous la charge (« An error has occurred that was not properly handled ») : son
-    # code de retour le dit, et l'analyse est refaite ; une vraie erreur de syntaxe, elle, sort avec le code 0.
+# Un seul pwsh pour toutes les analyses : un texte par ligne d'entrée (en base64), sa réponse sur une ligne de sortie
+# « numéro base64 », écrite aussitôt analysé. Un pwsh par texte (~400 lancements) prenait l'essentiel des 29 s, et le
+# faisait planter sous la charge.
+ANALYSEUR = (
+    "$i = 0; while ($null -ne ($l = [Console]::In.ReadLine())) { $e = $null; $t = $null; "
+    "[void][System.Management.Automation.Language.Parser]::ParseInput("
+    "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($l)), [ref]$t, [ref]$e); "
+    "$m = ($e | ForEach-Object { $_.Message }) -join \"`n\"; "
+    "[Console]::Out.WriteLine(\"$i \" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($m))); $i++ }"
+)
+
+
+def analyser_tous(pwsh: Path, textes) -> dict:
+    """Les erreurs de syntaxe de chaque texte, vides s'il s'analyse ; un texte en double n'est analysé qu'une fois."""
+    restants = list(dict.fromkeys(textes))
+    erreurs = {}
     for essai in range(3):
-        r = subprocess.run([str(pwsh), "-NoProfile", "-NonInteractive", "-Command", code], input=texte,
-                           capture_output=True, text=True, timeout=60)
-        if r.returncode == 0:
-            return r.stdout.strip()
+        entree = "".join(base64.b64encode(t.encode()).decode() + "\n" for t in restants)
+        try:
+            r = subprocess.run([str(pwsh), "-NoProfile", "-NonInteractive", "-Command", ANALYSEUR], input=entree,
+                               capture_output=True, text=True, timeout=60)
+            sortie, raison = r.stdout, f"code {r.returncode} : {(r.stdout + r.stderr).strip()[-200:]}"
+            bloque = False
+        except subprocess.TimeoutExpired as e:
+            sortie = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+            raison, bloque = "pas de réponse en 60 s", True
+        # pwsh plante parfois lui-même (« An error has occurred that was not properly handled ») : ce qu'il a répondu
+        # avant reste juste, le reste est refait. Une vraie erreur de syntaxe, elle, est une réponse. Une ligne sans
+        # sa fin a pu être coupée par le plantage : refaite aussi.
+        for ligne in sortie.splitlines(keepends=True):
+            numero, _, message = ligne.partition(" ")
+            if not message.endswith("\n"):
+                continue
+            try:
+                erreurs[restants[int(numero)]] = base64.b64decode(message.strip(), validate=True).decode()
+            except (ValueError, IndexError):
+                continue
+        sans_reponse = [t for t in restants if t not in erreurs]
+        if not sans_reponse or bloque or essai == 2:
+            break
+        # Le premier sans réponse est celui que pwsh analysait en tombant : passé en dernier, un texte qui le fait
+        # tomber à chaque fois n'emporte pas ceux qui le suivent.
+        restants = sans_reponse[1:] + sans_reponse[:1]
         # Une pause qui grandit : refait aussitôt, il replantait dans la même pointe de charge (13 échecs, 20 octobre).
         time.sleep(1 + 2 * essai)
-    return f"pwsh a échoué trois fois (code {r.returncode}) : {(r.stdout + r.stderr).strip()[:200]}"
+    # Bloqué, pwsh n'est pas relancé : trois délais feraient attendre la vérification pour rien.
+    return erreurs | {t: f"pwsh n'a pas pu l'analyser ({raison})" for t in sans_reponse}
 
 
 def rejouer(pwsh: Path, texte: str, dossier: Path) -> str:
@@ -197,19 +234,25 @@ def main():
     args = a.parse_args()
     if not args.pwsh.exists() or not shutil.which("bwrap"):
         print(f"pwsh ({args.pwsh}) ou bwrap absent : scripts du programme pas rejoués.")
-        return 0
+        # 77 : l'étape est dite « sautée » par verifier.sh, pas verte.
+        return 77
+    # pwsh, quand il plante, laissait à chaque fois ~10 Mo à systemd-coredump ; ses enfants héritent de la limite.
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     tous = list(scripts())
+    # Un trou peut tenir une valeur ('x') ou un bout de commande (« {espace} __EventFilter », portes.rs) : 'x' en tête
+    # de ligne n'est pas du PowerShell, x nu l'est ; le modèle passe si l'un des deux s'analyse.
+    valeurs = ("'x'", "x")
+    syntaxe = analyser_tous(args.pwsh, [v for _, texte, modele in tous
+                                        for v in [texte, *(rempli(texte, x) for x in valeurs if modele)]])
     echecs = []
 
     def un(element):
         ou, texte, modele = element
-        erreurs = analyser(args.pwsh, texte)
-        # Un trou peut tenir une valeur ('x') ou un bout de commande (« {espace} __EventFilter », portes.rs) :
-        # 'x' en tête de ligne n'est pas du PowerShell, x nu l'est ; le modèle passe si l'un des deux s'analyse.
-        for valeur in ("'x'", "x") if modele else ():
+        erreurs = syntaxe[texte]
+        for valeur in valeurs if modele else ():
             if not erreurs:
                 break
-            erreurs = analyser(args.pwsh, rempli(texte, valeur))
+            erreurs = syntaxe[rempli(texte, valeur)]
         if erreurs:
             return ou, f"syntaxe : {erreurs.splitlines()[0]}"
         if modele:
