@@ -251,18 +251,33 @@ fn tentatives_lues() -> Option<Result<Lues, Constat>> {
     Some(super::windows::evenements::tentatives_lues().map_err(|raison| impossible("Comptes", raison)))
 }
 
-/// Sous macOS, sshd écrit dans le journal unifié, qui ne se lit qu'en lançant « log show » (des minutes, pour une
-/// journée) : non vérifié, jamais compté comme sain.
+/// Sous macOS : sshd écrit dans le journal unifié, qui ne se lit qu'en lançant « log show » (des minutes, pour une
+/// journée). Sans sshd en écoute (Session à distance coupée, le cas courant), rien à lire, comme sous Linux sans
+/// serveur SSH.
 #[cfg(target_os = "macos")]
-#[allow(clippy::unnecessary_wraps)] // même signature que sous Linux, où il peut n'y avoir aucun serveur SSH
 fn tentatives_lues() -> Option<Result<Lues, Constat>> {
-    Some(Err(impossible(
-        "Comptes",
-        tr!(
+    let ecoutes =
+        super::sortie("netstat", &["-an", "-p", "tcp"]).map(|netstat| super::macos::lire_netstat(&netstat, true));
+    tentatives_sans_journal(ecoutes.as_deref())
+}
+
+/// La décision de macOS, à part pour se tester partout. `ecoutes` : les ports TCP en écoute, `None` si netstat n'a
+/// pas répondu. Un sshd qui n'écoute que la machine elle-même compte aussi : ses échecs vont au journal non lu.
+/// netstat muet ou sshd en écoute : non vérifié, jamais compté comme sain.
+#[cfg(any(target_os = "macos", test))]
+fn tentatives_sans_journal(ecoutes: Option<&[(String, u16)]>) -> Option<Result<Lues, Constat>> {
+    let raison = match ecoutes {
+        Some(ports) if !ports.iter().any(|(_, port)| *port == 22) => return None,
+        Some(_) => tr!(
             "sshd écrit dans le journal unifié de macOS, que Vanguard ne lit pas",
             "sshd writes to macOS's unified log, which Vanguard does not read"
         ),
-    )))
+        None => tr!(
+            "netstat n'a pas dit si sshd écoute",
+            "netstat did not tell whether sshd is listening"
+        ),
+    };
+    Some(Err(impossible("Comptes", raison)))
 }
 
 // ───────────────────────────── Programmes en marche ─────────────────────────────
@@ -1355,6 +1370,31 @@ mod tests {
         };
         let c = juger_intrusions(&[piege], Os::Linux, None);
         assert!(!c.message.contains('\x1b') && !c.correctif.unwrap().action.contains('\x1b'));
+    }
+
+    /// macOS : sans port 22 en écoute, rien à lire, comme sous Linux sans serveur SSH. sshd en écoute, même sur la
+    /// machine elle-même, ou netstat muet : non vérifié, jamais sain.
+    #[test]
+    fn mac_sans_sshd() {
+        let ports = |liste: &[(&str, u16)]| -> Vec<(String, u16)> {
+            liste.iter().map(|(a, p)| ((*a).to_string(), *p)).collect()
+        };
+        assert!(tentatives_sans_journal(Some(&[])).is_none());
+        assert!(tentatives_sans_journal(Some(&ports(&[("*", 5900), ("127.0.0.1", 631), ("*", 2222)]))).is_none());
+        for ecoute in [
+            ports(&[("*", 22)]),
+            ports(&[("127.0.0.1", 22)]),
+            ports(&[("::1", 22), ("*", 5900)]),
+        ] {
+            let Some(Err(c)) = tentatives_sans_journal(Some(&ecoute)) else {
+                panic!("sshd en écoute compté comme lu : {ecoute:?}");
+            };
+            assert!(!c.verifie && c.message.contains("sshd"), "{}", c.message);
+        }
+        let Some(Err(c)) = tentatives_sans_journal(None) else {
+            panic!("netstat muet compté comme sain");
+        };
+        assert!(!c.verifie && c.message.contains("netstat"), "{}", c.message);
     }
 
     /// Une lecture qui a atteint sa borne (les 2 000 échecs les plus récents sous Windows) : sain, jamais sans le dire.

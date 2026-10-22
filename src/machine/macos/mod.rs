@@ -205,7 +205,7 @@ fn mode_furtif() -> Option<Constat> {
 
 /// Ports en écoute de `netstat -an -p tcp|udp` : « tcp4  0  0  *.22  *.*  LISTEN » → (adresse, port).
 /// L'adresse et le port sont séparés par le dernier point (« 127.0.0.1.631 », « ::1.631 », « *.5900 »).
-fn lire_netstat(sortie: &str, tcp: bool) -> Vec<(String, u16)> {
+pub(super) fn lire_netstat(sortie: &str, tcp: bool) -> Vec<(String, u16)> {
     sortie
         .lines()
         .filter(|l| {
