@@ -161,12 +161,6 @@ which steals the network's Windows passwords; the hourly monitoring flags it too
   quarantined by itself). Its dashboard, a local page opened in the browser:
   its state, the alerts day by day (kept even when the night's notification is gone), the devices that showed up and
   the connections to botnet servers. Nothing is sent.
-- The watcher (Linux 6.6 and later, off by default, `vanguard watcher on`): between two monitoring runs, each program
-  started, even one of a few milliseconds, and each TCP or UDP connection as it closes. Programs are judged as in the
-  check, connections against the botnet command servers already downloaded; what is serious goes to the dashboard
-  and as a notification. Without root or code loaded into the kernel, it stops nothing. A program gone before it
-  could be read is counted as such, never judged safe, and the program of a closed connection is not known (the
-  kernel does not give it).
 
 #### Connected devices
 
@@ -234,6 +228,13 @@ cleared logs, Defender detections, recent files that matter (programs, scripts, 
 on Linux, Remote Desktop on Windows): the sign of a guessed password. And suspicious running programs: a known
 offensive tool (mimikatz, xmrig…), a command line that downloads or hides what it runs (encoded PowerShell, mshta,
 certutil, curl piped to a shell), a program started from Downloads, a temporary folder or the recycle bin.
+
+**The watcher** (Linux 6.6 and later, off by default, `vanguard watcher on`) — between two monitoring runs, each program
+started, even one of a few milliseconds, and each TCP or UDP connection as it closes. Programs are judged as in the
+check, connections against the botnet command servers already downloaded; what is serious goes to the dashboard
+and as a notification. Without root or code loaded into the kernel, it stops nothing. A program gone before it
+could be read is counted as such, never judged safe, and the program of a closed connection is not known (the
+kernel does not give it).
 
 **Windows' hidden doors and kernel drivers** — the DLLs Windows loads by itself, often with system rights: LSA
 packages (a password filter receives every new password in clear text), AppCertDlls, print monitors, time providers,

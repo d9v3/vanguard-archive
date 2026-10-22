@@ -193,8 +193,10 @@ if ! etape mise-en-forme cargo fmt --check; then
   exit 1
 fi
 
+# VANGUARD_EXIGER_VEILLEUR : l'essai du veilleur sur le vrai noyau échoue au lieu de se dire sauté (un test sauté
+# passerait pour réussi) ; pas dans la passe sans Internet, où le connecteur de processus n'existe pas.
 {
-  etape clippy-linux clippy x86_64-unknown-linux-musl && etape tests-linux cargo test -q &&
+  etape clippy-linux clippy x86_64-unknown-linux-musl && etape tests-linux env VANGUARD_EXIGER_VEILLEUR=1 cargo test -q &&
     if [[ $MODE != --rapide ]]; then etape tests-hors-ligne hors_ligne; fi
 } &
 if [[ $MODE != --rapide ]]; then

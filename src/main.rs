@@ -141,7 +141,8 @@ enum Commande {
         sans_ouvrir: bool,
     },
     /// Veilleur (Linux 6.6 et plus) : chaque programme lancé et chaque connexion fermée, vus sur le moment et jugés
-    /// comme au bilan ; il observe et n'arrête rien. Coupé par défaut. Sans argument : son état.
+    /// comme au bilan ; il observe et n'arrête rien. Coupé par défaut. Sans argument : son état, puis l'allumer ou le
+    /// couper, après accord.
     #[command(visible_alias = "watcher")]
     Veilleur {
         #[arg(value_parser = ["on", "off"])]
@@ -1711,7 +1712,7 @@ const AIDES_EN: &[(&str, &str)] = &[
                  suspicious connections. Local page, nothing is sent"),
     ("veilleur", "Watcher (Linux 6.6 and later): each program started and each connection closed, seen as they \
                    happen and judged as in the check; it observes and stops nothing. Off by default. Without \
-                   argument: its state"),
+                   argument: its state, then turning it on or off, after your consent"),
     ("entretien", "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new \
                    problems, in one notification; nothing is changed. Without argument: what it would say now"),
     ("maj", "Updates: system, programs, drivers and firmware checked at once, then installed with your consent"),

