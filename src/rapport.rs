@@ -16,6 +16,11 @@ pub(crate) fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Des adresses IPv4, « 10.0.0.5, 10.0.0.9 ».
+fn liste_ips(ips: &[std::net::Ipv4Addr]) -> String {
+    ips.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+}
+
 fn classe(n: Option<Niveau>) -> &'static str {
     match n {
         None => "ok",
@@ -231,6 +236,14 @@ fn complements_scan_markdown(m: &mut String, r: &Rapport) {
                     m,
                     "Non vérifié : les redirections de la box n'ont pas pu être lues.",
                     "Not checked: the router's forwardings could not be read."
+                );
+            }
+            upnp::Etat::Usurpee(ips) => {
+                let _ = trwln!(
+                    m,
+                    "Non vérifié : la box n'a pas répondu, mais {} se dit box en UPnP (suspect).",
+                    "Not checked: the router did not answer, but {} claims to be the router over UPnP (suspicious).",
+                    liste_ips(ips)
                 );
             }
             upnp::Etat::Actif(l) if l.lues && l.redirections.is_empty() => {
@@ -612,6 +625,18 @@ fn complements_scan_html(h: &mut String, r: &Rapport) {
                         "Les redirections de la box n'ont pas pu être lues.",
                         "The router's forwardings could not be read."
                     )
+                );
+            }
+            upnp::Etat::Usurpee(ips) => {
+                let _ = write!(
+                    h,
+                    "<div class=ligne>{}<div>{}</div></div>",
+                    badge_non_verifie(),
+                    esc(&trf!(
+                        "La box n'a pas répondu, mais {} se dit box en UPnP (suspect).",
+                        "The router did not answer, but {} claims to be the router over UPnP (suspicious).",
+                        liste_ips(ips)
+                    ))
                 );
             }
             upnp::Etat::Actif(l) if l.lues && l.redirections.is_empty() => h.push_str(tr!(
@@ -1120,6 +1145,7 @@ mod tests {
                 }],
                 lues: true,
                 tronquees: false,
+                ailleurs: Vec::new(),
             }))),
             empoisonnement: Some(empoisonnement::Rapport::Teste(vec![empoisonnement::Empoisonneur {
                 ip: "10.0.0.66".parse().unwrap(),

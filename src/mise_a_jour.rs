@@ -319,11 +319,46 @@ fn cibles_github() -> Vec<PathBuf> {
     }
     if let Some(exe) = programme() {
         let sur_la_cle = crate::reseau::cle_du_programme().is_some_and(|c| exe.starts_with(c));
-        if !sur_la_cle && !meme_fichier(&exe, &copie) {
+        if !sur_la_cle && !meme_fichier(&exe, &copie) && remplacable_ici(&exe) {
             cibles.push(exe);
         }
     }
     cibles
+}
+
+/// En root, un programme ne se remplace que dans un dossier à root que ni son groupe ni les autres ne peuvent
+/// changer : le nouveau est écrit à côté, relu, essayé puis renommé par son chemin, et le compte à qui appartient le
+/// dossier (un « sudo ~/Téléchargements/vanguard ») l'aurait échangé entre la relecture et l'essai, que root lance.
+/// Hors de root : toujours (le compte ne risque que lui-même).
+fn remplacable_ici(programme: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY : geteuid n'a ni pointeur ni effet de bord.
+        remplacable_pour(unsafe { libc::geteuid() }, programme)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = programme;
+        true
+    }
+}
+
+#[cfg(unix)]
+fn remplacable_pour(euid: libc::uid_t, programme: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    if euid != 0 {
+        return true;
+    }
+    programme
+        .parent()
+        .and_then(|d| std::fs::symlink_metadata(d).ok())
+        .is_some_and(|m| m.file_type().is_dir() && m.uid() == 0 && m.mode() & 0o022 == 0)
+}
+
+/// Le programme lancé est-il laissé de côté par la mise à jour, lancé en root depuis un dossier qui n'est pas sûr ?
+/// Pour le dire, plutôt que de le taire.
+fn programme_ecarte_en_root() -> Option<PathBuf> {
+    programme().filter(|exe| !remplacable_ici(exe))
 }
 
 /// Deux chemins vers le même fichier ? Comparés une fois résolus : sous Windows, le programme lancé se lit en
@@ -541,6 +576,13 @@ pub fn commande() {
 /// La dernière version publiée sur GitHub : montrée, puis téléchargée, vérifiée et installée après un « o », à la
 /// place de chaque programme d'ici qui est plus ancien.
 fn depuis_github() {
+    if let Some(exe) = programme_ecarte_en_root() {
+        trp!(
+            "\n  {GRIS}Lancé en root depuis un dossier que d'autres comptes peuvent changer :\n  {}\n  Ce programme n'est pas remplacé d'ici : pose-le dans un dossier à root,\n  ou mets-le à jour sans sudo.{RESET}",
+            "\n  {GRIS}Started as root from a folder other accounts can change:\n  {}\n  This program is not replaced from here: put it in a root-owned folder,\n  or update it without sudo.{RESET}",
+            chemin_affichable(&exe)
+        );
+    }
     let cibles = cibles_github();
     if cibles.is_empty() {
         return;
@@ -742,6 +784,29 @@ fn proposer(source: &Path, cible: &Path, copie: Option<Version>, cle: Version) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// En root, un programme posé dans un dossier que son compte (ou n'importe qui) peut changer n'est pas remplacé :
+    /// ce compte échangerait le nouveau entre sa relecture et l'essai que root lance.
+    #[cfg(unix)]
+    #[test]
+    fn en_root_pas_de_remplacement_dans_un_dossier_d_un_compte() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = std::env::temp_dir().join(format!("vanguard-cible-root-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let exe = d.join("vanguard-linux-x86_64");
+        // Hors de root : le compte ne risque que lui-même.
+        assert!(remplacable_pour(1000, &exe));
+        // Ouvert à tous (comme /tmp) : jamais en root.
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(!remplacable_pour(0, &exe));
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Le dossier d'un compte (le nôtre, qui n'est pas root ; sous `unshare -r`, il paraît à root).
+        // SAFETY : getuid lit le compte du processus, sans argument.
+        if unsafe { libc::getuid() } != 0 {
+            assert!(!remplacable_pour(0, &exe));
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn versions_lues_et_comparees() {

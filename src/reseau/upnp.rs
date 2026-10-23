@@ -22,6 +22,9 @@ pub enum Etat {
     Actif(Box<Lecture>),
     /// La box n'a pas pu être interrogée, ni en Rust ni par l'outil de repli : non vérifié.
     OutilAbsent,
+    /// La passerelle n'a pas répondu en UPnP, mais d'autres appareils du réseau se disent box (leurs adresses) :
+    /// suspect, et rien n'est cru d'eux. Ce que la vraie box ouvre n'est pas vérifié.
+    Usurpee(Vec<Ipv4Addr>),
 }
 
 pub fn etat() -> Etat {
@@ -37,6 +40,7 @@ pub fn etat_et_adresse() -> (Etat, Option<Ipv4Addr>) {
             (Etat::Actif(lecture), adresse)
         }
         Decouverte::Aucune => (Etat::Absent, None),
+        Decouverte::Ailleurs(ips) => (Etat::Usurpee(ips), None),
         Decouverte::NonVerifie => etat_par_outil(),
     }
 }
@@ -68,6 +72,7 @@ fn lecture_d_outil(redirections: Vec<Redirection>, adresse_externe: Option<Ipv4A
         redirections,
         lues: true,
         tronquees: false,
+        ailleurs: Vec::new(),
     }))
 }
 

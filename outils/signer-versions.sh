@@ -12,6 +12,13 @@
 # (src/mise_a_jour/github.rs : CLE_PUBLIQUE, CLE_SECOURS).
 #   outils/signer-versions.sh DOSSIER             DOSSIER : celui de publier-version.sh, avec les trois programmes
 #   outils/signer-versions.sh --secours DOSSIER   signé par la clé de secours (la principale perdue ou volée)
+#   outils/signer-versions.sh --secours --revoquer DOSSIER
+#                                                 la clé principale volée : « revoque principale » ajoutée à la fin
+#                                                 de derniere.txt, que chaque Vanguard retient et après quoi il refuse
+#                                                 la principale pour toujours (à redonner à chaque version qui suit,
+#                                                 pour les ordinateurs qui n'auraient pas vu la première). Après les
+#                                                 lignes des programmes : les copies 0.85 trouvent la leur avant elle.
+#                                                 Jamais dans l'historique, que github.rs lit ligne par programme.
 #   outils/signer-versions.sh --premier DOSSIER   sans rien d'avant : l'historique commence à cette version (la
 #                                                 toute première publication seulement ; sinon, refusé)
 #   outils/signer-versions.sh --cle [--secours]   la clé publique, sous la forme que github.rs grave
@@ -23,11 +30,13 @@ cd "$(dirname "$0")/.."
 
 SECOURS=
 PREMIER=
+REVOQUER=
 ARGS=()
 for a in "$@"; do
   case $a in
     --secours) SECOURS=1 ;;
     --premier) PREMIER=1 ;;
+    --revoquer) REVOQUER=1 ;;
     *) ARGS+=("$a") ;;
   esac
 done
@@ -45,6 +54,9 @@ DOMAINE='vanguard-versions 1'
 DOMAINE_HISTORIQUE='vanguard-historique 1'
 
 erreur() { echo "✖ $*" >&2; exit 1; }
+# Seule la clé de secours révoque (github.rs ne croit la ligne que d'elle) : signée par la principale, elle ne ferait
+# rien, sinon croire à une révocation qui n'a pas eu lieu.
+[[ -z $REVOQUER || -n $SECOURS ]] || erreur "--revoquer va avec --secours : la principale ne se révoque pas elle-même"
 [[ -r $CLE ]] || erreur "clé de signature absente : $CLE"
 # La clé de secours vit hors ligne, loin de la principale : en clair, la moindre copie (instantané de /home,
 # sauvegarde) les mettrait côte à côte et un seul vol donnerait les deux. Chiffrée seulement.
@@ -152,6 +164,7 @@ cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
     f=$D/${FICHIERS[$systeme]}
     echo "$systeme $(sha256sum "$f" | cut -d' ' -f1) $(stat -c %s "$f")"
   done
+  [[ -z $REVOQUER ]] || echo "revoque principale"
 } >"$D/derniere.txt"
 
 message=$(mktemp "$D/.message.XXXX")
@@ -205,13 +218,14 @@ if [[ -f $AVANT/historique.txt ]]; then
 elif [[ -f $AVANT/derniere.txt ]]; then
   [[ -f $AVANT/derniere.txt.sig ]] && signe_par_une_gravee "$AVANT/derniere.txt" "$DOMAINE" ||
     erreur "manifeste d'avant mal signé ($AVANT/derniere.txt) : il n'entre pas dans l'historique"
-  anciens=$(awk -v ici="version $version" '/^version / { garder = ($0 != ici) } garder' "$AVANT/derniere.txt")
+  anciens=$(awk -v ici="version $version" '/^version / { garder = ($0 != ici) } /^revoque / { next } garder' \
+    "$AVANT/derniere.txt")
   echo "Historique commencé à partir du manifeste signé de la version d'avant."
 else
   echo "Pas d'historique d'avant : il commence à cette version."
 fi
 {
-  cat "$D/derniere.txt"
+  grep -v '^revoque ' "$D/derniere.txt"
   [[ -z $anciens ]] || printf '%s\n' "$anciens"
 } >"$D/historique.txt"
 { printf '%s\n' "$DOMAINE_HISTORIQUE"; cat "$D/historique.txt"; } >"$message"

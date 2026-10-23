@@ -26,6 +26,29 @@ delivered just before it. Only the latest version has its download page; every v
   that touch the same file share one note: undoing one marks them all undone. Two notes on the same target undone
   together are both put back, without a false ✖. A service enabled but stopped is said not undoable rather than
   falsely restored, and fixed ~/.ssh rights can be undone.
+- **Vanguard better withstands attacks on itself** (attack campaign of Oct. 23, 18 weaknesses fixed, each with its
+  test). The backup key can revoke a stolen main key (“revoque principale” at the end of the manifest, which 0.85
+  copies still read): kept in the sealed state, the main key is never accepted again, and the highest version seen
+  starts over. The signed Mac program only comes from a master build, without cache. As root, a program in a folder
+  others can change is no longer replaced. State files are read only when they are plain files of bounded size (a
+  named pipe froze monitoring forever); deleted along with the seals, they are “unknown” and everything is said again,
+  and the check says the seals were remade; real-time, its reminder, the audit, the sites and the gateway already
+  reported are sealed (a pause set by another program no longer pauses anything); a critical file changed again is
+  notified again; writing no longer follows links, and root no longer writes into an account's folder. Undoing a block
+  never replays a command read back from the log: it is rebuilt from the noted address, port or value. The USB key:
+  its Ventoy menu and ISO images (by size) enter the manifest, and a recognized key whose serial number changed is
+  reported. Local network: UPnP is read only at the gateway (a device claiming to be the router is reported), never
+  towards this machine or another host, and listening goes on after an oversized datagram; DNS is also tested on
+  randomly drawn names. The MalwareBazaar list is only unpacked up to its announced size, and the sshd log only counts
+  lines written by root. A second pass against these fixes closed their bypasses: a VANGUARD key without a reference,
+  where other keys have theirs, is a medium warning (changing its token too no longer brings it down to information),
+  and only a reference carrying its token accuses it of a changed identifier (an unreadable identifier no longer
+  accuses anything); an updated 0.85 no longer looks like deleted seals, and deleting the history along with them no
+  longer makes a first pass; the time of the last look at Downloads and the unblocked threats already reported are
+  sealed; undoing only puts back a copy of Claude Code settings made by Vanguard; “put back as before” for the gaming
+  settings only rewrites as root what Vanguard puts in /etc; the quarantine no longer follows links and root no longer
+  writes into an account's folder there; UPnP listening no longer counts oversized datagrams; the ThreatFox export is
+  bounded like the MalwareBazaar list; and a tag named master no longer reuses a cache on the Mac.
 - **A problem recognized by its rule and its object, no longer by its translated text.** Open ports, suspicious
   autostarts, browser extensions, forgotten accounts or new administrators, stalkerware, remote control tools,
   outdated software and the VANGUARD key's record now carry a key (“LNX-RES-001|port:8080/tcp:python3”): switching

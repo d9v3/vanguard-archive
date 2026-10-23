@@ -7,7 +7,11 @@
 //! ne pourrait donc pas faire installer autre chose que ce que l'auteur a signé.
 //!
 //! Une clé de secours, gardée hors ligne par l'auteur, signe aussi : la clé principale perdue ou volée, les versions
-//! suivantes passent par elle sans que les ordinateurs déjà installés perdent la mise à jour. Les anciens manifestes
+//! suivantes passent par elle sans que les ordinateurs déjà installés perdent la mise à jour. Volée, la principale se
+//! révoque : un manifeste signé par la clé de secours qui finit par la ligne « revoque principale » est retenu dans
+//! l'état scellé (`sceau::REVOCATION`), et la principale n'est plus jamais acceptée ici, ni pour un manifeste ni pour
+//! l'historique ; la plus haute version vue, qu'un voleur a pu monter au plus haut, repart de ce manifeste. Cette
+//! ligne vient après celles des programmes : le lecteur des copies 0.85 trouve son système avant elle. Les anciens manifestes
 //! signés restent publics : quelqu'un qui tient le dépôt des versions pourrait en remettre un pour geler les mises à
 //! jour. Vanguard retient donc la plus haute version signée déjà vue et refuse tout manifeste plus vieux ; et une
 //! dernière version signée de plus de 45 jours n'est plus dite « à jour », mais non vérifiée.
@@ -48,6 +52,33 @@ const CLE_SECOURS: [u8; 32] = [
 /// Les clés dont la signature est acceptée.
 const CLES: [[u8; 32]; 2] = [CLE_PUBLIQUE, CLE_SECOURS];
 
+/// La dernière ligne d'un manifeste signé par la clé de secours qui révoque la principale (`signer-versions.sh
+/// --secours --revoquer`).
+const LIGNE_REVOCATION: &str = "revoque principale";
+
+/// Les clés acceptées ici, la clé de secours en dernier : la principale révoquée, la clé de secours seule.
+fn cles_acceptees(revoquee: bool) -> &'static [[u8; 32]] {
+    if revoquee { &CLES[1..] } else { &CLES }
+}
+
+/// La clé principale a-t-elle été révoquée sur cet ordinateur ? Le fichier là sous n'importe quelle forme (même
+/// changé ou illisible) la dit révoquée : l'effacer ou le réécrire ne la fait pas revenir. Absent, ou inconnu après
+/// des sceaux refaits, elle ne l'est pas : la clé de secours redit la révocation dans chaque manifeste qui suit.
+fn principale_revoquee() -> bool {
+    !matches!(
+        crate::sceau::lire(crate::sceau::REVOCATION),
+        crate::sceau::Lecture::Absent | crate::sceau::Lecture::Inconnu
+    )
+}
+
+/// Le manifeste finit-il par la ligne de révocation ?
+fn revoque_la_principale(manifeste: &[u8]) -> bool {
+    std::str::from_utf8(manifeste)
+        .ok()
+        .and_then(|t| t.lines().rfind(|l| !l.is_empty()))
+        == Some(LIGNE_REVOCATION)
+}
+
 /// Au-delà, la dernière version signée (la date de son commit) n'est plus crue la dernière : l'auteur publie bien plus
 /// souvent, un manifeste aussi vieux est plus probablement un ancien remis en place qu'une absence.
 pub(super) const FRAICHEUR_JOURS: u64 = 45;
@@ -85,6 +116,8 @@ pub(super) struct Publiee {
     sha256: [u8; 32],
     taille: u64,
     fichier: &'static str,
+    /// Signé par la clé de secours avec la ligne de révocation : la principale ne vaut plus.
+    revoque: bool,
 }
 
 /// Le manifeste : « version 0.79.0+1792540000 », puis une ligne par système, « linux-x86_64 <sha256> <taille> ». Le
@@ -207,12 +240,18 @@ pub(super) fn dans_l_historique(sha256: &[u8; 32]) -> Result<Option<(Version, St
     }
     let historique = recevoir("historique.txt", HISTORIQUE_MAX, 30).ok_or_else(pas_de_reponse)?;
     let signature = recevoir("historique.txt.sig", 64, 20).ok_or_else(pas_de_reponse)?;
-    chercher_avec(&CLES, &historique, &signature, sha256)
+    chercher_avec(cles_acceptees(principale_revoquee()), &historique, &signature, sha256)
 }
 
 /// Le manifeste et sa signature, vérifiés : la version publiée pour `systeme`, ou pourquoi elle ne vaut rien.
 fn juger(manifeste: &[u8], signature: &[u8], systeme: &str, fichier: &'static str) -> Result<Publiee, String> {
-    juger_avec(&CLES, manifeste, signature, systeme, fichier)
+    juger_avec(
+        cles_acceptees(principale_revoquee()),
+        manifeste,
+        signature,
+        systeme,
+        fichier,
+    )
 }
 
 /// `juger` avec ces clés-là (les tests y passent des clés d'essai).
@@ -223,13 +262,23 @@ fn juger_avec(
     systeme: &str,
     fichier: &'static str,
 ) -> Result<Publiee, String> {
-    if !cles.iter().any(|c| signature_valide(c, manifeste, signature)) {
+    let Some(cle) = cles.iter().find(|c| signature_valide(c, manifeste, signature)) else {
+        if !cles.contains(&CLE_PUBLIQUE) && signature_valide(&CLE_PUBLIQUE, manifeste, signature) {
+            return Err(tr!(
+                "manifeste signé par la clé principale, révoquée ici par la clé de secours : rien n'est proposé",
+                "manifest signed by the main key, revoked here by the backup key: nothing is offered"
+            )
+            .into());
+        }
         return Err(tr!(
             "manifeste de GitHub mal signé : rien n'est proposé",
             "badly signed GitHub manifest: nothing is offered"
         )
         .into());
-    }
+    };
+    // Seule la clé de secours (la dernière des clés acceptées) révoque : la ligne signée par la principale ne compte
+    // pas, sinon un voleur de la principale couperait la clé de secours.
+    let revoque = cles.last() == Some(cle) && revoque_la_principale(manifeste);
     let (version, sha256, taille) = std::str::from_utf8(manifeste)
         .ok()
         .and_then(|t| lire_manifeste(t, systeme))
@@ -252,6 +301,7 @@ fn juger_avec(
         sha256,
         taille,
         fichier,
+        revoque,
     })
 }
 
@@ -281,7 +331,7 @@ fn version_vue(lu: crate::sceau::Lecture) -> Result<Option<Version>, String> {
         Lecture::Intact(o) => Ok(std::str::from_utf8(&o).ok().and_then(|t| lire_version(t.trim()))),
         // Adoptées sans sceau d'avant : un plancher baissé juste avant que `sceaux.json` soit effacé ne doit pas
         // laisser passer un vieux manifeste en silence.
-        Lecture::Adopte(_) => Err(tr!(
+        Lecture::Adopte(_) | Lecture::Inconnu => Err(tr!(
             "les versions déjà vues ont été acceptées telles quelles, sans sceau d'avant : rien n'est cru",
             "the versions already seen were accepted as they were, without an earlier seal: nothing is trusted"
         )
@@ -304,6 +354,17 @@ pub(super) fn versions_vues_douteuses() -> bool {
 /// Repartir de zéro, sur accord (`depuis_github`) : la prochaine version signée reçue devient la plus haute vue.
 pub(super) fn oublier_versions_vues() -> std::io::Result<()> {
     crate::sceau::effacer(crate::sceau::VERSIONS)
+}
+
+/// Retient que la clé de secours a révoqué la principale, la première fois : la plus haute version vue, qu'un voleur
+/// de la principale a pu monter au plus haut pour refuser toute version d'après, repart du manifeste de secours.
+/// `Err` : non retenue (disque, dossier d'un autre compte), le manifeste n'est pas suivi.
+fn retenir_revocation() -> std::io::Result<()> {
+    if principale_revoquee() {
+        return Ok(());
+    }
+    crate::sceau::ecrire(crate::sceau::REVOCATION, LIGNE_REVOCATION)?;
+    oublier_versions_vues()
 }
 
 /// Le manifeste reçu, comparé à la plus haute version signée déjà vue : refusé s'il est plus vieux (un ancien remis
@@ -375,10 +436,13 @@ pub(super) fn derniere() -> Result<Publiee, String> {
     if crate::parametres::hors_ligne() {
         return Err(pas_de_reponse());
     }
-    let vue = plus_haute_vue()?;
     let manifeste = recevoir("derniere.txt", MANIFESTE_MAX, 20).ok_or_else(pas_de_reponse)?;
     let signature = recevoir("derniere.txt.sig", 64, 20).ok_or_else(pas_de_reponse)?;
     let publiee = juger(&manifeste, &signature, systeme, fichier)?;
+    if publiee.revoque {
+        retenir_revocation().map_err(|e| e.to_string())?;
+    }
+    let vue = plus_haute_vue()?;
     // Retenue seulement une fois la signature vérifiée : un manifeste quelconque ne fait pas monter la barre.
     if comparer_a_la_vue(vue, publiee.version)? {
         let v = publiee.version;
@@ -445,6 +509,9 @@ fn derniere_vue() -> Option<Version> {
 mod tests {
     use super::*;
     use ed25519_dalek::Signer;
+
+    /// Les tests qui écrivent l'état des versions (le même dossier jetable pour tout le processus) passent un à un.
+    static ETAT_DES_VERSIONS: Mutex<()> = Mutex::new(());
 
     fn cle_d_essai() -> ed25519_dalek::SigningKey {
         ed25519_dalek::SigningKey::from_bytes(&[7; 32])
@@ -605,6 +672,7 @@ mod tests {
     /// dit, au lieu de laisser passer un vieux manifeste.
     #[test]
     fn versions_vues_changees_a_cote() {
+        let _seul = ETAT_DES_VERSIONS.lock().unwrap_or_else(PoisonError::into_inner);
         crate::sceau::ecrire(crate::sceau::VERSIONS, "0.85.0+1792540000").unwrap();
         assert_eq!(plus_haute_vue(), Ok(Some((0, 85, 0, 1_792_540_000))));
         std::fs::write(crate::socle::dossier_local().join(crate::sceau::VERSIONS), "0.1.0+1").unwrap();
@@ -664,8 +732,83 @@ mod tests {
             lire_manifeste_0_85(MANIFESTE, "macos"),
             lire_manifeste(MANIFESTE, "macos")
         );
+        // La ligne de révocation (signer-versions.sh --secours --revoquer) vient après les trois programmes : le
+        // lecteur de la 0.85 trouve le sien avant elle, et lit la même chose (la 0.85 ne connaît pas la clé de
+        // secours : elle refuse ce manifeste pour sa signature, jamais pour sa forme).
+        let revoque = format!("{manifeste}{LIGNE_REVOCATION}\n");
+        for systeme in ["linux-x86_64", "windows-x86_64", "macos"] {
+            assert_eq!(
+                lire_manifeste_0_85(&revoque, systeme),
+                lire_manifeste(&manifeste, systeme),
+                "{systeme}"
+            );
+        }
         // Le message signé garde le domaine de la 0.85 : sa vérification (clé principale) reste la même.
         assert_eq!(DOMAINE, b"vanguard-versions 1\n");
+    }
+
+    /// La clé principale volée : la clé de secours la révoque par la dernière ligne de son manifeste. Retenue ici,
+    /// la principale n'est plus acceptée (ni manifeste ni historique), effacer ou réécrire l'état ne la fait pas
+    /// revenir, et la ligne signée par la principale elle-même ne révoque rien.
+    #[test]
+    fn la_cle_de_secours_revoque_la_principale() {
+        let principale = cle_d_essai();
+        let secours = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        let cles = [
+            principale.verifying_key().to_bytes(),
+            secours.verifying_key().to_bytes(),
+        ];
+        let avec_ligne = format!("{MANIFESTE}{LIGNE_REVOCATION}\n");
+        // Le lecteur d'aujourd'hui lit toujours chaque programme.
+        for systeme in ["linux-x86_64", "windows-x86_64", "macos"] {
+            assert_eq!(lire_manifeste(&avec_ligne, systeme), lire_manifeste(MANIFESTE, systeme));
+        }
+        assert!(revoque_la_principale(avec_ligne.as_bytes()) && !revoque_la_principale(MANIFESTE.as_bytes()));
+        // Avant : les deux clés passent.
+        let par_principale = signer(&principale, MANIFESTE);
+        assert!(juger_avec(&cles, MANIFESTE.as_bytes(), &par_principale, "macos", "m").is_ok());
+        // Signée par la principale, la ligne ne révoque rien (sinon un voleur couperait la clé de secours).
+        let p = juger_avec(
+            &cles,
+            avec_ligne.as_bytes(),
+            &signer(&principale, &avec_ligne),
+            "macos",
+            "m",
+        )
+        .unwrap();
+        assert!(!p.revoque);
+        let s = juger_avec(
+            &cles,
+            avec_ligne.as_bytes(),
+            &signer(&secours, &avec_ligne),
+            "macos",
+            "m",
+        );
+        assert!(s.unwrap().revoque);
+        // Sans la ligne, la clé de secours signe sans rien révoquer.
+        let s = juger_avec(&cles, MANIFESTE.as_bytes(), &signer(&secours, MANIFESTE), "macos", "m");
+        assert!(!s.unwrap().revoque);
+        // Après : la principale est refusée, et le refus le dit.
+        let apres = &cles[1..];
+        let refus = juger_avec(apres, MANIFESTE.as_bytes(), &par_principale, "macos", "m");
+        assert!(refus.is_err());
+        assert!(juger_avec(apres, MANIFESTE.as_bytes(), &signer(&secours, MANIFESTE), "macos", "m").is_ok());
+        // Les clés gravées : révoquée, la principale ne reste pas dans la liste.
+        assert_eq!(cles_acceptees(false), &CLES);
+        assert_eq!(cles_acceptees(true), &[CLE_SECOURS]);
+        // L'état retenu : là sous n'importe quelle forme, la principale reste révoquée ; et le plancher repart.
+        let _seul = ETAT_DES_VERSIONS.lock().unwrap_or_else(PoisonError::into_inner);
+        crate::sceau::ecrire(crate::sceau::VERSIONS, "4294967295.0.0+1792540000").unwrap();
+        assert!(!principale_revoquee());
+        retenir_revocation().unwrap();
+        assert!(principale_revoquee());
+        assert_eq!(plus_haute_vue(), Ok(None));
+        let fichier = crate::socle::dossier_local().join(crate::sceau::REVOCATION);
+        std::fs::write(&fichier, "rien").unwrap();
+        assert!(principale_revoquee());
+        std::fs::remove_file(&fichier).unwrap();
+        assert!(principale_revoquee(), "effacée hors de Vanguard : toujours révoquée");
+        crate::sceau::effacer(crate::sceau::REVOCATION).unwrap();
     }
 
     #[test]

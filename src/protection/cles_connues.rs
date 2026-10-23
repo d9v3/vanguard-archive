@@ -257,7 +257,8 @@ pub(crate) fn accepter() {
 }
 
 /// Au bilan : la clé reconnue dont le carnet est refusé (niveau élevé), ou un volume au témoin sans jeton connu,
-/// ignoré (information : une clé à soi pas encore redéployée a le même air).
+/// ignoré (information au premier usage : une clé à soi pas encore redéployée a le même air ; moyen dès que cet
+/// ordinateur a déployé des clés, voir `constat_inconnue`).
 pub fn constats() -> Vec<Constat> {
     // Pendant les tests, jamais la vraie clé branchée sur l'ordinateur de développement.
     if cfg!(test) {
@@ -268,7 +269,9 @@ pub fn constats() -> Vec<Constat> {
             Ok(()) => Vec::new(),
             Err(refus) => vec![constat_refus(refus)],
         },
-        None if crate::reseau::volume_inconnu() => vec![constat_inconnue()],
+        None if crate::reseau::volume_inconnu() => vec![constat_inconnue(
+            crate::protection::manifeste::a_des_references(&crate::socle::dossier_local()),
+        )],
         None => Vec::new(),
     }
 }
@@ -298,7 +301,31 @@ fn constat_refus(refus: Refus) -> Constat {
     )
 }
 
-fn constat_inconnue() -> Constat {
+/// Un volume au témoin sans jeton connu. Là où des clés ont déjà été déployées (`deja_deployees` : une référence
+/// de manifeste existe), changer le jeton (un simple fichier texte) et le numéro de série d'une clé qui a voyagé
+/// suffisait à la faire passer pour un volume étranger, en simple information : rien n'a été comparé, c'est un
+/// avertissement moyen. Sans aucune clé déployée ici, c'est le premier usage : information.
+fn constat_inconnue(deja_deployees: bool) -> Constat {
+    if deja_deployees {
+        return Constat {
+            verifie: false,
+            ..alerte(
+                CAT,
+                Niveau::Moyen,
+                tr!(
+                    "Un volume branché porte le témoin d'une clé VANGUARD sans jeton connu de cet ordinateur : autre clé que celles déployées ici, ou clé dont le jeton et l'identifiant de volume ont été changés. Rien n'a été comparé ni lu : ne lance rien depuis elle avant de l'avoir redéployée.",
+                    "A plugged-in volume carries a VANGUARD key marker without a token known to this computer: a key other than those deployed here, or a key whose token and volume identifier were changed. Nothing was compared or read: do not run anything from it before redeploying it."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "Redéploie-la avec outils/deployer.sh",
+                    "Redeploy it with outils/deployer.sh"
+                ),
+                &[],
+            )
+        };
+    }
     alerte(
         CAT,
         Niveau::Info,
@@ -322,6 +349,21 @@ mod tests {
 
     const JETON_A: &str = "0123456789abcdef0123456789abcdef";
     const JETON_B: &str = "fedcba9876543210fedcba9876543210";
+
+    /// Un volume au témoin sans jeton connu : information au premier usage, moyen dès qu'une clé a été déployée ici
+    /// (jeton et numéro de série changés ne ramènent plus une clé altérée à une information).
+    #[test]
+    fn volume_inconnu_la_ou_des_cles_sont_deployees() {
+        let c = constat_inconnue(false);
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        let c = constat_inconnue(true);
+        assert_eq!((c.probleme, c.verifie), (Some(Niveau::Moyen), false));
+        assert!(
+            c.message.contains("jeton") || c.message.contains("token"),
+            "{}",
+            c.message
+        );
+    }
 
     fn jetable(nom: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("vanguard-cles-connues-{nom}-{}", std::process::id()));

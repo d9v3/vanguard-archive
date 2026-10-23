@@ -95,20 +95,23 @@ pub(crate) fn export(
     fraiche: Duration,
     delai: Duration,
 ) -> Result<(Vec<u8>, Duration), Echec> {
-    export_et_manque(service, fichier, lieu, fraiche, delai).map(|(copie, _)| copie)
+    export_et_manque(service, fichier, lieu, fraiche, delai, |_| true).map(|(copie, _)| copie)
 }
 
 /// `export`, avec la raison d'un rafraîchissement manqué quand la copie d'avant sert : pour une liste sans limite
-/// d'âge (les empreintes de MalwareBazaar), où l'âge seul ne le dirait pas.
+/// d'âge (les empreintes de MalwareBazaar), où l'âge seul ne le dirait pas. Seule une réponse que `valide` accepte
+/// remplace la copie gardée : une archive anormale (démesurée une fois ouverte, ou presque vide) ne prend jamais la
+/// place de la bonne.
 pub(crate) fn export_et_manque(
     service: Service,
     fichier: &str,
     lieu: (&str, &str),
     fraiche: Duration,
     delai: Duration,
+    valide: fn(&[u8]) -> bool,
 ) -> Result<Export, Echec> {
     let cle = cle().ok_or(Echec::Manquante)?;
-    export_depuis(service.exports(), &cle, fichier, lieu, (fraiche, delai))
+    export_depuis(service.exports(), &cle, fichier, lieu, (fraiche, delai), valide)
 }
 
 /// L'export, depuis `base` (un serveur local dans les tests). L'adresse qui porte la clé naît et meurt ici.
@@ -118,6 +121,7 @@ fn export_depuis(
     fichier: &str,
     lieu: (&str, &str),
     (fraiche, delai): (Duration, Duration),
+    valide: fn(&[u8]) -> bool,
 ) -> Result<Export, Echec> {
     // Lettres et chiffres seulement : un segment de chemin sûr, sans « / ? # % » ni « .. » qui changerait l'adresse.
     if !cle_valide(cle) {
@@ -130,7 +134,7 @@ fn export_depuis(
         meme_hote: true,
         ..crate::http::Demande::get(&adresse, delai)
     };
-    let liste = liste(demande, lieu, fraiche, |_| true);
+    let liste = liste(demande, lieu, fraiche, valide);
     let manque = liste.manque;
     liste.resultat(true).map(|copie| (copie, manque))
 }
@@ -439,14 +443,14 @@ mod tests {
         let (base, fil) = serveur(
             b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 45\r\nConnection: close\r\n\r\n{\"status\":401,\"message\":\"Invalid auth token\"}",
         );
-        let refus = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap_err();
+        let refus = export_depuis(&base, CLE, "hostfile.txt", lieu, delais, |_| true).unwrap_err();
         assert_eq!(refus, Echec::Refusee);
         let demande = fil.join().unwrap();
         assert_eq!(demande, format!("GET /v2/files/exports/{CLE}/hostfile.txt HTTP/1.1"));
         raisons.push(format!("{refus:?} {}", refus.raison()));
         // Panne, sans copie d'avant.
         let (base, fil) = serveur(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-        let panne = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap_err();
+        let panne = export_depuis(&base, CLE, "hostfile.txt", lieu, delais, |_| true).unwrap_err();
         assert_eq!(panne, Echec::Reponse(502));
         fil.join().unwrap();
         raisons.push(format!("{panne:?} {}", panne.raison()));
@@ -455,12 +459,20 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let rien = export_depuis(&format!("http://{libre}/v2/files/exports/"), CLE, "x.txt", lieu, delais).unwrap_err();
+        let rien = export_depuis(
+            &format!("http://{libre}/v2/files/exports/"),
+            CLE,
+            "x.txt",
+            lieu,
+            delais,
+            |_| true,
+        )
+        .unwrap_err();
         assert_eq!(rien, Echec::SansReponse);
         raisons.push(format!("{rien:?} {}", rien.raison()));
         // Une clé qui changerait l'adresse n'est même pas envoyée.
         assert_eq!(
-            export_depuis(&base, "a1B2c3D4e5F6g7H8i9J0/../x", "x.txt", lieu, delais),
+            export_depuis(&base, "a1B2c3D4e5F6g7H8i9J0/../x", "x.txt", lieu, delais, |_| true),
             Err(Echec::Manquante)
         );
         for raison in &raisons {
@@ -472,7 +484,7 @@ mod tests {
         // Réussie : la liste est gardée, toujours sans la clé.
         let (base, fil) =
             serveur(b"HTTP/1.1 200 OK\r\nContent-Length: 22\r\nConnection: close\r\n\r\n# URLhaus\n127.0.0.1 x\n");
-        let ((octets, _), manque) = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap();
+        let ((octets, _), manque) = export_depuis(&base, CLE, "hostfile.txt", lieu, delais, |_| true).unwrap();
         fil.join().unwrap();
         assert_eq!(octets, b"# URLhaus\n127.0.0.1 x\n");
         assert_eq!(manque, None);
@@ -503,7 +515,7 @@ mod tests {
         ] {
             let reponse: &'static [u8] = reponse;
             let (base, fil) = serveur(reponse);
-            let ((octets, _), manque) = export_depuis(&base, CLE, "nom_change.zip", lieu, due).unwrap();
+            let ((octets, _), manque) = export_depuis(&base, CLE, "nom_change.zip", lieu, due, |_| true).unwrap();
             fil.join().unwrap();
             assert_eq!(octets, b"# d'avant\n");
             assert_eq!(manque, Some(attendu));
@@ -515,11 +527,11 @@ mod tests {
             .local_addr()
             .unwrap();
         let base = format!("http://{libre}/v2/files/exports/");
-        let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, due).unwrap();
+        let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, due, |_| true).unwrap();
         assert_eq!(manque, Some(Echec::SansReponse));
         // Encore fraîche : rien n'est demandé (personne n'écoute), rien à dire.
         let fraiche = (Duration::from_hours(1), Duration::from_secs(5));
-        let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, fraiche).unwrap();
+        let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, fraiche, |_| true).unwrap();
         assert_eq!(manque, None);
         let _ = std::fs::remove_dir_all(&dossier);
     }

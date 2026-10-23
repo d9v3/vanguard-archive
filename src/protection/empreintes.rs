@@ -23,7 +23,17 @@ const RECENTES: &str = "sha256_recent.txt";
 /// La liste complète se retélécharge après une semaine, les récentes après un jour.
 const SEMAINE: Duration = Duration::from_hours(7 * 24);
 const JOUR: Duration = Duration::from_hours(24);
-const TEXTE_MAX: usize = 1 << 30;
+/// Au-delà, ce n'est pas la liste : la vraie fait 76 Mo de texte (oct. 2026) ; 1 Gio laissait une archive de 3,6 Mo
+/// faire monter la mémoire à 2,5 Go à chaque bilan.
+pub(crate) const TEXTE_MAX: usize = 256 << 20;
+/// Moins d'empreintes que cela, ce n'est pas la liste (une page d'erreur, une archive vide) : la copie gardée reste.
+/// La complète en a plus d'un million ; les récentes (48 heures), des centaines.
+const COMPLETE_MIN: usize = 10_000;
+const RECENTES_MIN: usize = 10;
+
+/// Une liste de MalwareBazaar à télécharger : (son nom chez abuse.ch, son nom ici, après combien de temps la
+/// redemander, délai en secondes, ce qui la reconnaît).
+type Source = (&'static str, &'static str, Duration, u64, fn(&[u8]) -> bool);
 
 /// Les empreintes connues, triées : (combien, de quand) se dit avec.
 pub(crate) struct Empreintes {
@@ -56,21 +66,41 @@ impl Empreintes {
 /// champ de 64 chiffres hexadécimaux, guillemets et fins de ligne Windows ôtés : la liste nue comme l'export CSV (où
 /// l'empreinte SHA-256 est la seule de cette longueur) se lisent pareil.
 fn lire_texte(texte: &str) -> Vec<[u8; 32]> {
-    texte
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.starts_with('#'))
-        .filter_map(|l| {
-            l.split(',')
-                .map(|c| c.trim().trim_matches('"').trim())
-                .find(|c| c.len() == 64 && c.bytes().all(|b| b.is_ascii_hexdigit()))
+    lire_octets(texte.as_bytes())
+}
+
+/// `lire_texte`, sur les octets mêmes : sans copie en texte de la liste entière (un seul octet qui n'est pas de
+/// l'UTF-8 forçait une seconde copie de tout le fichier).
+fn lire_octets(octets: &[u8]) -> Vec<[u8; 32]> {
+    let blanc = |b: &u8| b.is_ascii_whitespace();
+    octets
+        .split(|&b| b == b'\n')
+        .map(|l| {
+            let debut = l.iter().position(|b| !blanc(b)).unwrap_or(l.len());
+            &l[debut..]
         })
+        .filter(|l| !l.starts_with(b"#"))
         .filter_map(|l| {
+            l.split(|&b| b == b',')
+                .map(|c| {
+                    let c = c.trim_ascii();
+                    let c = c.strip_prefix(b"\"").unwrap_or(c);
+                    c.strip_suffix(b"\"").unwrap_or(c).trim_ascii()
+                })
+                .find(|c| c.len() == 64 && c.iter().all(u8::is_ascii_hexdigit))
+        })
+        .map(|l| {
             let mut e = [0u8; 32];
             for (i, o) in e.iter_mut().enumerate() {
-                *o = u8::from_str_radix(l.get(2 * i..2 * i + 2)?, 16).ok()?;
+                let chiffre = |b: u8| {
+                    char::from(b)
+                        .to_digit(16)
+                        .and_then(|d| u8::try_from(d).ok())
+                        .unwrap_or(0)
+                };
+                *o = (chiffre(l[2 * i]) << 4) | chiffre(l[2 * i + 1]);
             }
-            Some(e)
+            e
         })
         .collect()
 }
@@ -106,11 +136,26 @@ pub(crate) fn premier_fichier_zip(archive: &[u8], max: usize) -> Option<Vec<u8>>
     }
     let donnees = local + 30 + mot16(archive, local + 26)? + mot16(archive, local + 28)?;
     let brut = archive.get(donnees..donnees.checked_add(compresse)?)?;
-    match methode {
-        0 => Some(brut.to_vec()),
-        8 => miniz_oxide::inflate::decompress_to_vec_with_limit(brut, max).ok(),
-        _ => None,
-    }
+    // Décompressé jusqu'à la taille annoncée, pas jusqu'à `max` : une archive qui annonce 1 octet et en contient
+    // un milliard s'arrête au premier ; et le résultat doit faire exactement la taille annoncée (comme
+    // plugins/archive.rs).
+    let contenu = match methode {
+        0 => brut.to_vec(),
+        8 => miniz_oxide::inflate::decompress_to_vec_with_limit(brut, decompresse).ok()?,
+        _ => return None,
+    };
+    (contenu.len() == decompresse).then_some(contenu)
+}
+
+/// La liste complète reçue est-elle la liste ? Une archive lisible, de taille raisonnable une fois ouverte, avec
+/// assez d'empreintes : sinon la copie gardée reste.
+fn complete_valide(archive: &[u8]) -> bool {
+    premier_fichier_zip(archive, TEXTE_MAX).is_some_and(|t| lire_octets(&t).len() >= COMPLETE_MIN)
+}
+
+/// La liste des récentes reçue est-elle la liste ?
+fn recentes_valide(texte: &[u8]) -> bool {
+    texte.len() <= TEXTE_MAX && lire_octets(texte).len() >= RECENTES_MIN
 }
 
 fn dossier() -> PathBuf {
@@ -169,10 +214,11 @@ fn charger(telecharger: bool) -> Result<Empreintes, String> {
                 "  {GRIS}MalwareBazaar fingerprints: full list (about 43 MB, once a week)…{RESET}"
             );
         }
-        for (fichier, nom, apres, secondes) in [
-            (COMPLETE, "complete.zip", SEMAINE, 600),
-            (RECENTES, "recentes.txt", JOUR, 60),
-        ] {
+        let listes: [Source; 2] = [
+            (COMPLETE, "complete.zip", SEMAINE, 600, complete_valide),
+            (RECENTES, "recentes.txt", JOUR, 60, recentes_valide),
+        ];
+        for (fichier, nom, apres, secondes, valide) in listes {
             let lieu = ("malwarebazaar", nom);
             let rendu = abuse_ch::export_et_manque(
                 Service::MalwareBazaar,
@@ -180,6 +226,7 @@ fn charger(telecharger: bool) -> Result<Empreintes, String> {
                 lieu,
                 apres,
                 Duration::from_secs(secondes),
+                valide,
             );
             if let Some(e) = manque(&rendu) {
                 echec.get_or_insert(e);
@@ -189,9 +236,9 @@ fn charger(telecharger: bool) -> Result<Empreintes, String> {
     let mut triees = std::fs::read(&complete)
         .ok()
         .and_then(|a| premier_fichier_zip(&a, TEXTE_MAX))
-        .map(|t| lire_texte(&String::from_utf8_lossy(&t)))
+        .map(|t| lire_octets(&t))
         .unwrap_or_default();
-    triees.extend(lire_texte(&std::fs::read_to_string(&recentes).unwrap_or_default()));
+    triees.extend(lire_octets(&std::fs::read(&recentes).unwrap_or_default()));
     triees.sort_unstable();
     triees.dedup();
     if triees.is_empty() {
@@ -372,6 +419,44 @@ mod tests {
         abimee.truncate(abimee.len() - 30);
         assert!(premier_fichier_zip(&abimee, 1 << 20).is_none());
         assert!(premier_fichier_zip(b"pas une archive", 1 << 20).is_none());
+        // Une bombe : la taille annoncée (1 octet) ment sur ce que l'archive contient (des Mio de la même ligne).
+        // Rien n'est décompressé au-delà de l'annonce, et l'écart la fait refuser.
+        let gros = texte.repeat(2000);
+        let mut bombe = archive(gros.as_bytes(), 8);
+        let central = bombe.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        bombe[central + 24..central + 28].copy_from_slice(&1u32.to_le_bytes());
+        assert!(premier_fichier_zip(&bombe, TEXTE_MAX).is_none());
+        // Annoncée plus grande que son contenu : refusée aussi.
+        let mut menteuse = archive(texte.as_bytes(), 8);
+        let central = menteuse.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        let plus = u32::try_from(texte.len() + 1).unwrap();
+        menteuse[central + 24..central + 28].copy_from_slice(&plus.to_le_bytes());
+        assert!(premier_fichier_zip(&menteuse, TEXTE_MAX).is_none());
+        // La validation à la réception : une archive presque vide, ou une bombe, ne remplace pas la copie gardée.
+        assert!(!complete_valide(&archive(texte.as_bytes(), 8)));
+        assert!(!complete_valide(&bombe));
+        let liste = (0..COMPLETE_MIN).fold(String::new(), |mut s, i| {
+            let _ = writeln!(s, "{i:064x}");
+            s
+        });
+        assert!(complete_valide(&archive(liste.as_bytes(), 8)));
+        assert!(recentes_valide(texte.as_bytes()) && !recentes_valide(b"<html>erreur</html>"));
+    }
+
+    /// La lecture sur les octets mêmes rend ce que rendait la lecture en texte, octet non UTF-8 compris.
+    #[test]
+    fn lecture_des_octets_comme_du_texte() {
+        let a = "9edfda3b77b3973f37708add497130d44cd88374c85812926f7974687006e3e5";
+        let csv = format!(
+            "# commentaire\r\n  {a}\r\n\"2026-10-23\", \"{}\", \"x\"\n# {a}\npas une empreinte\n",
+            a.to_uppercase()
+        );
+        assert_eq!(lire_octets(csv.as_bytes()), lire_texte(&csv));
+        assert_eq!(lire_octets(csv.as_bytes()).len(), 2);
+        let mut abime = csv.into_bytes();
+        abime.push(0xff);
+        abime.extend_from_slice(format!("\n{a}\n").as_bytes());
+        assert_eq!(lire_octets(&abime).len(), 3);
     }
 
     #[test]

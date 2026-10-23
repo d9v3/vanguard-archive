@@ -66,32 +66,54 @@ fn erreurs_avec(champs: &[&str]) -> Option<Vec<Entree>> {
     // Pas de borne d'heure : au début du démarrage, l'horloge peut être fausse de plusieurs heures (une horloge
     // matérielle à l'heure locale, sous Windows en double démarrage), et journalctl -b garde ces entrées. Les
     // champs se trouvent par la table de hachage : lire aussi les fichiers d'avant ne coûte presque rien.
-    chercher_dans_le_systeme(&Requete {
-        un_de: &["PRIORITY=0", "PRIORITY=1", "PRIORITY=2", "PRIORITY=3"],
-        depuis: None,
-        demarrage: Some(demarrage),
-        champs,
-    })
+    chercher_dans_le_systeme(
+        &Requete {
+            un_de: &["PRIORITY=0", "PRIORITY=1", "PRIORITY=2", "PRIORITY=3"],
+            depuis: None,
+            demarrage: Some(demarrage),
+            champs,
+        },
+        false,
+    )
 }
 
-/// Les messages des programmes `programmes` (« _COMM=… ») des `secondes` dernières, dans l'ordre du journal, comme
-/// `journalctl _COMM=a + _COMM=b --since -Ns -o cat`. `None` : le journal ne se lit pas ici.
+/// Les messages que root a écrits sous le nom des programmes `programmes` (« _COMM=… ») les `secondes` dernières,
+/// dans l'ordre du journal, comme `journalctl _COMM=a _UID=0 + _COMM=b _UID=0 --since -Ns -o cat`, dans les
+/// journaux du système seulement. `_COMM` n'est que le nom du processus, que chacun choisit : un programme sans
+/// droits nommé « sshd » écrivait de fausses attaques SSH (et un faux « mot de passe deviné ») dans son propre
+/// journal, lu avec les autres. `_UID` est posé par journald lui-même, et sshd écrit ces lignes en root. `None` : le
+/// journal ne se lit pas ici.
 pub(crate) fn messages_de(programmes: &[&str], secondes: u64) -> Option<Vec<String>> {
     let un_de: Vec<String> = programmes.iter().map(|p| format!("_COMM={p}")).collect();
     let un_de: Vec<&str> = un_de.iter().map(String::as_str).collect();
     let depuis = maintenant().saturating_sub(secondes.saturating_mul(1_000_000));
-    let entrees = chercher_dans_le_systeme(&Requete {
-        un_de: &un_de,
-        depuis: Some(depuis),
-        demarrage: None,
-        champs: &["MESSAGE"],
-    })?;
-    Some(
-        entrees
-            .into_iter()
-            .filter_map(|e| e.champ("MESSAGE").map(str::to_string))
-            .collect(),
-    )
+    let entrees = chercher_dans_le_systeme(
+        &Requete {
+            un_de: &un_de,
+            depuis: Some(depuis),
+            demarrage: None,
+            champs: &["MESSAGE", "_UID"],
+        },
+        true,
+    )?;
+    Some(de_root(entrees))
+}
+
+/// Les messages des entrées écrites par root (`_UID=0`, champ de confiance posé par journald) ; les autres, écrits
+/// par n'importe quel compte sous le même nom de programme, sont écartés.
+fn de_root(entrees: Vec<Entree>) -> Vec<String> {
+    entrees
+        .into_iter()
+        .filter(|e| e.champ("_UID") == Some("0"))
+        .filter_map(|e| e.champ("MESSAGE").map(str::to_string))
+        .collect()
+}
+
+/// Les journaux du système seulement (« system.journal » et ses archives), sans ceux des comptes (« user-1000 ») :
+/// ce qu'y écrit un programme sans droits n'a rien à faire dans ce que dit sshd.
+fn du_systeme_seul(mut fichiers: Vec<PathBuf>) -> Vec<PathBuf> {
+    fichiers.retain(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("system")));
+    fichiers
 }
 
 fn maintenant() -> u64 {
@@ -156,11 +178,13 @@ fn fichiers_dans(racines: &[&Path], machine: &str) -> Option<Vec<PathBuf>> {
 /// La requête sur les journaux du système. journald archive un fichier en le renommant (« system.journal » devient
 /// « system@….journal ») : une rotation pendant la lecture ferait manquer l'archive. La liste est donc relue après ;
 /// si elle a changé, la lecture recommence, et après trois essais, journalctl prend le relais.
-fn chercher_dans_le_systeme(requete: &Requete) -> Option<Vec<Entree>> {
+/// `systeme_seul` : sans les journaux des comptes (`du_systeme_seul`).
+fn chercher_dans_le_systeme(requete: &Requete, systeme_seul: bool) -> Option<Vec<Entree>> {
+    let liste = || fichiers_du_systeme().map(|f| if systeme_seul { du_systeme_seul(f) } else { f });
     for _ in 0..3 {
-        let fichiers = fichiers_du_systeme()?;
+        let fichiers = liste()?;
         let entrees = chercher(&fichiers, requete)?;
-        if fichiers_du_systeme()? == fichiers {
+        if liste()? == fichiers {
             return Some(entrees);
         }
     }
@@ -1080,6 +1104,73 @@ mod tests {
         }
     }
 
+    /// Un programme sans droits copié sous le nom « sshd » écrit de fausses attaques dans son propre journal : seules
+    /// les lignes que root a écrites (`_UID=0`, posé par journald) comptent, et le journal du compte n'est pas lu.
+    #[test]
+    fn sshd_de_confiance_seulement() {
+        // Les archives de journald se nomment « system@… » : écrit ainsi, le garde-fou de confidentialité ne les
+        // prend pas pour des adresses de courriel.
+        const AROBASE: char = '@';
+        let d = jetable("confiance");
+        let mut e = Ecrivain::new(HACHAGE_A_CLE | COMPACT);
+        e.entree(
+            1_000,
+            DEMARRAGE,
+            &[
+                b"_COMM=sshd",
+                b"_UID=0",
+                b"MESSAGE=Failed password for root from 203.0.113.9 port 4242 ssh2",
+            ],
+        );
+        e.entree(
+            2_000,
+            DEMARRAGE,
+            &[
+                b"_COMM=sshd",
+                b"_UID=1000",
+                b"MESSAGE=Failed password for root from 198.51.100.7 port 1 ssh2",
+            ],
+        );
+        e.entree(
+            3_000,
+            DEMARRAGE,
+            &[
+                b"_COMM=sshd-session",
+                b"MESSAGE=Accepted password for alice from 198.51.100.7 port 2 ssh2",
+            ],
+        );
+        let f = e.fichier(&d, "system.journal");
+        let entrees = chercher(
+            std::slice::from_ref(&f),
+            &Requete {
+                un_de: &["_COMM=sshd", "_COMM=sshd-session"],
+                depuis: Some(0),
+                demarrage: None,
+                champs: &["MESSAGE", "_UID"],
+            },
+        )
+        .unwrap();
+        assert_eq!(entrees.len(), 3);
+        assert_eq!(
+            de_root(entrees),
+            ["Failed password for root from 203.0.113.9 port 4242 ssh2"]
+        );
+        let tous = vec![
+            d.join("system.journal"),
+            d.join(format!("system{AROBASE}0001-0002.journal~")),
+            d.join("user-1000.journal"),
+            d.join(format!("user-1000{AROBASE}0003.journal")),
+        ];
+        assert_eq!(
+            du_systeme_seul(tous),
+            [
+                d.join("system.journal"),
+                d.join(format!("system{AROBASE}0001-0002.journal~"))
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// Ce qui ne se lit pas rend `None` (journalctl prendra le relais), jamais une liste vide qui passerait pour
     /// « rien à signaler ».
     #[test]
@@ -1380,12 +1471,15 @@ mod tests {
             let un_de: Vec<String> = programmes.iter().map(|p| format!("_COMM={p}")).collect();
             let un_de: Vec<&str> = un_de.iter().map(String::as_str).collect();
             comme_journalctl(&arguments, &["MESSAGE"], || {
-                chercher_dans_le_systeme(&Requete {
-                    un_de: &un_de,
-                    depuis: Some(depuis),
-                    demarrage: None,
-                    champs: &["MESSAGE"],
-                })
+                chercher_dans_le_systeme(
+                    &Requete {
+                        un_de: &un_de,
+                        depuis: Some(depuis),
+                        demarrage: None,
+                        champs: &["MESSAGE"],
+                    },
+                    false,
+                )
             });
         }
     }

@@ -959,8 +959,13 @@ fn en_texte<T>(analyser: fn(&str) -> Option<T>) -> impl FnOnce(&[u8]) -> Option<
 /// clé : ses serveurs « ip:port » et ses domaines, lus dans le même fichier.
 type ExportThreatfox = (HashMap<(IpAddr, u16), String>, HashMap<String, String>);
 
+/// Le même plafond que la liste de MalwareBazaar : 1 Gio laissait une archive de 1 Mo faire monter la mémoire à 4 Go
+/// à chaque bilan (le CSV, sa copie en texte, puis ses deux lectures). Non vérifié : la taille réelle de full.csv chez
+/// ThreatFox ; au-delà, l'export serait dit illisible, jamais tu.
+const EXPORT_MAX: usize = crate::protection::empreintes::TEXTE_MAX;
+
 fn analyser_export_threatfox(archive: &[u8]) -> Option<ExportThreatfox> {
-    let csv = crate::protection::empreintes::premier_fichier_zip(archive, 1 << 30)?;
+    let csv = crate::protection::empreintes::premier_fichier_zip(archive, EXPORT_MAX)?;
     let texte = String::from_utf8_lossy(&csv);
     Some((analyser_threatfox(&texte)?, analyser_domaines(&texte)?))
 }
@@ -1287,8 +1292,7 @@ pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String, String)> {
         return Vec::new();
     };
     let actuels = sites_dangereux(&noms, &hotes);
-    let fichier = crate::socle::dossier_local().join("surveillance-sites.txt");
-    let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
+    let avant = sites_d_avant(crate::sceau::lire(crate::sceau::SITES));
     let alertes = nouvelles_alertes(&avant, &actuels)
         .into_iter()
         .map(|site| {
@@ -1306,9 +1310,17 @@ pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String, String)> {
             )
         })
         .collect();
-    let _ = std::fs::create_dir_all(crate::socle::dossier_local());
-    let _ = std::fs::write(&fichier, actuels.into_iter().collect::<Vec<_>>().join("\n"));
+    let _ = crate::sceau::ecrire(crate::sceau::SITES, actuels.into_iter().collect::<Vec<_>>().join("\n"));
     alertes
+}
+
+/// Les sites déjà signalés, seulement tels que Vanguard les a notés : une ligne posée d'avance (le site qu'un
+/// programme vient de demander) ne tait rien, et un fichier changé, adopté ou effacé avec les sceaux fait tout redire.
+fn sites_d_avant(lu: crate::sceau::Lecture) -> String {
+    match lu {
+        crate::sceau::Lecture::Intact(o) => String::from_utf8_lossy(&o).into_owned(),
+        _ => String::new(),
+    }
 }
 
 /// Depuis le menu : l'écran, puis Entrée pour revenir, ou C pour donner ou retirer la clé abuse.ch (celle qui ouvre
@@ -1836,6 +1848,45 @@ fn afficher_connexions(botnets: &Botnets) -> BTreeSet<String> {
 mod tests {
     use super::*;
 
+    /// Un export qui annonce une ligne de plus que le plafond une fois décompressé (une archive « stockée », sans
+    /// compression : un vrai CSV vide, puis un long commentaire) n'est pas lu ; juste au plafond, il l'est. Avant, il
+    /// se décompressait jusqu'à 1 Gio.
+    #[test]
+    fn export_threatfox_borne_comme_malwarebazaar() {
+        fn stockee(taille: usize) -> Vec<u8> {
+            let nom = b"full.csv";
+            let mut z = b"PK\x03\x04".to_vec();
+            z.extend_from_slice(&[20, 0, 0, 0, 0, 0]);
+            z.extend_from_slice(&[0; 16]);
+            z.extend_from_slice(&u16::try_from(nom.len()).unwrap().to_le_bytes());
+            z.extend_from_slice(&[0, 0]);
+            z.extend_from_slice(nom);
+            let debut = z.len();
+            z.extend_from_slice(b"# ThreatFox\n#");
+            z.resize(debut + taille, b'#');
+            let central = z.len();
+            let taille = u32::try_from(taille).unwrap().to_le_bytes();
+            z.extend_from_slice(b"PK\x01\x02");
+            z.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0]);
+            z.extend_from_slice(&[0; 8]);
+            z.extend_from_slice(&taille);
+            z.extend_from_slice(&taille);
+            z.extend_from_slice(&u16::try_from(nom.len()).unwrap().to_le_bytes());
+            z.extend_from_slice(&[0; 12]);
+            z.extend_from_slice(&0u32.to_le_bytes());
+            z.extend_from_slice(nom);
+            let taille_central = z.len() - central;
+            z.extend_from_slice(b"PK\x05\x06");
+            z.extend_from_slice(&[0, 0, 0, 0, 1, 0, 1, 0]);
+            z.extend_from_slice(&u32::try_from(taille_central).unwrap().to_le_bytes());
+            z.extend_from_slice(&u32::try_from(central).unwrap().to_le_bytes());
+            z.extend_from_slice(&[0, 0]);
+            z
+        }
+        assert!(analyser_export_threatfox(&stockee(64)).is_some());
+        assert!(analyser_export_threatfox(&stockee(crate::protection::empreintes::TEXTE_MAX + 1)).is_none());
+    }
+
     fn ip(t: &str) -> IpAddr {
         t.parse().unwrap()
     }
@@ -2322,6 +2373,26 @@ mod tests {
         let actuelles = BTreeSet::from([planquee.to_string()]);
         assert_eq!(nouvelles_alertes(&deja_signalees(), &actuelles).len(), 1);
         crate::sceau::effacer(crate::sceau::BOTNETS).unwrap();
+    }
+
+    /// Un site URLhaus écrit d'avance dans la liste des sites déjà signalés ne se fait pas oublier.
+    #[test]
+    fn sites_signales_poses_a_cote_ne_taisent_rien() {
+        use crate::sceau::Lecture;
+        let site = "malware.example (URLhaus)";
+        let actuels = BTreeSet::from([site.to_string()]);
+        assert_eq!(
+            nouvelles_alertes(&sites_d_avant(Lecture::Intact(site.into())), &actuels),
+            Vec::<&String>::new()
+        );
+        for lu in [
+            Lecture::Falsifie(Some(site.into())),
+            Lecture::Adopte(site.into()),
+            Lecture::Inconnu,
+            Lecture::Illisible("refusé".into()),
+        ] {
+            assert_eq!(nouvelles_alertes(&sites_d_avant(lu), &actuels).len(), 1);
+        }
     }
 
     #[test]

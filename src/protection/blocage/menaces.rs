@@ -888,6 +888,7 @@ mod tests {
                     crate::changements::Annulation::Commandes {
                         commandes: vec!["true".into()],
                         port: None,
+                        inverse: None,
                     },
                 ),
             ),

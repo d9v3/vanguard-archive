@@ -186,9 +186,15 @@ fn contenu_admis(forme: Forme, t: &str) -> bool {
 /// Une ligne de sysctl que Vanguard écrit dans ses fichiers : la limite de mémoire des jeux, ou une clé du
 /// durcissement à sa valeur sûre. Ces fichiers sont lus en root à chaque démarrage : une clé libre ou une valeur
 /// affaiblie viendrait d'ailleurs que de Vanguard.
+/// La plus petite limite de mémoire des jeux remise : celle du noyau par défaut.
+const MAX_MAP_COUNT_MIN: u64 = 65_530;
+
 fn ligne_sysctl_posee(cle: &str, v: &str) -> bool {
     match cle {
-        "vm/max_map_count" => v.parse::<u64>().is_ok(),
+        // Un plancher : la valeur par défaut du noyau (65 530). Plus bas, plus aucun programme ne démarre.
+        "vm/max_map_count" => v
+            .parse::<u64>()
+            .is_ok_and(|n| (MAX_MAP_COUNT_MIN..=i32::MAX as u64).contains(&n)),
         _ => v
             .parse::<i64>()
             .is_ok_and(|n| crate::machine::linux::valeur_durcie(cle, n)),
@@ -691,8 +697,11 @@ impl Changement {
                 Entree::Autostart(_) => v == "-" || (v.starts_with('+') && v.len() <= 64 << 10 && !v.contains('\0')),
                 Entree::Service(_) => ETATS_UNITE.contains(&v),
             },
-            Changement::Sysctl { .. } => {
-                v.len() <= 64 && !v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || " -".contains(c))
+            Changement::Sysctl { cle } => {
+                v.len() <= 64
+                    && !v.is_empty()
+                    && v.chars().all(|c| c.is_ascii_digit() || " -".contains(c))
+                    && (cle != "vm/max_map_count" || ligne_sysctl_posee(cle, v.trim()))
             }
             Changement::Pose { fichier, .. } => contenu_admis(fichier.forme, v),
             Changement::Module { .. } => v == "charge",

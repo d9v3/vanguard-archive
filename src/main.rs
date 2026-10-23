@@ -543,6 +543,13 @@ enum Commande {
         /// Accepter le carnet de la clé branchée tel qu'il est (copie restaurée, protection retirée ailleurs).
         #[arg(long)]
         accepter: bool,
+        /// Redire à la référence les images et le menu de Ventoy de la clé montée ici, après leur mise à jour par
+        /// outils/images-cle.sh (seulement les images nommées par --image, qu'il vient de copier et de vérifier).
+        #[arg(long)]
+        images: Option<std::path::PathBuf>,
+        /// Une image copiée et vérifiée par outils/images-cle.sh (son nom dans ISO/), avec --images.
+        #[arg(long, requires = "images")]
+        image: Vec<String>,
     },
     /// Plugins : des programmes à toi ajoutés à Vanguard sans changer son code (essais, outils expérimentaux), chacun
     /// dans un dossier avec un plugin.toml. « ajouter <dossier> » le copie et l'approuve (empreintes SHA-256),
@@ -2243,8 +2250,13 @@ async fn main() {
         Some(Commande::Sortantes) => protection::sortantes::afficher(),
         Some(Commande::Distance) => protection::distance::menu(),
         Some(Commande::VerifierMoi { programme }) => protection::manifeste::verifier_moi(programme.as_deref()),
-        Some(Commande::Manifeste { ecrire, accepter }) => {
-            protection::manifeste::commande(ecrire.as_deref(), accepter);
+        Some(Commande::Manifeste {
+            ecrire,
+            accepter,
+            images,
+            image,
+        }) => {
+            protection::manifeste::commande(ecrire.as_deref(), accepter, images.as_deref().map(|d| (d, &image[..])));
         }
         Some(Commande::Lien { adresse }) => protection::lien::verifier(Some(&adresse)),
         Some(Commande::VerifierFichier { fichier, empreinte }) => {

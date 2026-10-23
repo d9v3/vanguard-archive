@@ -233,6 +233,7 @@ mod tests {
         let regle = Annulation::Commandes {
             commandes: vec!["sudo ufw delete deny out to 203.0.113.7".into()],
             port: None,
+            inverse: None,
         };
         let blocages = vec![
             ("2026-10-21 12:00".to_string(), blocage("x", regle)),

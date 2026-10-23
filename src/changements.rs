@@ -63,10 +63,18 @@ pub(crate) struct Blocage {
 pub(crate) enum Annulation {
     /// Les commandes inverses (règle de pare-feu retirée, valeur d'avant remise), par `machine::appliquer`. `port` :
     /// le port fermé en entrée (« 11434/tcp ») que Vanguard a retenu, à oublier avec la règle.
+    ///
+    /// Ces commandes ne sont plus jamais rejouées telles qu'elles sont relues : ce fichier est celui du compte, et un
+    /// programme du compte y glissait une commande sudo qu'« annuler » lançait en root. L'annulation est refaite
+    /// depuis `inverse` (des champs typés : une adresse, un port, une valeur), ou, pour une note d'avant elle, depuis
+    /// ce que Vanguard aurait écrit lui-même (`blocage::gestes::inverse_reconnue`) ; sinon, elle se fait à la main.
+    /// `commandes` et `port` restent écrits : les copies d'avant (0.85 et plus anciennes) ne lisent qu'eux.
     Commandes {
         commandes: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         port: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inverse: Option<Inverse>,
     },
     /// Le fichier mis en quarantaine, à remettre à sa place (son nom dans la quarantaine).
     Quarantaine { nom: String },
@@ -79,6 +87,25 @@ pub(crate) enum Annulation {
     },
     /// Le programme retiré du démarrage : le réglage d'Optimiser (« demarrage:… ») à remettre.
     Demarrage { id: String },
+}
+
+/// Ce que défait un blocage par des commandes, en champs typés : les commandes inverses en sont refaites au moment
+/// d'annuler, jamais relues du fichier.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(tag = "genre", rename_all = "kebab-case")]
+pub(crate) enum Inverse {
+    /// La règle sortante vers une adresse.
+    Sortante {
+        pare_feu: crate::protection::blocage::pare_feu::PareFeu,
+        adresse: std::net::IpAddr,
+    },
+    /// La règle qui ferme un port TCP en entrée.
+    Entrante {
+        pare_feu: crate::protection::blocage::pare_feu::PareFeu,
+        port: u16,
+    },
+    /// La liste de blocage des pilotes vulnérables de Windows remise à sa valeur d'avant (`None` : absente).
+    Pilotes { avant: Option<u32> },
 }
 
 /// Le relevé des corrections faites ici, dans le dossier de données : le seul endroit où leurs commandes sont notées.
@@ -511,6 +538,7 @@ mod tests {
         let retirer = Annulation::Commandes {
             commandes: vec!["sudo ufw delete deny out to 203.0.113.7".into()],
             port: None,
+            inverse: None,
         };
         noter_blocage_dans(
             &f,

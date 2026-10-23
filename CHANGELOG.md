@@ -27,6 +27,31 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   note : en annuler une les marque toutes défaites. Deux notes sur la même cible défaites ensemble sont toutes deux
   remises, sans faux ✖. Un service activé mais arrêté est dit non annulable plutôt que faussement remis, et les
   droits de ~/.ssh corrigés s'annulent.
+- **Vanguard résiste mieux à qui l'attaque lui-même** (campagne d'attaque du 23 oct., 18 faiblesses corrigées, chacune
+  avec son essai). La clé de secours peut révoquer la clé principale volée (« revoque principale » à la fin du
+  manifeste, que les 0.85 lisent toujours) : retenue dans l'état scellé, la principale n'est plus jamais acceptée, et
+  la plus haute version vue repart. Le programme Mac signé ne vient que d'une compilation de master, sans cache. En
+  root, un programme posé dans un dossier modifiable par d'autres n'est plus remplacé. Les fichiers d'état ne se
+  lisent que s'ils sont de simples fichiers de taille bornée (un tube nommé figeait la surveillance pour toujours) ;
+  effacés avec les sceaux, ils sont « inconnus » et tout est redit, et le bilan dit les sceaux refaits ; le temps
+  réel, son rappel, l'audit, les sites et la passerelle déjà signalés sont scellés (une coupure posée par un autre
+  programme ne coupe plus rien) ; un fichier critique rechangé est renotifié ; l'écriture ne suit plus de lien, et
+  root n'écrit plus dans le dossier d'un compte. Annuler un blocage ne rejoue plus jamais une commande relue du relevé
+  : elle est refaite depuis l'adresse, le port ou la valeur notés. La clé USB : son menu Ventoy et ses images ISO (par
+  leur taille) entrent dans le manifeste, et une clé reconnue dont le numéro de série a changé est signalée. Réseau
+  local : l'UPnP n'est lu qu'à la passerelle (un appareil qui se dit box est signalé), jamais vers cette machine ni un
+  autre hôte, et l'écoute continue après un datagramme trop gros ; le DNS est aussi éprouvé sur des noms tirés au
+  hasard. La liste de MalwareBazaar ne se décompresse que jusqu'à sa taille annoncée, et le journal de sshd ne compte
+  que les lignes écrites par root. Une seconde passe contre ces corrections en a refermé les contournements : une clé
+  VANGUARD sans référence, là où d'autres clés ont la leur, est un avertissement moyen (changer aussi son jeton ne la
+  ramène plus à une information), et seule une référence qui porte son jeton l'accuse d'un identifiant changé (un
+  identifiant illisible n'accuse plus rien) ; une 0.85 mise à jour n'a plus l'air de sceaux effacés, et effacer avec
+  eux l'historique ne fait plus un premier passage ; l'heure du dernier regard sur Téléchargements et les menaces non
+  bloquées déjà signalées sont scellées ; annuler ne remet plus qu'une copie de réglages de Claude Code faite par
+  Vanguard ; « remettre comme avant » les réglages pour jouer ne réécrit en root que ce que Vanguard met dans /etc ;
+  la quarantaine ne suit plus de lien et root n'y écrit plus dans le dossier d'un compte ; l'écoute UPnP ne compte
+  plus les datagrammes trop gros ; l'export de ThreatFox est borné comme la liste de MalwareBazaar ; et une étiquette
+  nommée master ne reprend plus de cache sur le Mac.
 - **Un problème reconnu à sa règle et à son objet, plus à son texte traduit.** Les ports ouverts, les lancements
   automatiques suspects, les extensions de navigateur, les comptes oubliés ou ajoutés aux administrateurs, les
   logiciels espions, la prise de contrôle à distance, les logiciels périmés et le carnet de la clé VANGUARD portent

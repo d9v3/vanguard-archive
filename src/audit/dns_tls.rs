@@ -45,6 +45,23 @@ const NOMS_STABLES: [(&str, [Ipv4Addr; 2]); 3] = [
 /// Un nom signé DNSSEC, et un nom dont la signature est cassée exprès (zone de test publique).
 const NOM_SIGNE: &str = "internetsociety.org";
 const NOM_CASSE: &str = "dnssec-failed.org";
+/// Un nom tiré au hasard dans la zone cassée, et un nom qui n'existe pas (tiré au hasard sous .com) : des noms fixes
+/// et connus se reconnaissent, et un résolveur hostile pouvait répondre juste pour eux seuls (la bonne adresse, le
+/// refus attendu de la signature cassée) puis réécrire tout le reste. Un nom inventé à chaque audit ne se prépare pas.
+const ZONE_INEXISTANTS: &str = "com";
+
+/// Une étiquette DNS de 20 lettres tirée au hasard.
+fn etiquette_au_hasard() -> String {
+    let mut octets = [0u8; 20];
+    if getrandom::fill(&mut octets).is_err() {
+        // Sans hasard du système : l'horloge, mêlée (rien de secret ici, seulement imprévisible d'avance).
+        let h = crate::reseau::nat::hasard().to_le_bytes();
+        for (i, o) in octets.iter_mut().enumerate() {
+            *o = h[i % 8].rotate_left(u32::try_from(i).unwrap_or(0));
+        }
+    }
+    octets.iter().map(|o| char::from(b'a' + o % 26)).collect()
+}
 /// La question de DDR (RFC 9462) : le résolveur annonce-t-il du DNS chiffré ?
 const NOM_DDR: &str = "_dns.resolver.arpa";
 /// Site de référence pour le certificat présenté (une page de diagnostic sans contenu personnel).
@@ -102,6 +119,9 @@ pub struct Mesure {
     pub serveur: IpAddr,
     /// Par nom stable : la réponse, ou rien (muet).
     pub reponses: Vec<(&'static str, Option<Reponse>)>,
+    /// La réponse pour un nom inventé à l'instant, qui n'existe pas : une adresse au lieu de « ce nom n'existe
+    /// pas » trahit un résolveur qui réécrit les noms inexistants.
+    pub inexistant: Option<Reponse>,
 }
 
 /// L'épreuve DNSSEC d'un résolveur : sa réponse (avec le bit DO) au nom signé et au nom à signature cassée.
@@ -111,6 +131,8 @@ pub struct Dnssec {
     pub serveur: IpAddr,
     pub signe: Option<Reponse>,
     pub casse: Option<Reponse>,
+    /// Un nom tiré au hasard dans la zone cassée : un résolveur qui valide le refuse aussi (SERVFAIL).
+    pub casse_hasard: Option<Reponse>,
 }
 
 /// La réponse d'un résolveur à la question de DDR.
@@ -454,10 +476,18 @@ fn interroger(role: Role, serveur: IpAddr) -> (Mesure, Option<Dnssec>, Option<Dd
         .iter()
         .map(|(nom, _)| (*nom, dns_client::interroger(serveur, nom, Genre::A, true, false)))
         .collect();
+    let inexistant = dns_client::interroger(
+        serveur,
+        &format!("{}.{ZONE_INEXISTANTS}", etiquette_au_hasard()),
+        Genre::A,
+        true,
+        false,
+    );
     let mesure = Mesure {
         role,
         serveur,
         reponses,
+        inexistant,
     };
     let muet = mesure.reponses.iter().all(|(_, r)| r.is_none());
     if muet || matches!(role, Role::Public(_)) {
@@ -468,6 +498,13 @@ fn interroger(role: Role, serveur: IpAddr) -> (Mesure, Option<Dnssec>, Option<Dd
         serveur,
         signe: dns_client::interroger(serveur, NOM_SIGNE, Genre::A, true, true),
         casse: dns_client::interroger(serveur, NOM_CASSE, Genre::A, true, true),
+        casse_hasard: dns_client::interroger(
+            serveur,
+            &format!("{}.{NOM_CASSE}", etiquette_au_hasard()),
+            Genre::A,
+            true,
+            true,
+        ),
     };
     let ddr = Ddr {
         role,
@@ -957,6 +994,28 @@ fn constats_divergence(e: &Entree) -> Vec<Constat> {
                     "{serveur} answers {vu} for {nom} instead of {attendu}; the other names are right. A single gap: check again at the next audit before believing it."
                 ),
             )
+        } else if let Some(vues) = m
+            .inexistant
+            .as_ref()
+            .map(Reponse::adresses_v4)
+            .filter(|v| !v.is_empty())
+        {
+            alerte(
+                CAT_DNS,
+                Niveau::Moyen,
+                trf!(
+                    "{serveur} donne une adresse ({}) à un nom inventé à l'instant, qui n'existe pas : il réécrit les noms inexistants (page de publicité du fournisseur, ou détournement). Une faute de frappe mène alors chez lui.",
+                    "{serveur} gives an address ({}) to a name made up just now, which does not exist: it rewrites nonexistent names (provider ad page, or hijack). A typo then leads to it.",
+                    vues[0]
+                ),
+            )
+            .manuel(
+                tr!(
+                    "Choisis un DNS qui ne réécrit rien (Quad9, Cloudflare, Bouclier canadien), sur cet ordinateur ou dans la box",
+                    "Pick a DNS that rewrites nothing (Quad9, Cloudflare, Canadian Shield), on this computer or in the router"
+                ),
+                &[],
+            )
         } else if !b.filtres.is_empty() {
             let noms = b.filtres.join(", ");
             alerte(
@@ -980,8 +1039,8 @@ fn constats_divergence(e: &Entree) -> Vec<Constat> {
             ok(
                 CAT_DNS,
                 trf!(
-                    "{serveur} répond les adresses connues pour {n} noms stables : aucune réécriture visible{reference}.",
-                    "{serveur} answers the known addresses for {n} stable names: no rewriting visible{reference}."
+                    "{serveur} répond les adresses connues pour {n} noms stables, et « n'existe pas » pour un nom inventé : aucune réécriture visible sur les noms testés{reference}.",
+                    "{serveur} answers the known addresses for {n} stable names, and “does not exist” for a made-up name: no rewriting visible on the names tested{reference}."
                 ),
             )
         };
@@ -1046,7 +1105,21 @@ fn constat_dnssec(e: &Entree) -> Constat {
             ID,
         );
     }
-    let constat = if signe.ad && casse.rcode == 2 {
+    // Le nom tiré au hasard dans la zone cassée doit être refusé lui aussi : un résolveur qui ne refuse que le nom
+    // connu s'est préparé à l'épreuve. Sans réponse, la validation n'est pas confirmée.
+    let Some(casse_hasard) = &d.casse_hasard else {
+        return regle(
+            impossible(
+                CAT_DNS,
+                &trf!(
+                    "{serveur} ne répond pas à la question DNSSEC tirée au hasard : validation non confirmée",
+                    "{serveur} does not answer the randomly drawn DNSSEC question: validation not confirmed"
+                ),
+            ),
+            ID,
+        );
+    };
+    let constat = if signe.ad && casse.rcode == 2 && casse_hasard.rcode == 2 {
         ok(
             CAT_DNS,
             trf!(
@@ -1055,7 +1128,12 @@ fn constat_dnssec(e: &Entree) -> Constat {
             ),
         )
     } else {
-        let precision = if signe.ad {
+        let precision = if signe.ad && casse.rcode == 2 {
+            tr!(
+                " (il refuse le nom connu de la zone cassée, mais pas un nom tiré au hasard dans la même zone : il s'est préparé à l'épreuve)",
+                " (it refuses the known name of the broken zone, but not a randomly drawn name in the same zone: it was prepared for the test)"
+            )
+        } else if signe.ad {
             tr!(
                 " (il annonce des réponses validées, mais accepte une signature cassée)",
                 " (it claims validated answers, yet accepts a broken signature)"
@@ -1525,6 +1603,7 @@ mod tests {
             role,
             serveur: ip(serveur),
             reponses,
+            inexistant: Some(reponse(&[], 3, false)),
         }
     }
 
@@ -1562,6 +1641,7 @@ mod tests {
             serveur: ip("203.0.113.53"),
             signe: Some(reponse(&["198.51.100.7"], 0, false)),
             casse: Some(reponse(&["198.51.100.8"], 0, false)),
+            casse_hasard: Some(reponse(&["198.51.100.9"], 0, false)),
         }];
         e.ddr = vec![Ddr {
             role: Role::Utilise,
@@ -1841,14 +1921,43 @@ mod tests {
         );
     }
 
+    /// Un résolveur qui répond juste pour les noms connus mais donne une adresse à un nom inventé à l'instant :
+    /// il réécrit les noms inexistants, ce n'est pas « aucune réécriture ».
+    #[test]
+    fn nom_invente_reecrit() {
+        let mut e = maison();
+        let c = constats(&e);
+        assert!(par_regle(&c, "COM-DNS-004")[0].message.contains("noms testés"));
+        e.mesures[0].inexistant = Some(reponse(&["203.0.113.80"], 0, false));
+        let c = constats(&e);
+        let d = par_regle(&c, "COM-DNS-004");
+        assert_eq!(d[0].probleme, Some(Niveau::Moyen));
+        assert!(d[0].message.contains("203.0.113.80"), "{}", d[0].message);
+        // Deux noms inventés de suite ne se ressemblent pas.
+        assert_ne!(etiquette_au_hasard(), etiquette_au_hasard());
+        assert!(etiquette_au_hasard().chars().all(|c| c.is_ascii_lowercase()));
+    }
+
     #[test]
     fn dnssec_valide_ou_non() {
         let mut e = maison();
         e.dnssec[0].signe = Some(reponse(&["198.51.100.7"], 0, true));
         e.dnssec[0].casse = Some(reponse(&[], 2, false));
+        e.dnssec[0].casse_hasard = Some(reponse(&[], 2, false));
         let c = constats(&e);
         assert_eq!(par_regle(&c, "COM-DNS-005")[0].probleme, None);
         assert!(par_regle(&c, "COM-DNS-005")[0].message.contains("valide DNSSEC"));
+        // Un résolveur hostile préparé aux noms connus : AD sur le nom signé, refus du nom cassé connu, mais un nom
+        // tiré au hasard dans la même zone passe. Pas un feu vert.
+        e.dnssec[0].casse_hasard = Some(reponse(&["198.51.100.9"], 0, false));
+        let c = constats(&e);
+        let d = par_regle(&c, "COM-DNS-005");
+        assert_eq!(d[0].probleme, Some(Niveau::Info));
+        assert!(d[0].message.contains("tiré au hasard"), "{}", d[0].message);
+        // Il ne répond pas au nom tiré au hasard : non confirmé, jamais vert.
+        e.dnssec[0].casse_hasard = None;
+        assert!(!par_regle(&constats(&e), "COM-DNS-005")[0].verifie);
+        e.dnssec[0].casse_hasard = Some(reponse(&[], 2, false));
         // AD mais la signature cassée passe : ne vérifie pas vraiment.
         e.dnssec[0].casse = Some(reponse(&["198.51.100.8"], 0, false));
         let c = constats(&e);

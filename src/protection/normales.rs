@@ -50,7 +50,7 @@ enum Refus {
 fn charger() -> Result<Normales, Refus> {
     use crate::sceau::Lecture;
     match crate::sceau::lire(crate::sceau::NORMALES) {
-        Lecture::Absent => Ok(Normales::default()),
+        Lecture::Absent | Lecture::Inconnu => Ok(Normales::default()),
         Lecture::Intact(o) => serde_json::from_slice(&o).map_err(|_| Refus::Illisible),
         // Ce fichier n'existe que depuis les sceaux : accepté sans sceau, c'est que les sceaux ont été effacés.
         Lecture::Adopte(_) | Lecture::Falsifie(_) => Err(Refus::Falsifiee),

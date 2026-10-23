@@ -72,7 +72,8 @@ jobs:
     needs: utile
     if: needs.utile.outputs.compiler == 'oui'
     runs-on: macos-latest
-    timeout-minutes: 30
+    # Sur master, tout se compile sans cache (voir plus bas) : plus long qu'une branche qui reprend le sien.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       # La chaîne de rust-toolchain.toml, avec les cibles Apple Silicon et Intel.
@@ -81,7 +82,13 @@ jobs:
       # Actions venues d'autres que GitHub : épinglées par leur commit. Une étiquette (v2) se déplace ; si leur dépôt était
       # piraté, une version piégée toucherait ce que compile ce travail. À mettre à jour à la main (le commentaire dit la
       # version).
+      # Jamais sur master : son programme est celui que la clé de l'auteur signe (outils/publier-version.sh ne prend
+      # que lui). Un cache se reprend d'un passage à l'autre, et un compte GitHub pris pourrait en préparer un piégé
+      # (dépendances déjà compilées) ; master compile donc tout depuis les sources, à chaque fois.
+      # Par le nom court : une étiquette nommée master porte le même headBranch que la branche, et
+      # outils/publier-version.sh ne lit que ce nom.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: github.ref_name != 'master'
       # .cargo/config.toml vise Linux par défaut : la cible est toujours donnée.
       # Les tests qui ne peuvent pas tourner ici le notent dans VANGUARD_TESTS_SAUTES (src/essais.rs) : sans lui,
       # libtest avale leur message et les compte réussis. Comptés et montrés au résumé, même si les tests échouent :

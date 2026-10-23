@@ -116,6 +116,42 @@ fn nom_de_box(d: &igd::Description) -> String {
         .unwrap_or_default()
 }
 
+/// D'autres appareils que la passerelle ont répondu comme une box IGD : écartés, et dits. `box_aussi` : la vraie box a
+/// répondu, et sa lecture est celle qui compte (moyen : un second routeur au réseau, UPnP allumé, répond aussi) ;
+/// sinon ses redirections ne sont pas vérifiées (élevé).
+fn usurpateurs(ips: &[std::net::Ipv4Addr], box_aussi: bool) -> Constat {
+    let liste = ips.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+    let suite = if box_aussi {
+        tr!(
+            " Seule la réponse de la box (la passerelle) est lue.",
+            " Only the router's answer (the gateway) is read."
+        )
+    } else {
+        tr!(
+            " La box elle-même n'a pas répondu : ce qu'elle ouvre vers Internet n'est pas vérifié.",
+            " The router itself did not answer: what it opens to the Internet is not checked."
+        )
+    };
+    Constat {
+        verifie: box_aussi,
+        ..alerte(
+            CATEGORIE,
+            if box_aussi { Niveau::Moyen } else { Niveau::Eleve },
+            trf!(
+                "{liste} se dit box en UPnP sans être la passerelle du réseau : un appareil se fait peut-être passer pour elle, pour cacher les ports qu'il ouvre ou en inventer.{suite}",
+                "{liste} claims to be the router over UPnP without being the network's gateway: a device may be impersonating it, to hide the ports it opens or make some up.{suite}"
+            ),
+        )
+        .manuel(
+            tr!(
+                "Regarde quel appareil a cette adresse (Réseau › appareils) ; s'il n'a rien d'un routeur, débranche-le du réseau",
+                "Check which device has this address (Network › devices); if it is nothing like a router, unplug it from the network"
+            ),
+            &[],
+        )
+    }
+}
+
 /// COM-EXP-001 : les redirections de ports de la box, lues en UPnP.
 fn redirections(e: &Entree) -> Vec<Constat> {
     const REGLE: &str = "COM-EXP-001";
@@ -166,6 +202,8 @@ fn redirections(e: &Entree) -> Vec<Constat> {
                 REGLE,
             )];
         }
+        // Personne à la passerelle, mais d'autres se disent box : un appareil se fait peut-être passer pour elle.
+        Etat::Usurpee(ips) => return vec![marque(usurpateurs(ips, false), REGLE)],
         Etat::Actif(l) => l,
     };
     let boite = nom_de_box(&lecture.description);
@@ -194,6 +232,9 @@ fn redirections(e: &Entree) -> Vec<Constat> {
         ),
         REGLE,
     )];
+    if !lecture.ailleurs.is_empty() {
+        liste.push(marque(usurpateurs(&lecture.ailleurs, true), REGLE));
+    }
     if !lecture.lues {
         liste.push(marque(
             impossible(
@@ -708,6 +749,7 @@ mod tests {
             redirections,
             lues: true,
             tronquees: false,
+            ailleurs: Vec::new(),
         })
     }
 
@@ -809,6 +851,27 @@ mod tests {
         let r = rapport(None);
         let liste = constats(&entree(&r));
         assert!(!regle(&liste, "COM-EXP-001")[0].verifie);
+        // Personne à la passerelle, mais un autre appareil se dit box : élevé, et la box non vérifiée.
+        let piege: Ipv4Addr = "10.0.0.66".parse().unwrap();
+        let r = rapport(Some(Etat::Usurpee(vec![piege])));
+        let liste = constats(&entree(&r));
+        let exp = regle(&liste, "COM-EXP-001");
+        assert_eq!(
+            (exp.len(), exp[0].probleme, exp[0].verifie),
+            (1, Some(Niveau::Eleve), false)
+        );
+        assert!(exp[0].message.contains("10.0.0.66"), "{}", exp[0].message);
+        // La box a répondu, et un autre aussi : sa lecture compte, l'autre est dit.
+        let r = rapport(Some(Etat::Actif(Box::new(igd::Lecture {
+            ailleurs: vec![piege],
+            ..*lecture(Vec::new(), None)
+        }))));
+        let liste = constats(&entree(&r));
+        assert!(
+            regle(&liste, "COM-EXP-001")
+                .iter()
+                .any(|c| c.probleme == Some(Niveau::Moyen) && c.verifie && c.message.contains("10.0.0.66"))
+        );
         // La box annonce UPnP mais refuse le SOAP : moyen (UPnP ouvert) et non vérifié (redirections).
         let r = rapport(Some(Etat::Actif(Box::new(igd::Lecture {
             lues: false,

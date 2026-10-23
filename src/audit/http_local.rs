@@ -35,7 +35,7 @@ impl Adresse {
             None => (hote, 80),
         };
         let ip: Ipv4Addr = ip.parse().ok()?;
-        if !crate::reseau::nmap::locale(ip) || chemin.chars().any(|c| c.is_ascii_control() || c == ' ') {
+        if !admise(ip, cfg!(test)) || chemin.chars().any(|c| c.is_ascii_control() || c == ' ') {
             return None;
         }
         Some(Adresse {
@@ -43,6 +43,12 @@ impl Adresse {
             port,
             chemin: chemin.to_string(),
         })
+    }
+
+    /// L'hôte d'une adresse donnée par la box (absolue, ou relative à celle-ci) : une description, un URLBase ou un
+    /// point de contrôle qui mènerait vers un autre appareil que celui qui a répondu n'est pas suivi.
+    pub fn meme_hote(&self, url: &str) -> bool {
+        Adresse::lire(&self.resoudre(url)).is_some_and(|a| a.ip == self.ip)
     }
 
     /// « http://10.0.0.1:5000 ».
@@ -62,6 +68,13 @@ impl Adresse {
         let dossier = self.chemin.rsplit_once('/').map_or("", |(d, _)| d);
         format!("{}{dossier}/{lien}", self.origine())
     }
+}
+
+/// Une adresse du réseau local, jamais cet ordinateur (la boucle locale) hors des tests (`boucle`) : une réponse
+/// SSDP du réseau qui y menait faisait envoyer à Vanguard un GET puis des POST vers les services de cette machine qui
+/// n'écoutent qu'en local (serveur de développement, administration locale).
+fn admise(ip: Ipv4Addr, boucle: bool) -> bool {
+    crate::reseau::nmap::locale(ip) && (boucle || !ip.is_loopback() && !ip.is_unspecified())
 }
 
 /// Une réponse reçue, quel que soit son code (une erreur SOAP arrive en 500).
@@ -222,6 +235,21 @@ fn recoller(mut reste: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hors des tests, la boucle locale n'est jamais visée : une box (ou un appareil qui s'en dit une) ne fait pas
+    /// parler Vanguard aux services de cette machine ; et un point de contrôle ailleurs que chez elle n'est pas suivi.
+    #[test]
+    fn jamais_cette_machine_ni_un_autre_hote() {
+        assert!(!admise(Ipv4Addr::LOCALHOST, false));
+        assert!(!admise(Ipv4Addr::new(127, 1, 2, 3), false));
+        assert!(!admise(Ipv4Addr::UNSPECIFIED, false));
+        assert!(admise(Ipv4Addr::new(192, 168, 1, 1), false));
+        assert!(!admise(Ipv4Addr::new(203, 0, 113, 9), false));
+        let base = Adresse::lire("http://192.168.1.1:5000/rootDesc.xml").unwrap();
+        assert!(base.meme_hote("/ctl/IPConn") && base.meme_hote("http://192.168.1.1:5000/ctl"));
+        assert!(!base.meme_hote("http://192.168.1.20:80/ctl"));
+        assert!(!base.meme_hote("http://203.0.113.9/ctl"));
+    }
     use std::time::Duration;
 
     #[test]

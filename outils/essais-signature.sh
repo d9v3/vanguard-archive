@@ -9,6 +9,13 @@
 #   3. Un historique d'avant signé par une autre clé est refusé : rien ne s'ajoute à un historique douteux.
 #   4. Sans rien d'avant ni --premier (un téléchargement raté chez publier-version.sh), rien n'est signé : l'historique
 #      ne repart pas de zéro avant que les pages d'avant soient effacées.
+#   5. La révocation de la clé principale (--secours --revoquer) : la ligne « revoque principale » vient après les
+#      trois programmes, que le lecteur de la 0.85.0 (refait ici en awk, comme github.rs le recopie) trouve tous
+#      avant elle ; jamais dans l'historique ; refusée sans --secours. La phrase de la clé de secours d'essai
+#      (chiffrée, comme la vraie) passe par un pseudo-terminal (script) ; sans script, cet essai est sauté et dit.
+#   6. Le programme Mac que la clé signe vient d'une exécution de master : publier-version.sh (sa fonction
+#      avec_programme, face à un faux gh) écarte celle d'une autre branche, même plus récente et du même commit ; et
+#      macos.yml ne reprend aucun cache sur master. Sans jq, cet essai est sauté et dit.
 # Lancé par outils/verifier.sh ; code 77 (sauté) sans la branche master ici (clone partiel) ou sans openssl.
 #   outils/essais-signature.sh
 set -uo pipefail
@@ -132,6 +139,91 @@ elif grep -q "ni historique ni manifeste d'avant" "$T/v90.log" && [[ ! -e $T/v90
 else
   ko "refus pour une autre raison : $(tail -n 1 "$T/v90.log")"
 fi
+
+# La révocation : refusée sans la clé de secours.
+programmes "$T/v91" 0.88.0+1793100000
+mkdir -p "$T/v91/avant" && cp "$T/v88/historique.txt" "$T/v88/historique.txt.sig" "$T/v91/avant/"
+if signer "$T/nouveau88" "$T/v91" --revoquer; then
+  ko "--revoquer sans --secours a signé"
+elif grep -q -- "--revoquer va avec --secours" "$T/v91.log"; then
+  ok "--revoquer sans --secours : refusé"
+else
+  ko "refus pour une autre raison : $(tail -n 1 "$T/v91.log")"
+fi
+# Le lecteur de la 0.85.0 (lire_manifeste) : la version en tête, puis la ligne du système cherché trouvée avant toute
+# ligne qui n'a pas trois champs.
+lu_par_la_0_85() { # $1 : manifeste, $2 : système ; affiche « empreinte taille »
+  awk -v s="$2" 'NR == 1 { if ($0 !~ /^version /) exit 1; next } NF != 3 { exit 1 } $1 == s { print $2, $3; trouve = 1; exit }
+    END { exit !trouve }' "$1"
+}
+if command -v script >/dev/null; then
+  openssl pkcs8 -topk8 -v2 aes-256-cbc -in "$T/secours.pem" -out "$T/secours-chiffree.pem" -passout pass:essai \
+    2>/dev/null
+  printf 'essai\n' | VANGUARD_CLE_SECOURS=$T/secours-chiffree.pem script -qec \
+    "bash '$T/nouveau88/outils/signer-versions.sh' --secours --revoquer '$T/v91'" /dev/null >"$T/v91.log" 2>&1
+  if [[ -f $T/v91/derniere.txt.sig ]] && [[ $(tail -n 1 "$T/v91/derniere.txt") == "revoque principale" ]]; then
+    ok "--secours --revoquer : « revoque principale » en dernière ligne"
+    pareil=1
+    for s in linux-x86_64 windows-x86_64 macos; do
+      attendu=$(grep "^$s " "$T/v91/derniere.txt" | cut -d' ' -f2-)
+      [[ -n $attendu && $(lu_par_la_0_85 "$T/v91/derniere.txt" "$s") == "$attendu" ]] || pareil=
+    done
+    [[ -n $pareil ]] && ok "le lecteur de la 0.85.0 lit chaque programme du manifeste qui révoque" ||
+      ko "le lecteur de la 0.85.0 ne lit plus le manifeste qui révoque"
+    grep -q '^revoque' "$T/v91/historique.txt" && ko "la révocation est entrée dans l'historique" ||
+      ok "la révocation n'entre pas dans l'historique"
+    awk '/^version / { next } NF != 3 { exit 1 }' "$T/v91/historique.txt" && ok "historique toujours lisible par github.rs" ||
+      ko "forme de l'historique après une révocation"
+  else
+    ko "--secours --revoquer : $(tail -n 2 "$T/v91.log")"
+  fi
+else
+  echo "  (sauté : script absent, pas de pseudo-terminal pour la phrase de la clé de secours d'essai)"
+fi
+
+# Le Mac signé : seulement une exécution de master. Un faux gh répond comme GitHub (jq applique les -q), avec deux
+# passages réussis du même commit : le plus récent sur une autre branche, l'autre sur master par la nuit.
+if command -v jq >/dev/null; then
+  mkdir -p "$T/faux-gh"
+  cat >"$T/faux-gh/runs.json" <<'JSON'
+[{"databaseId": 2, "headSha": "c0ffee", "headBranch": "piege", "event": "workflow_dispatch"},
+ {"databaseId": 1, "headSha": "c0ffee", "headBranch": "master", "event": "schedule"}]
+JSON
+  cat >"$T/faux-gh/gh" <<'GH'
+#!/usr/bin/env bash
+q=. branche=
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -q) q=$2; shift ;;
+    --branch) branche=$2; shift ;;
+  esac
+  shift
+done
+if [[ -n $branche ]]; then
+  jq -r --arg b "$branche" "[.[] | select(.headBranch == \$b)] | $q" "$(dirname "$0")/runs.json"
+else
+  # « api …/artifacts » ou « run list » sans branche : chaque passage a son programme.
+  case $q in
+    *artifacts*) echo vanguard-macos ;;
+    *) jq -r "$q" "$(dirname "$0")/runs.json" ;;
+  esac
+fi
+GH
+  chmod +x "$T/faux-gh/gh"
+  awk '/^avec_programme\(\) \{/,/^\}/' "$DEPOT/outils/publier-version.sh" >"$T/avec_programme.sh"
+  choisi=$(PATH="$T/faux-gh:$PATH" COMMIT=c0ffee HORS_CODE= bash -c "source '$T/avec_programme.sh'; avec_programme")
+  [[ $choisi == 1 ]] && ok "publier-version.sh prend la compilation Mac de master, pas celle d'une autre branche" ||
+    ko "publier-version.sh a pris la compilation Mac « ${choisi:-aucune} » (attendu : 1, celle de master)"
+  grep -q 'BRANCHE_RUN != "master schedule"' "$DEPOT/outils/publier-version.sh" &&
+    ok "publier-version.sh relit la branche de l'exécution qu'il signe" || ko "branche de l'exécution signée non relue"
+else
+  echo "  (sauté : jq absent, pas de faux gh pour essayer publier-version.sh)"
+fi
+# Par le nom court : une étiquette nommée master a le même headBranch que la branche, que publier-version.sh
+# accepte ; « github.ref != 'refs/heads/master' » lui laissait reprendre un cache préparé.
+awk '/uses: Swatinem\/rust-cache/ { getline; exit !($0 ~ /if: github.ref_name != .master.$/) }' \
+  "$DEPOT/.github/workflows/macos.yml" && ok "macos.yml : aucun cache repris sur master (branche ou étiquette)" ||
+  ko "macos.yml reprend un cache sur master ou une étiquette « master » (le programme signé en sortirait)"
 
 ((ECHECS == 0)) || { echo "$ECHECS essai(s) en échec."; exit 1; }
 echo "Signature des versions : tout est juste."

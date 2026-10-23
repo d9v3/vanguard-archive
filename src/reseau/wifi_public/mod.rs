@@ -54,7 +54,8 @@ enum Lu {
 
 fn lire_etat() -> Lu {
     match sceau::lire(sceau::WIFI_PUBLIC) {
-        Lecture::Absent => Lu::Absent,
+        // Inconnu (sceaux refaits) : rien de noté à remettre, comme absent.
+        Lecture::Absent | Lecture::Inconnu => Lu::Absent,
         Lecture::Intact(o) => Etat::lire(&o).map_or_else(
             || Lu::NonFiable(tr!("état illisible", "unreadable state").to_string()),
             Lu::Fiable,

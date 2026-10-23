@@ -6,10 +6,15 @@
 use std::path::PathBuf;
 
 use crate::tre;
+use crate::ui::*;
 
 /// Écrit d'abord un fichier temporaire, le force sur le disque, puis le renomme à la place de l'ancien :
 /// une coupure, un Ctrl-C ou une clé arrachée laissent soit l'ancienne base, soit la nouvelle, jamais une
 /// base tronquée.
+///
+/// Le temporaire porte un nom tiré au hasard et se crée sans suivre de lien, jamais par-dessus un fichier déjà là :
+/// lancé en root avec le dossier d'un compte (sudo -E), un nom déductible du numéro de processus laissait ce compte
+/// poser d'avance un lien vers un fichier du système, que root aurait tronqué en écrivant à travers.
 pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: impl AsRef<[u8]>) -> std::io::Result<()> {
     use std::io::Write;
     // Un nom par écriture, pas seulement par processus : deux fils qui écrivent le même fichier en même temps se
@@ -19,9 +24,20 @@ pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: impl AsRef<[u8]
         std::fs::create_dir_all(d)?;
     }
     let n = ECRITURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let temporaire = chemin.with_extension(format!("tmp-{}-{n}", std::process::id()));
+    let mut sel = [0u8; 8];
+    getrandom::fill(&mut sel).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let temporaire = chemin.with_extension(format!(
+        "tmp-{}-{n}-{:016x}",
+        std::process::id(),
+        u64::from_le_bytes(sel)
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW);
+    // Pas créé (un lien ou un fichier déjà là sous ce nom) : rien à retirer, ce n'est pas le nôtre.
+    let mut f = options.open(&temporaire)?;
     let resultat = (|| {
-        let mut f = std::fs::File::create(&temporaire)?;
         f.write_all(contenu.as_ref())?;
         f.sync_all()?;
         remplacer(&temporaire, chemin)
@@ -30,6 +46,89 @@ pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: impl AsRef<[u8]
         let _ = std::fs::remove_file(&temporaire);
     }
     resultat
+}
+
+/// Lit un fichier d'état d'au plus `max` octets, seulement s'il est un simple fichier : ni lien, ni tube nommé, ni
+/// périphérique. Un tube posé à la place d'un fichier d'état figeait la lecture dans open() pour toujours (la passe
+/// horaire ne finissait plus, sans rien dire) ; un fichier creux de plusieurs Gio se chargeait en entier. Ouvert sans
+/// suivre de lien et sans attendre, puis jugé sur ce qui a été ouvert (fstat), pas sur le chemin : un échange entre
+/// le regard et l'ouverture ne passe pas. `NotFound` s'il n'existe pas ; `InvalidData` s'il n'est pas lu pour ça.
+pub(crate) fn lire_ordinaire(chemin: &std::path::Path, max: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    #[cfg(windows)]
+    {
+        // FILE_FLAG_OPEN_REPARSE_POINT : un lien symbolique ou une jonction s'ouvre lui-même, sans être suivi.
+        std::os::windows::fs::OpenOptionsExt::custom_flags(&mut options, 0x0020_0000);
+    }
+    let f = options.open(chemin).map_err(|e| {
+        // O_NOFOLLOW sur un lien : ELOOP, qui n'est pas « absent ».
+        if e.kind() == std::io::ErrorKind::NotFound {
+            e
+        } else {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+        }
+    })?;
+    let m = f.metadata()?;
+    if !m.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            tr!("pas un simple fichier", "not a plain file"),
+        ));
+    }
+    if m.len() > max {
+        return Err(trop_gros(max));
+    }
+    let mut octets = Vec::new();
+    f.take(max.saturating_add(1)).read_to_end(&mut octets)?;
+    if octets.len() as u64 > max {
+        return Err(trop_gros(max));
+    }
+    Ok(octets)
+}
+
+fn trop_gros(max: u64) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        trf!("plus de {} Kio", "over {} KiB", max >> 10),
+    )
+}
+
+/// Vanguard peut-il écrire ses fichiers d'état dans `dossier` ? Toujours, sauf en root (Unix) : le dossier, ou
+/// son plus proche parent existant, doit alors être un vrai dossier qui appartient à root. Lancé par sudo -E (HOME ou
+/// XDG_DATA_HOME du compte gardés), root écrivait sinon dans le dossier d'un compte, où un programme de ce compte
+/// prépare d'avance liens et fichiers.
+pub(crate) fn ecriture_sure(dossier: &std::path::Path) -> bool {
+    // Les tests écrivent dans leurs dossiers jetables, même lancés en root dans `unshare -r` (verifier.sh), où /tmp
+    // paraît à personne : la règle elle-même s'essaie par `ecriture_sure_pour`.
+    if cfg!(test) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY : geteuid n'a ni pointeur ni effet de bord.
+        ecriture_sure_pour(unsafe { libc::geteuid() }, dossier)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dossier;
+        true
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn ecriture_sure_pour(euid: libc::uid_t, dossier: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    if euid != 0 {
+        return true;
+    }
+    dossier
+        .ancestors()
+        .find_map(|d| std::fs::symlink_metadata(d).ok())
+        .is_some_and(|m| m.file_type().is_dir() && m.uid() == 0)
 }
 
 /// Renomme `de` à la place de `vers`. Sous Windows, le remplacement échoue tant qu'un autre programme tient `vers`
@@ -192,6 +291,83 @@ mod tests {
         drop(v);
         assert!(!chemin.exists());
         std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    /// Un lien posé d'avance sous un nom de temporaire n'est jamais suivi : la cible reste intacte, et le nom tiré
+    /// au hasard ne se devine plus d'après le numéro du processus.
+    #[cfg(unix)]
+    #[test]
+    fn ecriture_atomique_sans_suivre_de_lien() {
+        let dossier = std::env::temp_dir().join(format!("vanguard-atomique-lien-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        let cible = dossier.join("systeme.conf");
+        std::fs::write(&cible, b"intact").unwrap();
+        // Les noms d'avant le correctif, pour les écritures à venir de ce processus.
+        let fichier = dossier.join("sceaux.json");
+        for n in 0..20_000 {
+            let piege = fichier.with_extension(format!("tmp-{}-{n}", std::process::id()));
+            std::os::unix::fs::symlink(&cible, piege).unwrap();
+        }
+        ecrire_atomique(&fichier, b"{}").unwrap();
+        assert_eq!(std::fs::read(&cible).unwrap(), b"intact");
+        assert_eq!(std::fs::read(&fichier).unwrap(), b"{}");
+        std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    /// Un tube nommé, un lien ou un fichier trop gros à la place d'un fichier d'état : refusés tout de suite, sans
+    /// rester bloqués dans open() ni tout charger.
+    #[cfg(unix)]
+    #[test]
+    fn lecture_bornee_d_un_simple_fichier() {
+        let dossier = std::env::temp_dir().join(format!("vanguard-ordinaire-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        let tube = dossier.join("appris.json");
+        let c = std::ffi::CString::new(tube.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY : mkfifo reçoit un chemin terminé par zéro, qui vit le temps de l'appel.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let debut = std::time::Instant::now();
+        let e = lire_ordinaire(&tube, 1024).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+        assert!(debut.elapsed() < std::time::Duration::from_secs(2));
+        let vrai = dossier.join("vrai.json");
+        std::fs::write(&vrai, b"{}").unwrap();
+        let lien = dossier.join("lien.json");
+        std::os::unix::fs::symlink(&vrai, &lien).unwrap();
+        assert_eq!(
+            lire_ordinaire(&lien, 1024).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        let gros = dossier.join("gros.json");
+        std::fs::File::create(&gros).unwrap().set_len(1 << 30).unwrap();
+        assert_eq!(
+            lire_ordinaire(&gros, 1024).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(lire_ordinaire(&vrai, 1024).unwrap(), b"{}");
+        assert_eq!(
+            lire_ordinaire(&dossier.join("absent"), 1024).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    /// En root, le dossier d'un compte (le nôtre ici, qui n'est pas root) n'est pas sûr ; hors de root, tout l'est.
+    #[cfg(unix)]
+    #[test]
+    fn en_root_seulement_un_dossier_de_root() {
+        let d = std::env::temp_dir().join(format!("vanguard-sur-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        // SAFETY : getuid lit le compte du processus, sans argument.
+        if unsafe { libc::getuid() } == 0 {
+            return crate::essais::saute("lancé en root : un dossier à soi est à root");
+        }
+        assert!(ecriture_sure_pour(1000, &d));
+        assert!(!ecriture_sure_pour(0, &d));
+        assert!(!ecriture_sure_pour(0, &d.join("pas-encore/vanguard")));
+        assert!(ecriture_sure_pour(0, std::path::Path::new("/")));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     /// Une écriture qui échoue (le dossier parent est un fichier) ne laisse aucun fichier provisoire derrière elle.

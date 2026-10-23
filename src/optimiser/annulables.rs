@@ -737,9 +737,11 @@ pub(super) fn reprendre_jeux(h: &mut Historique, dossier: &Path) {
         match convertie(&id, &a) {
             Some(l) => {
                 h.reglages.entry(format!("{JEUX}{id}")).or_insert_with(|| Avant {
-                    date: a.date.clone(),
+                    // Venus de jeux.json, jamais scellé : sans séquence d'échappement qui cacherait les lignes
+                    // suivantes à l'écran.
+                    date: crate::ui::affichable(&a.date),
                     valeurs: l.iter().map(|(_, v)| v.clone()).collect(),
-                    titre: Some(a.titre.clone()),
+                    titre: Some(crate::ui::affichable(&a.titre)),
                     gestes: l.into_iter().map(|(g, _)| g.0).collect(),
                 });
             }

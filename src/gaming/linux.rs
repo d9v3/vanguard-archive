@@ -576,6 +576,29 @@ mod tests {
         assert_eq!(convertir("/etc/sysctl.d/99-autre.conf", None), None);
     }
 
+    /// jeux.json est dans le dossier du compte : un contenu d'avant qui n'est pas celui que Vanguard écrit (une
+    /// commande lancée à chaque plantage, un module choisi, une limite qui bloquerait tout programme) n'est jamais
+    /// réécrit en root dans /etc. La reprise par le mécanisme commun le refuse, comme la remise.
+    #[test]
+    fn contenu_d_avant_etranger_jamais_reecrit() {
+        use crate::optimiser::linux::Changement;
+        let admis = |nom: &str, contenu: &str| {
+            let (g, v) = convertir(nom, Some(contenu)).expect("un fichier de Vanguard");
+            Changement::depuis_geste(&g.0).is_some_and(|c| c.valeur_admise(v.as_deref()))
+        };
+        assert!(!admis(SYSCTL_JEUX, "kernel.core_pattern=|/home/bob/x\n"));
+        assert!(!admis(
+            SYSCTL_JEUX,
+            "vm.max_map_count = 262144\nkernel.core_pattern=|/home/bob/x\n"
+        ));
+        assert!(!admis(SYSCTL_JEUX, "vm.max_map_count = 0\n"));
+        assert!(admis(SYSCTL_JEUX, "vm.max_map_count = 262144\n"));
+        assert!(!admis(NTSYNC_CONF, "evil\n"));
+        assert!(admis(NTSYNC_CONF, "ntsync\n"));
+        let (g, v) = convertir("vm.max_map_count", Some("0")).unwrap();
+        assert!(!Changement::depuis_geste(&g.0).is_some_and(|c| c.valeur_admise(v.as_deref())));
+    }
+
     #[test]
     fn depot_multilib() {
         assert!(multilib_actif(

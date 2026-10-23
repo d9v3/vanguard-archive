@@ -9,7 +9,7 @@ pub(crate) mod annulables;
 mod defender;
 mod demarrage;
 #[cfg(target_os = "linux")]
-mod linux;
+pub(crate) mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]
@@ -161,7 +161,8 @@ fn lire_dans(dossier: &std::path::Path) -> Option<(Historique, bool)> {
     use crate::sceau::Lecture;
     let chemin = dossier.join(crate::sceau::REGLAGES);
     let (octets, adopte) = match crate::sceau::lire_dans(dossier, crate::sceau::REGLAGES) {
-        Lecture::Absent => return Some((Historique::default(), false)),
+        // Disparu (Inconnu) : rien à remettre, et rien de faux non plus ; la disparition est dite par les sceaux.
+        Lecture::Absent | Lecture::Inconnu => return Some((Historique::default(), false)),
         Lecture::Intact(o) => (o, false),
         Lecture::Adopte(o) => (o, true),
         Lecture::Falsifie(_) => {
