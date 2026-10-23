@@ -192,6 +192,13 @@ pub const PROGRAMMES: &[Programme] = &[
                 false,
             ),
             traduite(
+                "vanguard logiciels-perimes",
+                "vanguard outdated-software",
+                "Logiciels pas à jour : versions comparées, failles exploitées.",
+                "Outdated software: versions compared, exploited flaws.",
+                false,
+            ),
+            traduite(
                 "vanguard integrite",
                 "vanguard integrity",
                 "Fichiers critiques du système : ce qui a changé depuis la référence.",
@@ -264,8 +271,8 @@ pub const PROGRAMMES: &[Programme] = &[
             traduite(
                 "vanguard parametres",
                 "vanguard settings",
-                "Langue, emojis, sans Internet, temps réel, surveillance, entretien, alertes apprises, blocage, restrictions des extensions, clé abuse.ch.",
-                "Language, emojis, offline, real-time, monitoring, check-up, learned alerts, blocking, extension restrictions, abuse.ch key.",
+                "Langue, emojis, sans Internet, temps réel, surveillance, entretien, alertes apprises, blocage, extensions, clé abuse.ch, versions.",
+                "Language, emojis, offline, real-time, monitoring, check-up, learned alerts, blocking, extensions, abuse.ch key, software versions.",
                 false,
             ),
             traduite(

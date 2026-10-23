@@ -5,6 +5,7 @@
 
 mod a_laisser;
 mod apprentissage;
+mod archives;
 mod audit;
 mod changements;
 mod chiffrement;
@@ -35,6 +36,8 @@ mod optimiser;
 mod ordinateurs;
 mod parametres;
 mod passage;
+#[cfg(any(windows, test))]
+mod pe;
 #[cfg(any(target_os = "macos", test))]
 mod plist;
 mod plugins;
@@ -320,6 +323,10 @@ enum Commande {
     /// de surveillance, logiciels de surveillance connus. Lecture seule.
     #[command(name = "logiciels-espions", visible_alias = "spyware")]
     LogicielsEspions,
+    /// Logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java comparés à leur dernière version ;
+    /// failles exploitées. Lecture seule.
+    #[command(name = "logiciels-perimes", visible_alias = "outdated-software")]
+    LogicielsPerimes,
     /// Caméra et micro : qui s'en sert ? Sous Windows, chaque programme et la dernière fois ; sous Linux, ce qui les
     /// tient en ce moment. Lecture seule.
     #[command(name = "camera-micro", visible_alias = "camera-mic")]
@@ -339,14 +346,14 @@ enum Commande {
     #[command(visible_alias = "containers")]
     Conteneurs,
     /// Paramètres : tous les réglages de Vanguard (langue, emojis, travail sans Internet, protection en temps réel,
-    /// surveillance, entretien, alertes apprises, blocage, restrictions des extensions, clé abuse.ch). Sans argument :
-    /// leur état ; avec un réglage et une valeur : le change, la valeur d'avant montrée pour revenir. « temps-reel non
-    /// --pendant 1h|4h » coupe la protection en temps réel de Vanguard pour ce temps (sans --pendant : jusqu'à
-    /// reprise), après accord ; jamais Defender, le pare-feu ni l'UAC.
+    /// surveillance, entretien, alertes apprises, blocage, restrictions des extensions, clé abuse.ch, versions des
+    /// logiciels). Sans argument : leur état ; avec un réglage et une valeur : le change, la valeur d'avant montrée
+    /// pour revenir. « temps-reel non --pendant 1h|4h » coupe la protection en temps réel de Vanguard pour ce temps
+    /// (sans --pendant : jusqu'à reprise), après accord ; jamais Defender, le pare-feu ni l'UAC.
     #[command(visible_alias = "settings")]
     Parametres {
         /// Un réglage (langue, emojis, sans-internet, temps-reel, surveillance, entretien, appris, blocage,
-        /// restrictions, abuse.ch) et sa valeur ; temps-reel non prend aussi --pendant 1h ou 4h.
+        /// restrictions, abuse.ch, versions-logiciels) et sa valeur ; temps-reel non prend aussi --pendant 1h ou 4h.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         quoi: Vec<String>,
     },
@@ -1085,6 +1092,7 @@ enum Action {
     DernieresFailles,
     CourrielSuspect,
     LogicielsEspions,
+    LogicielsPerimes,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -1341,6 +1349,11 @@ const OUTILS: &[Outil] = &[
         precision: ["clavier épié, indicateurs Échap", "keyboard spying, Échap indicators"],
         mots: "espion spyware stalkerware logiciel espion keylogger enregistreur de frappe clavier keyboard \
                surveillance monitoring harcèlement stalking échap mspy flexispy contrôle parental parental control" },
+    Outil { action: Action::LogicielsPerimes, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Logiciels pas à jour", "Outdated software"],
+        precision: ["versions, failles exploitées", "versions, exploited flaws"],
+        mots: "logiciel software version périmé outdated mise à jour update navigateur browser chrome edge \
+               firefox brave office word excel acrobat reader java kev faille exploitée exploited" },
     Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
@@ -1523,6 +1536,8 @@ impl Action {
             Action::Protection => cfg!(windows),
             // Deux flux du noyau Linux : ailleurs, la ligne ne serait que du bruit.
             Action::Veilleur => cfg!(target_os = "linux"),
+            // Sous Linux, le gestionnaire de paquets et le catalogue de la CISA (bilan, Failles connues) s'en chargent.
+            Action::LogicielsPerimes => cfg!(any(windows, target_os = "macos")),
             _ => true,
         }
     }
@@ -1745,6 +1760,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Lien => protection::lien::verifier(None),
         Action::CourrielSuspect => protection::courriel_suspect::verifier(None),
         Action::LogicielsEspions => protection::espions::afficher(),
+        Action::LogicielsPerimes => protection::perimes::afficher(),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
         Action::Quarantaine => protection::quarantaine::menu(),
         Action::SecretsGit => protection::secrets_git::analyser(),
@@ -1825,7 +1841,7 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
     ("parametres", "Settings: all of Vanguard's settings (language, emojis, working without the Internet, real-time \
                     protection, monitoring, monthly check-up, learned alerts, blocking, extension restrictions, \
-                    abuse.ch key). No argument: their state; with a setting and a value: changes it, showing the \
+                    abuse.ch key, software versions). No argument: their state; with a setting and a value: changes it, showing the \
                     previous value to go back. “real-time no --for 1h|4h” turns Vanguard's real-time protection off \
                     for that long (without --for: until turned back on), after your consent; never Defender, the \
                     firewall or UAC"),
@@ -1864,6 +1880,10 @@ const AIDES_EN: &[(&str, &str)] = &[
                            connections and the DNS cache, programs reading the keyboard, apps allowed input \
                            monitoring, accessibility or screen recording (macOS), known monitoring software. \
                            Read-only"),
+    ("logiciels-perimes", "Outdated software (Windows, macOS): browsers, Office, Acrobat and Java compared with \
+                           their latest version (publishers' sites, endoflife.date; public files downloaded in full, \
+                           nothing about this computer is sent), each product's exploited flaws in CISA's catalog, \
+                           Firefox checked flaw by flaw (Mozilla advisories). Read-only"),
     ("camera-micro", "Camera and microphone: who uses them? On Windows, each program and the last time; on Linux, \
                       what holds them right now. Read-only"),
     ("acces", "Privacy check: the apps that have access to the location, contacts, camera and microphone, and their \
@@ -1983,8 +2003,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
                                          with all your rights); off: back on. The extensions folder must stay yours \
                                          alone"),
     ("parametres", "quoi", "A setting (language, emojis, offline, real-time, monitoring, maintenance, learned, \
-                              blocking, restrictions, abuse.ch) and its value; real-time no also takes --for 1h or \
-                              4h"),
+                              blocking, restrictions, abuse.ch, software-versions) and its value; real-time no also \
+                              takes --for 1h or 4h"),
     ("blocage", "quoi", "“search”, “undo”, “status”, “auto” or “click” (active protection), or a category (programs, \
                            connections, startup, agents) followed by a mode (off, click, auto)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
@@ -2149,6 +2169,7 @@ async fn main() {
         }
         Some(Commande::CourrielSuspect { fichier }) => protection::courriel_suspect::verifier(Some(&fichier)),
         Some(Commande::LogicielsEspions) => protection::espions::afficher(),
+        Some(Commande::LogicielsPerimes) => protection::perimes::afficher(),
         Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
         Some(Commande::Acces) => protection::acces::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),
@@ -2285,6 +2306,18 @@ mod tests_menu {
         lettres.sort_unstable();
         lettres.dedup();
         assert_eq!(lettres.len(), n);
+    }
+
+    /// Les logiciels pas à jour : dernière ligne du groupe Protection, juste après les logiciels espions ; montrée sous
+    /// Windows et macOS seulement (sous Linux, le gestionnaire de paquets tient les versions).
+    #[test]
+    fn logiciels_perimes_en_fin_de_protection() {
+        let protection = Groupe::Protection.actions();
+        assert!(protection.ends_with(&[Action::LogicielsEspions, Action::LogicielsPerimes]));
+        assert_eq!(
+            Action::LogicielsPerimes.disponible(),
+            cfg!(any(windows, target_os = "macos"))
+        );
     }
 
     #[test]

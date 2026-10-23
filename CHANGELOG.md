@@ -19,6 +19,17 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   est lu en Rust, sans commande externe. Lecture seule : rien n'est retiré, car celui qui l'a posé pourrait le voir ;
   l'écran dit de garder des captures et de demander de l'aide d'abord. Ce qui n'a pas pu être vérifié est compté, et
   le verdict n'est jamais « aucun logiciel espion ». Au bilan aussi, sans réseau.
+- **Logiciels pas à jour.** `vanguard logiciels-perimes` (alias `outdated-software` ; menu Antivirus et protection, en
+  dernier ; au bilan sous Windows et macOS) compare la version installée des navigateurs (Chrome, y compris le canal
+  Extended, Edge, Firefox et ESR, Brave), d'Office, d'Acrobat et Reader et de Java à la dernière publiée : fichiers
+  publics des éditeurs et d'endoflife.date, téléchargés en entier une fois par jour, les mêmes pour tous (la liste de
+  tes logiciels ne sort jamais ; Paramètres › Versions des logiciels pour couper). Version lue dans le fichier même
+  (lecteur de la ressource de version des .exe écrit pour Vanguard, Info.plist), tous les comptes en administrateur.
+  Firefox : chaque faille exploitée du catalogue de la CISA vérifiée contre ta version (avis de sécurité de Mozilla) ;
+  une version antérieure au correctif est critique. Les autres : le nombre de failles exploitées du produit au
+  catalogue, sans conclure pour ta version. Ce qui n'a pas de source (Edge Extended Stable, Acrobat 2020 et 2024, App
+  Store) est dit non vérifié ; un navigateur qui ne se compare pas garde le contrôle des 60 jours sans mise à jour, qui
+  quitte la fin de support. Sous Linux, la commande renvoie au gestionnaire de paquets.
 
 ## 22 octobre 2026, au soir : version 0.85
 

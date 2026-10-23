@@ -1,0 +1,11 @@
+## mfsa2099-51.yml
+announced: October 9, 2099
+impact: critical
+fixed_in:
+- Firefox 131.0.2
+- Firefox ESR 128.3.1
+title: Invented
+advisories:
+  CVE-2099-9680:
+    title: Invented use-after-free
+    impact: critical

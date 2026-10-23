@@ -272,81 +272,17 @@ fn telecharger(langue: &str) -> bool {
     false
 }
 
-/// Les fichiers d'une archive zip : (nom, contenu). Seulement ce que tldr-pages y met : des fichiers stockés tels quels
-/// ou compressés (deflate), sans zip64. Une entrée illisible ou hors limites est sautée ; une archive illisible donne
-/// une liste vide.
+/// Les fichiers d'une archive de tldr-pages : (nom, contenu), par le lecteur commun (`archives::zip`), avec les
+/// limites des pages. Une archive illisible donne une liste vide.
 pub(super) fn lire_zip(octets: &[u8]) -> Vec<(String, Vec<u8>)> {
-    // La fin du répertoire central, cherchée depuis la fin (un commentaire peut la suivre).
-    let Some(fin) = (0..octets.len().saturating_sub(21))
-        .rev()
-        .take(65_557)
-        .find(|&i| u32_a(octets, i) == Some(0x0605_4b50))
-    else {
-        return Vec::new();
-    };
-    let (Some(nombre), Some(debut)) = (u16_a(octets, fin + 10), u32_a(octets, fin + 16)) else {
-        return Vec::new();
-    };
-    let mut fichiers = Vec::new();
-    let mut total = 0;
-    let mut i = debut as usize;
-    for _ in 0..usize::from(nombre).min(PAGES_MAX) {
-        if u32_a(octets, i) != Some(0x0201_4b50) {
-            break;
-        }
-        let Some((methode, compresse, taille, longueur_nom, autres, local)) = entree_centrale(octets, i) else {
-            break;
-        };
-        let nom = octets
-            .get(i + 46..i + 46 + longueur_nom)
-            .map(|n| String::from_utf8_lossy(n).into_owned());
-        i += 46 + longueur_nom + autres;
-        let Some(nom) = nom else { break };
-        if taille > TAILLE_PAGE || total + taille > TAILLE_TOTALE {
-            continue;
-        }
-        let donnees = donnees_locales(octets, local, compresse);
-        let contenu = match (methode, donnees) {
-            (0, Some(d)) if d.len() == taille => Some(d.to_vec()),
-            (8, Some(d)) => miniz_oxide::inflate::decompress_to_vec_with_limit(d, TAILLE_PAGE).ok(),
-            _ => None,
-        };
-        if let Some(contenu) = contenu {
-            total += contenu.len();
-            fichiers.push((nom, contenu));
-        }
-    }
-    fichiers
-}
-
-fn u16_a(octets: &[u8], i: usize) -> Option<u16> {
-    octets.get(i..i + 2).map(|b| u16::from_le_bytes([b[0], b[1]]))
-}
-
-fn u32_a(octets: &[u8], i: usize) -> Option<u32> {
-    octets
-        .get(i..i + 4)
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-}
-
-/// Une entrée du répertoire central : (méthode, taille compressée, taille, longueur du nom, longueur des champs qui
-/// suivent le nom, position de l'en-tête local).
-fn entree_centrale(octets: &[u8], i: usize) -> Option<(u16, usize, usize, usize, usize, usize)> {
-    Some((
-        u16_a(octets, i + 10)?,
-        u32_a(octets, i + 20)? as usize,
-        u32_a(octets, i + 24)? as usize,
-        usize::from(u16_a(octets, i + 28)?),
-        usize::from(u16_a(octets, i + 30)?) + usize::from(u16_a(octets, i + 32)?),
-        u32_a(octets, i + 42)? as usize,
-    ))
-}
-
-/// Les données d'un fichier, après son en-tête local.
-fn donnees_locales(octets: &[u8], local: usize, compresse: usize) -> Option<&[u8]> {
-    (u32_a(octets, local)? == 0x0403_4b50).then_some(())?;
-    let depart = local + 30 + usize::from(u16_a(octets, local + 26)?) + usize::from(u16_a(octets, local + 28)?);
-    octets.get(depart..depart.checked_add(compresse)?)
+    crate::archives::zip::lire(
+        octets,
+        &crate::archives::Bornes {
+            entrees: PAGES_MAX,
+            fichier: TAILLE_PAGE,
+            total: TAILLE_TOTALE,
+        },
+    )
 }
 
 /// « {{chemin/du/fichier}} » devient « <chemin/du/fichier> », comme les mots à remplacer du guide ; un choix d'option

@@ -83,8 +83,8 @@ impl Echec {
             )
             .into(),
             Echec::Illisible => tr!(
-                "réponse qui n'est pas la liste (page d'un portail Wi-Fi ?)",
-                "answer is not the list (a Wi-Fi portal page?)"
+                "réponse illisible (format changé, ou page d'un portail Wi-Fi ?)",
+                "unreadable answer (format changed, or a Wi-Fi portal page?)"
             )
             .into(),
         }
@@ -125,9 +125,20 @@ impl Liste {
 /// écrite. Partagé entre MalwareBazaar, URLhaus, Feodo Tracker, ThreatFox, le catalogue de la CISA et Échap.
 pub(crate) fn liste(
     demande: crate::http::Demande,
-    (sous_dossier, nom): (&str, &str),
+    lieu: (&str, &str),
     fraiche: Duration,
     valide: fn(&[u8]) -> bool,
+) -> Liste {
+    liste_validee(demande, lieu, fraiche, &valide)
+}
+
+/// `liste`, pour un `valide` qui a besoin de son contexte (une fermeture : les versions des logiciels jugent chaque
+/// source par son propre lecteur).
+pub(crate) fn liste_validee(
+    demande: crate::http::Demande,
+    (sous_dossier, nom): (&str, &str),
+    fraiche: Duration,
+    valide: &dyn Fn(&[u8]) -> bool,
 ) -> Liste {
     let dossier = crate::reseau::dossier_local().join(sous_dossier);
     let fichier = dossier.join(nom);
@@ -605,6 +616,43 @@ mod tests {
         let fraiche = (Duration::from_hours(1), Duration::from_secs(5));
         let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, fraiche).unwrap();
         assert_eq!(manque, None);
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Une réponse 200 qui n'a pas la forme attendue (une page de portail Wi-Fi) ne remplace pas la bonne copie, et
+    /// c'est dit ; sans copie d'avant, la raison est la forme, pas le code.
+    #[test]
+    fn reponse_invalide_garde_la_copie() {
+        fn demande(base: &str) -> crate::http::Demande<'_> {
+            crate::http::Demande::get(base, Duration::from_secs(5))
+        }
+        let lieu = ("essai-valide-abuse-ch", "liste.json");
+        let dossier = crate::reseau::dossier_local().join(lieu.0);
+        let _ = std::fs::remove_dir_all(&dossier);
+        let portail: &'static [u8] =
+            b"HTTP/1.1 200 OK\r\nContent-Length: 22\r\nConnection: close\r\n\r\n<html>Connexion</html>";
+        let json = |o: &[u8]| o.starts_with(b"{");
+        // Aucune copie : la forme est la raison.
+        let (base, fil) = serveur(portail);
+        let liste = liste_validee(demande(&base), lieu, Duration::ZERO, &json);
+        fil.join().unwrap();
+        assert_eq!(liste.manque, Some(Echec::Illisible));
+        assert!(liste.copie.is_none());
+        assert_eq!(liste.resultat(false), Err(Echec::Illisible));
+        assert!(!dossier.join(lieu.1).exists());
+        // Une bonne réponse est gardée.
+        let (base, fil) = serveur(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n{\"a\": 1}");
+        let liste = liste_validee(demande(&base), lieu, Duration::ZERO, &json);
+        fil.join().unwrap();
+        assert_eq!(liste.manque, None);
+        assert_eq!(liste.copie.map(|c| c.0), Some(b"{\"a\": 1}".to_vec()));
+        // Le portail ensuite : la bonne copie reste, et le manque est dit.
+        let (base, fil) = serveur(portail);
+        let liste = liste_validee(demande(&base), lieu, Duration::ZERO, &json);
+        fil.join().unwrap();
+        assert_eq!(liste.manque, Some(Echec::Illisible));
+        assert_eq!(liste.copie.map(|c| c.0), Some(b"{\"a\": 1}".to_vec()));
+        assert!(Echec::Illisible.raison().contains("portail") || Echec::Illisible.raison().contains("portal"));
         let _ = std::fs::remove_dir_all(&dossier);
     }
 

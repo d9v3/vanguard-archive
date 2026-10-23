@@ -12,6 +12,8 @@ use crate::{tr, trf};
 const ADRESSE: &str = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 const FRAICHE: Duration = Duration::from_hours(24);
 const TROP_VIEILLE: Duration = Duration::from_hours(30 * 24);
+/// La copie gardée : sous-dossier et nom, dans le dossier de Vanguard.
+const LIEU: (&str, &str) = ("kev", "kev.json");
 
 /// Une faille du catalogue.
 pub(crate) struct Exploitee {
@@ -35,18 +37,38 @@ pub(crate) fn exploitees() -> Result<std::collections::HashMap<String, Option<Na
 
 /// Le catalogue entier ; `Err` : pourquoi il ne sert pas.
 pub(crate) fn catalogue() -> Result<Vec<Exploitee>, String> {
+    catalogue_selon(None)
+}
+
+/// `catalogue`, ou, quand `coupure` dit pourquoi rien ne doit partir (réglage, travail sans Internet, tests), la
+/// copie gardée seule, sans rien demander.
+pub(crate) fn catalogue_selon(coupure: Option<&str>) -> Result<Vec<Exploitee>, String> {
     use crate::protection::abuse_ch::{self, Echec};
-    let demande = crate::http::Demande {
-        taille_max: 64 << 20,
-        ..crate::http::Demande::get(ADRESSE, Duration::from_secs(60))
+    let (octets, age) = match coupure {
+        None => {
+            let demande = crate::http::Demande {
+                taille_max: 64 << 20,
+                ..crate::http::Demande::get(ADRESSE, Duration::from_secs(60))
+            };
+            abuse_ch::liste(demande, LIEU, FRAICHE, |_| true)
+                .resultat(false)
+                .map_err(|e| match e {
+                    Echec::Reponse(code) => trf!("la CISA a répondu {code}", "CISA answered {code}"),
+                    Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
+                    autre => autre.raison(),
+                })?
+        }
+        Some(pourquoi) => {
+            let fichier = crate::reseau::dossier_local().join(LIEU.0).join(LIEU.1);
+            let age = std::fs::metadata(&fichier)
+                .and_then(|m| m.modified())
+                .map(|t| t.elapsed().unwrap_or_default());
+            match (std::fs::read(&fichier), age) {
+                (Ok(octets), Ok(age)) => (octets, age),
+                _ => return Err(pourquoi.to_string()),
+            }
+        }
     };
-    let (octets, age) = abuse_ch::liste(demande, ("kev", "kev.json"), FRAICHE, |_| true)
-        .resultat(false)
-        .map_err(|e| match e {
-            Echec::Reponse(code) => trf!("la CISA a répondu {code}", "CISA answered {code}"),
-            Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
-            autre => autre.raison(),
-        })?;
     if age > TROP_VIEILLE {
         return Err(tr!(
             "copie de plus d'un mois, rafraîchissement impossible",
@@ -65,7 +87,7 @@ pub(crate) fn catalogue() -> Result<Vec<Exploitee>, String> {
 
 /// `{"vulnerabilities": [{"cveID": "CVE-…", "dateAdded": "2026-10-20", …}, …]}`. `None` pour tout autre texte :
 /// jamais un catalogue vide, donc « rien d'exploité », à sa place.
-fn analyser(octets: &[u8]) -> Option<Vec<Exploitee>> {
+pub(crate) fn analyser(octets: &[u8]) -> Option<Vec<Exploitee>> {
     let v: serde_json::Value = serde_json::from_slice(octets).ok()?;
     let texte =
         |e: &serde_json::Value, champ: &str| crate::ui::affichable(e[champ].as_str().unwrap_or_default().trim());
@@ -191,6 +213,31 @@ mod tests {
             br#"{"title":"x"}"#,
         ] {
             assert!(analyser(t).is_none());
+        }
+    }
+
+    /// Une copie réduite du vrai catalogue (CC0, voir assets/essais/LICENCES-ESSAIS.txt) se lit entière, éditeur et
+    /// produit compris : le rapprochement des logiciels pas à jour s'en servira.
+    #[test]
+    fn copie_reduite_du_vrai_catalogue() {
+        let c = analyser(include_bytes!("../../assets/essais/kev-extrait.json")).unwrap();
+        assert_eq!(c.len(), 15);
+        assert!(
+            c.iter()
+                .all(|e| e.cve.starts_with("CVE-") && e.ajoutee.is_some() && !e.produit.is_empty())
+        );
+        for (editeur, produit) in [
+            ("Google", "Chromium V8"),
+            ("Google", "Chrome for Android UI"),
+            ("Mozilla", "Firefox"),
+            ("Microsoft", "WordPad"),
+            ("Adobe", "Reader and Acrobat"),
+            ("Oracle", "Java SE and JRockit"),
+        ] {
+            assert!(
+                c.iter().any(|e| e.editeur == editeur && e.produit == produit),
+                "{editeur} {produit}"
+            );
         }
     }
 

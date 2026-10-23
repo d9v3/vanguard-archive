@@ -18,6 +18,17 @@ delivered just before it. Only the latest version has its download page; every v
   by a SQLite reader written for Vanguard). Everything is read in Rust, without external commands. Read-only: nothing
   is removed, since whoever planted it could notice; the screen says to keep screenshots and ask for help first. What
   could not be checked is counted, and the verdict is never “no spyware”. In the full check too, without network.
+- **Outdated software.** `vanguard outdated-software` (or `logiciels-perimes`; Antivirus and protection menu, last; in
+  the full check on Windows and macOS) compares the installed version of browsers (Chrome, Extended channel included,
+  Edge, Firefox and ESR, Brave), Office, Acrobat and Reader and Java with the latest published: public files from the
+  publishers and endoflife.date, downloaded in full once a day, the same for everyone (the list of your software never
+  leaves; Settings › Software versions to turn it off). Version read in the file itself (a reader of .exe version
+  resources written for Vanguard, Info.plist), all accounts as administrator. Firefox: each exploited flaw in CISA's
+  catalog checked against your version (Mozilla security advisories); a version older than the fix is critical. The
+  others: the number of exploited flaws of the product in the catalog, without concluding for your version. What has no
+  source (Edge Extended Stable, Acrobat 2020 and 2024, App Store) is said not checked; a browser that cannot be compared
+  keeps the 60-days-without-update check, which leaves end of support. On Linux, the command points to the package
+  manager.
 
 ## October 22, 2026, evening: version 0.85
 

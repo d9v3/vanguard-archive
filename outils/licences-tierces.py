@@ -38,6 +38,27 @@ LISTES_TELECHARGEES = [
         "CC-BY-4.0",
         "https://github.com/AssoEchap/stalkerware-indicators",
     ),
+    (
+        "Dernières versions de logiciels d'endoflife.date / endoflife.date software versions",
+        "MIT",
+        "https://github.com/endoflife-date/endoflife.date",
+    ),
+    (
+        "Avis de sécurité de Mozilla / Mozilla security advisories (lus, non redistribués / read, not redistributed)",
+        "MPL-2.0",
+        "https://github.com/mozilla/foundation-security-advisories",
+    ),
+    (
+        "Catalogue des failles exploitées de la CISA / CISA Known Exploited Vulnerabilities",
+        "CC0-1.0",
+        "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+    ),
+    (
+        "Versions publiées par les éditeurs (Mozilla, Google, Microsoft, Adobe, Brave), des faits / Versions "
+        "published by the publishers, facts",
+        "sans licence / no licence",
+        "leurs sites / their sites",
+    ),
 ]
 
 

@@ -606,6 +606,64 @@ fn logiciels_espions_hors_ligne() {
     );
 }
 
+/// Les logiciels pas à jour, sans Internet : rien ne part, la commande rend la main vite et sans planter. Sous
+/// Linux, elle renvoie au gestionnaire de paquets ; sous Windows (Wine), elle dit d'où viennent les versions et que
+/// rien de l'ordinateur n'est envoyé.
+#[test]
+fn logiciels_perimes_hors_ligne() {
+    let maison = maison_jetable();
+    let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
+    for (langue, commande) in [("fr", "logiciels-perimes"), ("en", "outdated-software")] {
+        let debut = Instant::now();
+        let s = vanguard_dans_env(
+            programme,
+            &maison,
+            langue,
+            &[commande],
+            "",
+            90,
+            &[("VANGUARD_HORS_LIGNE", "1")],
+        );
+        assert_eq!(s.code, Some(0), "{}", s.erreurs);
+        assert!(!s.erreurs.contains("panicked"), "{}", s.erreurs);
+        assert!(debut.elapsed() < Duration::from_secs(60), "{:?}", debut.elapsed());
+        // Les lignes coupées à 76 colonnes, remises bout à bout.
+        let t = sans_couleurs(&s.texte).split_whitespace().collect::<Vec<_>>().join(" ");
+        let (titre, linux, mention) = if langue == "fr" {
+            (
+                "Logiciels pas à jour",
+                "Sous Linux, le gestionnaire de paquets tient les versions",
+                "rien de cet ordinateur n'est envoyé",
+            )
+        } else {
+            (
+                "Outdated software",
+                "On Linux, the package manager keeps the versions",
+                "nothing about this computer is sent",
+            )
+        };
+        assert!(t.contains(titre), "{t}");
+        if cfg!(target_os = "linux") {
+            assert!(t.contains(linux), "{t}");
+        } else {
+            assert!(t.contains(mention), "{t}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&maison);
+    let aide = vanguard("en", &["outdated-software", "--help"], "", 30);
+    assert!(
+        sans_couleurs(&aide.texte).contains("Firefox checked flaw by flaw"),
+        "{}",
+        aide.texte
+    );
+    let aide = vanguard("fr", &["logiciels-perimes", "--help"], "", 30);
+    assert!(
+        sans_couleurs(&aide.texte).contains("Logiciels pas à jour"),
+        "{}",
+        aide.texte
+    );
+}
+
 /// Vérifier Vanguard lui-même : version, date et empreinte, sans rien changer.
 #[test]
 fn verifier_moi_en_lecture_seule() {

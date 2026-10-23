@@ -1,9 +1,9 @@
-//! Les outils du groupe « Antivirus et protection » du menu : antivirus, YARA, fichiers-pièges, bac à sable,
-//! intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, logiciels de prise de contrôle à
-//! distance (faux technicien), logiciels espions (`espions`), liens, courriels suspects et fichiers téléchargés, caméra
-//! et micro, bilan de confidentialité (`acces`), blocage des menaces, d'un clic ou tout seul pour le certain
-//! (`blocage`), l'interrupteur de la protection en temps réel (`temps_reel`) ; et, sous Linux et macOS, la protection
-//! de la clé USB (`cle`).
+//! Les outils du groupe « Antivirus et protection » du menu : antivirus, YARA, fichiers-pièges, bac à sable, intégrité
+//! des fichiers critiques, mots de passe fuités, connexions sortantes, logiciels de prise de contrôle à distance (faux
+//! technicien), logiciels espions (`espions`), logiciels pas à jour sous Windows et macOS (`perimes`), liens, courriels
+//! suspects et fichiers téléchargés, caméra et micro, bilan de confidentialité (`acces`), blocage des menaces, d'un
+//! clic ou tout seul pour le certain (`blocage`), l'interrupteur de la protection en temps réel (`temps_reel`) ; et,
+//! sous Linux et macOS, la protection de la clé USB (`cle`).
 
 pub(crate) mod abuse_ch;
 pub mod acces;
@@ -28,6 +28,7 @@ pub mod manifeste;
 pub mod memoire;
 pub(crate) mod memoire_dns;
 pub(crate) mod outil;
+pub mod perimes;
 pub mod pieges;
 pub mod quarantaine;
 pub mod secrets_git;

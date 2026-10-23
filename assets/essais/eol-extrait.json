@@ -1,0 +1,636 @@
+{
+  "schema_version": "1.2.1",
+  "generated_at": "2026-10-23T00:09:42+00:00",
+  "total": 485,
+  "result": [
+    {
+      "name": "amazon-corretto",
+      "aliases": [
+        "corretto"
+      ],
+      "label": "Amazon Corretto",
+      "category": "lang",
+      "tags": [
+        "amazon",
+        "java-distribution",
+        "lang"
+      ],
+      "versionCommand": "java -version",
+      "identifiers": [
+        {
+          "type": "cpe",
+          "id": "cpe:/a:amazon:corretto"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:2.3:a:amazon:corretto"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:docker/library/amazoncorretto"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-27"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-26"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-25"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-24"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-23"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-22"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-21"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-20"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-19"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-18"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-17"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-11"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:github/corretto/corretto-8"
+        }
+      ],
+      "labels": {
+        "eoas": null,
+        "discontinued": null,
+        "eol": "Security Support",
+        "eoes": null
+      },
+      "links": {
+        "icon": "https://cdn.jsdelivr.net/npm/simple-icons/icons/openjdk.svg",
+        "html": "https://endoflife.date/amazon-corretto",
+        "releasePolicy": "https://aws.amazon.com/corretto/faqs/"
+      },
+      "releases": [
+        {
+          "name": "25",
+          "codename": null,
+          "label": "25 (LTS)",
+          "releaseDate": "2025-09-17",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2032-10-31",
+          "isMaintained": true,
+          "latest": {
+            "name": "25.0.4.11.1",
+            "date": "2026-10-13",
+            "link": "https://github.com/corretto/corretto-25/releases/tag/25.0.4.11.1"
+          },
+          "custom": null
+        },
+        {
+          "name": "21",
+          "codename": null,
+          "label": "21 (LTS)",
+          "releaseDate": "2023-08-21",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2030-10-31",
+          "isMaintained": true,
+          "latest": {
+            "name": "21.0.12.13.1",
+            "date": "2026-10-13",
+            "link": "https://github.com/corretto/corretto-21/releases/tag/21.0.12.13.1"
+          },
+          "custom": null
+        },
+        {
+          "name": "8",
+          "codename": null,
+          "label": "8 (LTS)",
+          "releaseDate": "2019-01-31",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2030-12-31",
+          "isMaintained": true,
+          "latest": {
+            "name": "8.504.05.1",
+            "date": "2026-10-13",
+            "link": "https://github.com/corretto/corretto-8/releases/tag/8.504.05.1"
+          },
+          "custom": null
+        }
+      ]
+    },
+    {
+      "name": "azul-zulu",
+      "aliases": [
+        "zulu"
+      ],
+      "label": "Azul Zulu",
+      "category": "lang",
+      "tags": [
+        "azul",
+        "java-distribution",
+        "lang"
+      ],
+      "versionCommand": "java -version",
+      "identifiers": [
+        {
+          "type": "repology",
+          "id": "zulu-openjdk"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:/a:azul:zulu"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:2.3:a:azul:zulu"
+        }
+      ],
+      "labels": {
+        "eoas": null,
+        "discontinued": null,
+        "eol": "Support",
+        "eoes": "Extended Support"
+      },
+      "links": {
+        "icon": "https://cdn.jsdelivr.net/npm/simple-icons/icons/openjdk.svg",
+        "html": "https://endoflife.date/azul-zulu",
+        "releasePolicy": "https://www.azul.com/products/azul-support-roadmap/"
+      },
+      "releases": [
+        {
+          "name": "27",
+          "codename": null,
+          "label": "27",
+          "releaseDate": "2026-09-15",
+          "isLts": false,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2027-03-31",
+          "isEoes": null,
+          "eoesFrom": null,
+          "isMaintained": true,
+          "latest": {
+            "name": "27.28.101",
+            "date": "2026-09-15",
+            "link": "https://docs.azul.com/core/release/27-ga/release-notes/release-notes"
+          },
+          "custom": {
+            "latestJdkVersion": "27.0.0+35"
+          }
+        },
+        {
+          "name": "26",
+          "codename": null,
+          "label": "26",
+          "releaseDate": "2026-03-17",
+          "isLts": false,
+          "ltsFrom": null,
+          "isEol": true,
+          "eolFrom": "2026-09-30",
+          "isEoes": null,
+          "eoesFrom": null,
+          "isMaintained": false,
+          "latest": {
+            "name": "26.32.203",
+            "date": "2026-08-18",
+            "link": "https://docs.azul.com/core/release/august-2026/release-notes"
+          },
+          "custom": {
+            "latestJdkVersion": "26.0.2.1+1"
+          }
+        },
+        {
+          "name": "25",
+          "codename": null,
+          "label": "25 (LTS)",
+          "releaseDate": "2025-09-16",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2033-09-30",
+          "isEoes": false,
+          "eoesFrom": "2035-09-30",
+          "isMaintained": true,
+          "latest": {
+            "name": "25.36.205",
+            "date": "2026-08-18",
+            "link": "https://docs.azul.com/core/release/august-2026/release-notes"
+          },
+          "custom": {
+            "latestJdkVersion": "25.0.4.1+1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "eclipse-temurin",
+      "aliases": [
+        "temurin"
+      ],
+      "label": "Eclipse Temurin",
+      "category": "lang",
+      "tags": [
+        "eclipse",
+        "java-distribution",
+        "lang"
+      ],
+      "versionCommand": "java -version",
+      "identifiers": [
+        {
+          "type": "repology",
+          "id": "temurin-bin"
+        },
+        {
+          "type": "repology",
+          "id": "temurin-jre-bin"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:/a:eclipse:temurin"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:2.3:a:eclipse:temurin"
+        }
+      ],
+      "labels": {
+        "eoas": null,
+        "discontinued": null,
+        "eol": "Security Support",
+        "eoes": null
+      },
+      "links": {
+        "icon": "https://cdn.jsdelivr.net/npm/simple-icons/icons/eclipseadoptium.svg",
+        "html": "https://endoflife.date/eclipse-temurin",
+        "releasePolicy": "https://adoptium.net/support/"
+      },
+      "releases": [
+        {
+          "name": "27",
+          "codename": null,
+          "label": "27",
+          "releaseDate": "2026-09-22",
+          "isLts": false,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2027-03-23",
+          "isMaintained": true,
+          "latest": {
+            "name": "27+35",
+            "date": "2026-09-21",
+            "link": "https://github.com/adoptium/temurin27-binaries/releases/tag/jdk-27+35"
+          },
+          "custom": null
+        },
+        {
+          "name": "21",
+          "codename": null,
+          "label": "21 (LTS)",
+          "releaseDate": "2023-10-10",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2029-12-31",
+          "isMaintained": true,
+          "latest": {
+            "name": "21.0.13+9",
+            "date": "2026-10-22",
+            "link": "https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.13+9"
+          },
+          "custom": null
+        },
+        {
+          "name": "8",
+          "codename": null,
+          "label": "8 (LTS)",
+          "releaseDate": "2021-07-29",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2030-12-31",
+          "isMaintained": true,
+          "latest": {
+            "name": "8u504-b01",
+            "date": "2026-08-25",
+            "link": "https://github.com/adoptium/temurin8-binaries/releases/tag/jdk8u504-b01"
+          },
+          "custom": null
+        }
+      ]
+    },
+    {
+      "name": "firefox",
+      "aliases": [],
+      "label": "Firefox",
+      "category": "app",
+      "tags": [
+        "app",
+        "mozilla",
+        "web-browser"
+      ],
+      "versionCommand": "firefox --version",
+      "identifiers": [
+        {
+          "type": "repology",
+          "id": "firefox"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:apk/alpine/firefox"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:deb/debian/firefox-esr"
+        },
+        {
+          "type": "purl",
+          "id": "pkg:generic/firefox"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:2.3:a:mozilla:firefox"
+        }
+      ],
+      "labels": {
+        "eoas": null,
+        "discontinued": null,
+        "eol": "Security Support",
+        "eoes": null
+      },
+      "links": {
+        "icon": "https://cdn.jsdelivr.net/npm/simple-icons/icons/firefoxbrowser.svg",
+        "html": "https://endoflife.date/firefox",
+        "releasePolicy": "https://www.firefox.com/"
+      },
+      "releases": [
+        {
+          "name": "158",
+          "codename": null,
+          "label": "158",
+          "releaseDate": "2026-10-13",
+          "isLts": false,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2026-10-27",
+          "isMaintained": true,
+          "latest": {
+            "name": "158.0.1",
+            "date": "2026-10-20",
+            "link": "https://www.firefox.com/firefox/158.0.1/releasenotes/"
+          },
+          "custom": null
+        },
+        {
+          "name": "157",
+          "codename": null,
+          "label": "157",
+          "releaseDate": "2026-09-29",
+          "isLts": false,
+          "ltsFrom": null,
+          "isEol": true,
+          "eolFrom": "2026-10-13",
+          "isMaintained": false,
+          "latest": {
+            "name": "157.0.1",
+            "date": "2026-10-06",
+            "link": "https://www.firefox.com/firefox/157.0.1/releasenotes/"
+          },
+          "custom": null
+        },
+        {
+          "name": "156",
+          "codename": null,
+          "label": "156",
+          "releaseDate": "2026-09-15",
+          "isLts": false,
+          "ltsFrom": null,
+          "isEol": true,
+          "eolFrom": "2026-09-29",
+          "isMaintained": false,
+          "latest": {
+            "name": "156.0.1",
+            "date": "2026-09-22",
+            "link": "https://www.firefox.com/firefox/156.0.1/releasenotes/"
+          },
+          "custom": null
+        }
+      ]
+    },
+    {
+      "name": "microsoft-build-of-openjdk",
+      "aliases": [],
+      "label": "Microsoft Build of OpenJDK",
+      "category": "lang",
+      "tags": [
+        "java-distribution",
+        "lang",
+        "microsoft"
+      ],
+      "versionCommand": "java -version",
+      "identifiers": [],
+      "labels": {
+        "eoas": null,
+        "discontinued": null,
+        "eol": "Security Support",
+        "eoes": null
+      },
+      "links": {
+        "icon": "https://cdn.jsdelivr.net/npm/simple-icons/icons/openjdk.svg",
+        "html": "https://endoflife.date/microsoft-build-of-openjdk",
+        "releasePolicy": "https://learn.microsoft.com/java/openjdk/support"
+      },
+      "releases": [
+        {
+          "name": "25",
+          "codename": null,
+          "label": "25 (LTS)",
+          "releaseDate": "2025-09-16",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2030-09-30",
+          "isMaintained": true,
+          "latest": {
+            "name": "25.0.5.0.2",
+            "date": "2026-10-22",
+            "link": "https://learn.microsoft.com/java/openjdk/release-notes#openjdk-25"
+          },
+          "custom": null
+        },
+        {
+          "name": "21",
+          "codename": null,
+          "label": "21 (LTS)",
+          "releaseDate": "2023-09-19",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2028-09-30",
+          "isMaintained": true,
+          "latest": {
+            "name": "21.0.13.0.2",
+            "date": "2026-10-22",
+            "link": "https://learn.microsoft.com/java/openjdk/release-notes#openjdk-21"
+          },
+          "custom": null
+        },
+        {
+          "name": "11",
+          "codename": null,
+          "label": "11 (LTS)",
+          "releaseDate": "2019-01-21",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2027-09-30",
+          "isMaintained": true,
+          "latest": {
+            "name": "11.0.32.1",
+            "date": "2026-08-19",
+            "link": "https://learn.microsoft.com/java/openjdk/release-notes#openjdk-11"
+          },
+          "custom": null
+        }
+      ]
+    },
+    {
+      "name": "oracle-jdk",
+      "aliases": [
+        "oracle-java"
+      ],
+      "label": "Oracle JDK",
+      "category": "lang",
+      "tags": [
+        "java-distribution",
+        "lang",
+        "oracle"
+      ],
+      "versionCommand": "java -version",
+      "identifiers": [
+        {
+          "type": "cpe",
+          "id": "cpe:/a:oracle:jdk"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:2.3:a:oracle:jdk"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:/a:oracle:jre"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:2.3:a:oracle:jre"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:/a:oracle:java_se"
+        },
+        {
+          "type": "cpe",
+          "id": "cpe:2.3:a:oracle:java_se"
+        }
+      ],
+      "labels": {
+        "eoas": null,
+        "discontinued": null,
+        "eol": "Premier Support",
+        "eoes": "Extended Support"
+      },
+      "links": {
+        "icon": "https://cdn.jsdelivr.net/npm/simple-icons/icons/oracle.svg",
+        "html": "https://endoflife.date/oracle-jdk",
+        "releasePolicy": "https://www.oracle.com/java/technologies/java-se-support-roadmap.html"
+      },
+      "releases": [
+        {
+          "name": "27",
+          "codename": null,
+          "label": "27",
+          "releaseDate": "2026-09-15",
+          "isLts": false,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2027-03-31",
+          "isEoes": null,
+          "eoesFrom": null,
+          "isMaintained": true,
+          "latest": {
+            "name": "27.0.1.0.2",
+            "date": "2026-10-21",
+            "link": "https://www.oracle.com/java/technologies/javase/27all-relnotes.html"
+          },
+          "custom": null
+        },
+        {
+          "name": "21",
+          "codename": null,
+          "label": "21 (LTS)",
+          "releaseDate": "2023-09-19",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": false,
+          "eolFrom": "2028-09-30",
+          "isEoes": false,
+          "eoesFrom": "2031-09-30",
+          "isMaintained": true,
+          "latest": {
+            "name": "21.0.13.0.2",
+            "date": "2026-10-21",
+            "link": "https://www.oracle.com/java/technologies/javase/21-0-13-0-2-relnotes.html"
+          },
+          "custom": null
+        },
+        {
+          "name": "8",
+          "codename": null,
+          "label": "8 (LTS)",
+          "releaseDate": "2014-03-18",
+          "isLts": true,
+          "ltsFrom": null,
+          "isEol": true,
+          "eolFrom": "2022-03-31",
+          "isEoes": false,
+          "eoesFrom": "2030-12-31",
+          "isMaintained": true,
+          "latest": {
+            "name": "8u511",
+            "date": "2026-10-20",
+            "link": "https://www.oracle.com/java/technologies/javase/8u511-relnotes.html"
+          },
+          "custom": null
+        }
+      ]
+    }
+  ]
+}

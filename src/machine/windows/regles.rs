@@ -103,6 +103,15 @@ regle!(
 );
 
 regle!(
+    "WIN-MAJ-002",
+    Os::Windows,
+    185,
+    ("logiciels pas à jour", "outdated software"),
+    &[],
+    crate::protection::perimes::constats
+);
+
+regle!(
     "WIN-CHF-001",
     Os::Windows,
     190,

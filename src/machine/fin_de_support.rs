@@ -1,8 +1,9 @@
 //! Fin de support : ce qui ne reçoit plus de corrections de sécurité. Le système lui-même (Windows 10 depuis le
 //! 14 octobre 2025, les premières versions de Windows 11, les macOS de plus de trois ans) et les programmes que leur
 //! éditeur a abandonnés (Flash, Silverlight, QuickTime pour Windows, Java 6 et 7, Office 2016 et plus anciens…) : leurs
-//! failles ne seront jamais corrigées. Et les navigateurs installés à part (Windows, macOS) qui n'ont pas été mis à jour
-//! depuis plus de deux mois, alors qu'ils le sont toutes les quatre semaines : leur mise à jour automatique est cassée.
+//! failles ne seront jamais corrigées. Les navigateurs installés à part (Windows, macOS) sont jugés par les logiciels
+//! pas à jour (`protection::perimes`), qui comparent leur version à la dernière publiée ; quand elle ne se compare
+//! pas, ils reprennent d'ici l'âge du fichier (`age_jours`, `constat_navigateur`) : un seul constat par navigateur.
 //! Sous Linux, le gestionnaire de paquets tient tout cela : seuls Python 2 et le greffon Flash sont cherchés.
 
 use super::{Constat, alerte};
@@ -11,8 +12,8 @@ use crate::{tr, trf};
 
 const CAT: &str = "Fin de support";
 /// Au-delà, un navigateur qui se met à jour toutes les quatre semaines a cessé de le faire.
-#[cfg(any(windows, target_os = "macos"))]
-const NAVIGATEUR_JOURS: u64 = 60;
+#[cfg(any(windows, target_os = "macos", test))]
+pub(crate) const NAVIGATEUR_JOURS: u64 = 60;
 
 /// Un programme abandonné : un morceau de son nom (en minuscules, tel que l'affiche la liste des programmes), le nom
 /// montré, et l'année de sa dernière correction.
@@ -79,7 +80,7 @@ fn constat_abandonne(nom: &str, annee: u16) -> Constat {
 
 /// Un navigateur installé à part, pas mis à jour depuis `jours`.
 #[cfg_attr(target_os = "linux", allow(dead_code))] // sous Linux, le gestionnaire de paquets s'en charge
-fn constat_navigateur(nom: &str, jours: u64) -> Constat {
+pub(crate) fn constat_navigateur(nom: &str, jours: u64) -> Constat {
     alerte(
         "Navigateur",
         Niveau::Moyen,
@@ -99,28 +100,9 @@ fn constat_navigateur(nom: &str, jours: u64) -> Constat {
 
 /// Âge en jours d'un fichier (sa date de modification : celle de la version installée).
 #[cfg(any(windows, target_os = "macos"))]
-fn age_jours(chemin: &std::path::Path) -> Option<u64> {
+pub(crate) fn age_jours(chemin: &std::path::Path) -> Option<u64> {
     let m = std::fs::metadata(chemin).ok()?.modified().ok()?;
     Some(std::time::SystemTime::now().duration_since(m).ok()?.as_secs() / 86_400)
-}
-
-/// Les navigateurs (nom, fichier de la version installée) pas mis à jour depuis trop longtemps.
-#[cfg(any(windows, target_os = "macos"))]
-fn navigateurs_perimes(liste: &[(&'static str, std::path::PathBuf)]) -> Vec<Constat> {
-    let mut vus: Vec<&str> = Vec::new();
-    let mut constats = Vec::new();
-    for (nom, chemin) in liste {
-        if vus.contains(nom) {
-            continue;
-        }
-        if let Some(jours) = age_jours(chemin) {
-            vus.push(nom);
-            if jours > NAVIGATEUR_JOURS {
-                constats.push(constat_navigateur(nom, jours));
-            }
-        }
-    }
-    constats
 }
 
 // ───────────────────────────── Le système ─────────────────────────────
@@ -216,7 +198,7 @@ fn systeme_macos(version: &str) -> Option<Constat> {
 #[cfg(windows)]
 pub fn constats() -> Vec<Constat> {
     use winreg::RegKey;
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::enums::HKEY_LOCAL_MACHINE;
     let mut constats = Vec::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     if let Ok(v) = hklm.open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") {
@@ -226,53 +208,13 @@ pub fn constats() -> Vec<Constat> {
             constats.push(c);
         }
     }
-    let mut noms = Vec::new();
-    for (racine, chemin) in [
-        (
-            HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-        (
-            HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-        (
-            HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-    ] {
-        let Ok(cle) = RegKey::predef(racine).open_subkey(chemin) else {
-            continue;
-        };
-        for sous in cle.enum_keys().flatten() {
-            if let Ok(nom) = cle
-                .open_subkey(&sous)
-                .and_then(|k| k.get_value::<String, _>("DisplayName"))
-            {
-                noms.push(crate::ui::affichable(&nom));
-            }
-        }
-    }
+    // Les mêmes clés Uninstall que les autres lectures (machine 64 et 32 bits, ce compte).
+    let noms: Vec<String> = super::windows::installes::noms()
+        .unwrap_or_default()
+        .iter()
+        .map(|n| crate::ui::affichable(n))
+        .collect();
     constats.extend(abandonnes(&noms).into_iter().map(|(n, a)| constat_abandonne(n, a)));
-    let dossier = |var: &str| std::path::PathBuf::from(std::env::var_os(var).unwrap_or_default());
-    let (pf, pf86, local) = (
-        dossier("ProgramFiles"),
-        dossier("ProgramFiles(x86)"),
-        dossier("LOCALAPPDATA"),
-    );
-    let chrome = r"Google\Chrome\Application\chrome.exe";
-    let edge = r"Microsoft\Edge\Application\msedge.exe";
-    let brave = r"BraveSoftware\Brave-Browser\Application\brave.exe";
-    constats.extend(navigateurs_perimes(&[
-        ("Google Chrome", pf.join(chrome)),
-        ("Google Chrome", pf86.join(chrome)),
-        ("Google Chrome", local.join(chrome)),
-        ("Microsoft Edge", pf86.join(edge)),
-        ("Microsoft Edge", pf.join(edge)),
-        ("Mozilla Firefox", pf.join(r"Mozilla Firefox\firefox.exe")),
-        ("Brave", pf.join(brave)),
-        ("Brave", local.join(brave)),
-    ]));
     constats
 }
 
@@ -298,13 +240,6 @@ pub fn constats() -> Vec<Constat> {
         }
     }
     constats.extend(abandonnes(&noms).into_iter().map(|(n, a)| constat_abandonne(n, a)));
-    let plist = |app: &str| std::path::PathBuf::from(format!("/Applications/{app}.app/Contents/Info.plist"));
-    constats.extend(navigateurs_perimes(&[
-        ("Google Chrome", plist("Google Chrome")),
-        ("Mozilla Firefox", plist("Firefox")),
-        ("Microsoft Edge", plist("Microsoft Edge")),
-        ("Brave", plist("Brave Browser")),
-    ]));
     constats
 }
 

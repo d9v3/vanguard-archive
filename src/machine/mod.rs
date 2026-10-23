@@ -16,7 +16,7 @@ pub(crate) mod chasse;
 mod comptes_oublies;
 pub(crate) mod dns;
 pub(crate) mod extensions;
-mod fin_de_support;
+pub(crate) mod fin_de_support;
 mod heure;
 mod journaux;
 #[cfg(target_os = "linux")]

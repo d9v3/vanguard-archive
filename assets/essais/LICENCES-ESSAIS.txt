@@ -1,0 +1,69 @@
+Copies réduites de fichiers publics réels, lues seulement par les tests (include_bytes! sous cfg(test)) : rien n'entre
+dans le programme. Chacune garde les champs du fichier d'origine pour quelques entrées ; seuls des champs trop gros
+(artefacts, variations de langue) ont été retirés de cask-extrait.json. Copiées le 23 octobre 2026.
+
+Les autres fichiers des tests de versions (Mozilla product-details, Chrome versionhistory, Edge, OfficeReleases, Adobe,
+Brave, Microsoft AutoUpdate, avis de sécurité de Mozilla) n'ont pas de licence publiée, ou une licence qui demanderait
+l'accord de l'auteur (MPL-2.0) : leurs fixtures sont inventées, écrites dans les tests.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+kev-extrait.json
+  Source  : https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+            (catalogue 2026.10.21 ; 15 entrées sur 1 754)
+  Licence : Creative Commons 0 1.0 (CC0-1.0), https://www.cisa.gov/sites/default/files/licenses/kev/license.txt
+            « You may use this data in any legal manner ». L'usage de ces données ne vaut ni logo de la CISA ou du DHS,
+            ni appui de leur part.
+
+eol-extrait.json
+  Source  : https://endoflife.date/api/v1/products/full (produits firefox, oracle-jdk, eclipse-temurin,
+            amazon-corretto, azul-zulu, microsoft-build-of-openjdk ; trois branches chacun ; en-tête « total » gardé)
+  Licence : MIT, https://github.com/endoflife-date/endoflife.date
+
+    Copyright 2020 endoflife.date contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+    documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+    to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+    the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+    THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+    IN THE SOFTWARE.
+
+cask-extrait.json
+  Source  : https://formulae.brew.sh/api/cask.json (casks google-chrome, firefox, microsoft-word,
+            adobe-acrobat-reader, brave-browser, temurin, libndi à « version: latest », codeql à « variations »)
+  Licence : BSD-2-Clause, https://github.com/Homebrew/homebrew-cask et https://github.com/Homebrew/formulae.brew.sh
+
+    BSD 2-Clause License
+
+    Copyright (c) 2013-present, Homebrew contributors
+    Copyright (c) 2009-present, Homebrew contributors (formulae.brew.sh)
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this
+      list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above copyright notice,
+      this list of conditions and the following disclaimer in the documentation
+      and/or other materials provided with the distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+    IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+    FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+    DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+    SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+    OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
