@@ -702,16 +702,31 @@ fn choisir_ou(lignes: &[Ligne], invite: &str, depart: &str, echap: &str, gauche_
 /// menus (une ligne lue au clavier écrivait « ^[[D » pour ←, et il fallait Entrée de plus). Hors d'un terminal, la
 /// ligne est lue comme avant.
 pub fn attendre_retour(question: &str) {
+    attendre_retour_avant(question, None);
+}
+
+/// La même pause, qui cesse d'attendre à `fin` : `false` si le temps est écoulé avant un appui. Hors d'un terminal,
+/// la ligne lue ne peut pas expirer.
+pub fn attendre_retour_avant(question: &str, fin: Option<std::time::Instant>) -> bool {
     let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     let mut sortie = std::io::stdout();
     let _ = write!(sortie, "{}", question_en_lignes(question));
     let _ = sortie.flush();
     let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
         demander("");
-        return;
+        return true;
     };
     noter_retour(false);
     loop {
+        if let Some(f) = fin
+            && matches!(
+                event::poll(f.saturating_duration_since(std::time::Instant::now())),
+                Ok(false)
+            )
+        {
+            let _ = sortie.write_all(b"\r\n");
+            return false;
+        }
         let Ok(Event::Key(k)) = event::read() else {
             continue;
         };
@@ -730,7 +745,7 @@ pub fn attendre_retour(question: &str) {
         ) || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')))
         {
             let _ = sortie.write_all(b"\r\n");
-            return;
+            return true;
         }
     }
 }

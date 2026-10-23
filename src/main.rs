@@ -238,6 +238,15 @@ enum Commande {
     /// qui protège (NextDNS, chiffré, filtrant) est gardé.
     #[command(name = "dns-rapide", visible_alias = "fast-dns")]
     DnsRapide,
+    /// Mode Wi-Fi public (café, hôtel, aéroport) : entrées fermées sur ce réseau, partage de fichiers et annonce du
+    /// nom coupés, DNS protecteur (chiffré sous Linux avec systemd-resolved), après accord et avec les droits
+    /// d'administrateur ; « off » remet tout exactement, « portail » rouvre la page de connexion du réseau. Sans
+    /// argument : son état.
+    #[command(name = "wifi-public", visible_alias = "public-wifi")]
+    WifiPublic {
+        #[arg(value_parser = ["on", "off", "portail", "portal"])]
+        etat: Option<String>,
+    },
     /// Intégrité des fichiers critiques : référence d'empreintes BLAKE3, puis ce qui a changé depuis.
     #[command(visible_alias = "integrity")]
     Integrite {
@@ -1068,6 +1077,7 @@ enum Action {
     Nat,
     Cameras,
     Objets,
+    WifiPublic,
     AntivirusRapide,
     AntivirusComplet,
     AntivirusDossier,
@@ -1242,6 +1252,11 @@ const OUTILS: &[Outil] = &[
         precision: ["modèle, mots de passe d'origine", "model, default passwords"],
         mots: "box routeur router modem objets connectés iot smart caméra camera imprimante printer nas télé tv \
                domotique smart home mot de passe d'origine default password firmware upnp" },
+    Outil { action: Action::WifiPublic, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Mode Wi-Fi public", "Public Wi-Fi mode"],
+        precision: ["café, hôtel : allumer, éteindre", "café, hotel: turn on, off"],
+        mots: "wifi public café cafe hôtel hotel aéroport airport portail captif captive portal pare-feu firewall \
+               partage sharing découverte discovery dns chiffré encrypted" },
     Outil { action: Action::AntivirusRapide, groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Analyse rapide", "Quick scan"], precision: ["téléchargements, bureau…", "downloads, desktop…"],
         mots: "virus malware clamav defender" },
@@ -1521,6 +1536,7 @@ impl Action {
             ),
             Action::Blocage => protection::blocage::etat_court(),
             Action::Veilleur => precision_veilleur(),
+            Action::WifiPublic => reseau::wifi_public::etat_court(),
             _ => texte(self.outil().precision),
         };
         (texte(self.outil().titre), precision)
@@ -1736,6 +1752,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Nat => reseau::nat::tester(),
         Action::Cameras => reseau::cameras::chercher_cameras().await,
         Action::Objets => reseau::objets::montrer(),
+        Action::WifiPublic => reseau::wifi_public::commande(None),
         Action::AntivirusRapide => protection::antivirus::analyser(protection::antivirus::Portee::Rapide),
         Action::AntivirusComplet => protection::antivirus::analyser(protection::antivirus::Portee::Complete),
         Action::AntivirusDossier => protection::antivirus::choisir(),
@@ -1856,6 +1873,10 @@ const AIDES_EN: &[(&str, &str)] = &[
                 its HTTP-only admin page, the cameras, printers, NAS… and their default password. Nothing is probed"),
     ("dns-rapide", "Fastest DNS: measures the current DNS and public ones, then offers the fastest, undoable. A DNS \
                     that protects (NextDNS, encrypted, filtering) is kept"),
+    ("wifi-public", "Public Wi-Fi mode (café, hotel, airport): incoming connections closed on this network, file \
+                     sharing and name announcement off, protective DNS (encrypted on Linux with systemd-resolved), \
+                     after your consent and with administrator rights; \"off\" puts everything back exactly, \
+                     \"portal\" reopens the network's login page. Without argument: its state"),
     ("pieges", "Decoy files against ransomware: place them (after your consent), see whether they are intact, or \
                 remove them"),
     ("durcir", "Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access. \
@@ -2191,6 +2212,7 @@ async fn main() {
         Some(Commande::Cameras) => reseau::cameras::chercher_cameras().await,
         Some(Commande::Objets) => reseau::objets::montrer(),
         Some(Commande::DnsRapide) => dns_rapide::mesurer_et_proposer(),
+        Some(Commande::WifiPublic { etat }) => reseau::wifi_public::commande(etat.as_deref()),
         Some(Commande::Appris) => apprentissage::menu(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {

@@ -494,6 +494,14 @@ pub fn dns_change() -> Option<(String, String)> {
 /// Règle le DNS de la connexion principale sur ces serveurs, après accord, comme un réglage : la valeur d'avant est
 /// notée, et « Tout remettre comme avant » la remet. Erreur : pourquoi ce n'est pas possible ici.
 pub fn appliquer_dns(serveurs4: &[&str], serveurs6: &[&str]) -> Result<(), String> {
+    // Le mode Wi-Fi public remettra, en s'éteignant, le DNS qu'il a trouvé : il écraserait ce choix.
+    if crate::reseau::wifi_public::tient_le_dns() {
+        return Err(tr!(
+            "Le mode Wi-Fi public tient le DNS : éteins-le d'abord (« vanguard wifi-public off »).",
+            "Public Wi-Fi mode holds the DNS: turn it off first (“vanguard public-wifi off”)."
+        )
+        .to_string());
+    }
     let c = systeme::dns_principal(serveurs4, serveurs6)?;
     // Une seule valeur d'avant se garde : celle d'un autre réseau doit d'abord revenir.
     if let Some((_, reseau)) = dns_change()
@@ -517,8 +525,57 @@ pub fn appliquer_dns(serveurs4: &[&str], serveurs6: &[&str]) -> Result<(), Strin
     Ok(())
 }
 
+/// Le DNS protecteur du mode Wi-Fi public (`reseau::wifi_public`), par le même changement que « DNS le plus
+/// rapide » mais noté dans l'état scellé du mode, pas dans reglages.json : (connexion, valeur actuelle, valeur
+/// voulue), sur la connexion de la route par défaut. Erreur : pourquoi ce n'est pas possible ici.
+pub(crate) fn dns_pour_wifi_public(serveurs4: &[&str], serveurs6: &[&str]) -> Result<(String, String, String), String> {
+    let c = systeme::dns_principal(serveurs4, serveurs6)?;
+    let id = c.identite_dns().unwrap_or_default().to_string();
+    let avant = c
+        .lire()
+        .ok_or_else(|| tr!("DNS actuel illisible.", "Current DNS unreadable.").to_string())?;
+    let cible = c.cible().unwrap_or_default();
+    Ok((id, avant, cible))
+}
+
+/// Le DNS actuel de la connexion d'une valeur notée (son identité en tête), dans la même forme.
+pub(crate) fn dns_relu(valeur: &str) -> Option<String> {
+    systeme::Changement::dns_note(valeur)?.lire()
+}
+
+/// La commande qui pose cette valeur de DNS (identité en tête) ; `None` si elle ne se valide pas.
+pub(crate) fn dns_commande(valeur: &str) -> Option<String> {
+    systeme::Changement::dns_note(valeur)?.commande_dns(valeur)
+}
+
+/// Le mode Wi-Fi public tient le DNS : le dire. Le remettre maintenant, il le reposerait en s'éteignant (sa valeur
+/// d'avant est celle d'ici), et la note de reglages.json serait perdue.
+fn dire_dns_tenu() {
+    afficher_aligne(
+        "  ",
+        tr!(
+            "Le mode Wi-Fi public tient le DNS : il est laissé ; éteins le mode d'abord (« vanguard wifi-public off »).",
+            "Public Wi-Fi mode holds the DNS: it is left as is; turn the mode off first (“vanguard public-wifi off”)."
+        ),
+        2,
+        "",
+    );
+}
+
+/// Les réglages hors catalogue à remettre : sans le DNS quand le mode Wi-Fi public le tient.
+fn hors_catalogue_a_remettre(h: &Historique, tient_le_dns: bool) -> Vec<Reglage> {
+    hors_catalogue(h)
+        .into_iter()
+        .filter(|r| !(tient_le_dns && r.id.as_ref() == DNS))
+        .collect()
+}
+
 /// Remet le DNS d'avant le changement de Vanguard, après accord.
 pub fn remettre_dns() {
+    if crate::reseau::wifi_public::tient_le_dns() {
+        dire_dns_tenu();
+        return;
+    }
     let h = charger();
     let reglages = hors_catalogue(&h);
     if let Some(r) = reglages.first() {
@@ -535,14 +592,22 @@ pub(crate) fn reglages_notes() -> usize {
 /// Annule tout ce que Vanguard a changé : les valeurs notées avant chaque changement reviennent.
 pub fn tout_annuler() {
     titre(tr!("Tout remettre comme avant", "Put everything back"));
+    crate::reseau::wifi_public::proposer_d_eteindre();
     let h = charger();
+    let tient = crate::reseau::wifi_public::tient_le_dns() && h.reglages.contains_key(DNS);
+    if tient {
+        dire_dns_tenu();
+    }
     let mut reglages = systeme::catalogue();
-    reglages.extend(hors_catalogue(&h));
+    reglages.extend(hors_catalogue_a_remettre(&h, tient));
     let a_annuler: Vec<&Reglage> = reglages
         .iter()
         .filter(|r| h.reglages.contains_key(r.id.as_ref()))
         .collect();
     if a_annuler.is_empty() {
+        if tient {
+            return;
+        }
         trp!(
             "  {GRIS}Vanguard n'a changé aucun réglage sur cette machine.{RESET}",
             "  {GRIS}Vanguard has not changed any setting on this machine.{RESET}"
@@ -643,6 +708,33 @@ mod tests {
                 Vec::<String>::new()
             );
         }
+    }
+
+    /// Le mode Wi-Fi public tient le DNS : « Tout remettre » le laisse (le mode reposerait sinon, en s'éteignant, la
+    /// valeur d'ici, et la note d'origine serait perdue) ; le reste est remis comme avant.
+    #[test]
+    fn dns_laisse_quand_le_mode_le_tient() {
+        let mut h = Historique::default();
+        #[cfg(target_os = "linux")]
+        let note = "0b8c2f4e-1a2b-4c3d-9e8f-001122334455\n|no||no";
+        #[cfg(windows)]
+        let note = "{0B8C2F4E-1A2B-4C3D-9E8F-001122334455}\n|";
+        #[cfg(target_os = "macos")]
+        let note = "Wi-Fi\n";
+        h.reglages.insert(
+            DNS.into(),
+            Avant {
+                date: String::new(),
+                valeurs: vec![Some(note.into())],
+            },
+        );
+        let avec = |tient| {
+            hors_catalogue_a_remettre(&h, tient)
+                .iter()
+                .any(|r| r.id.as_ref() == DNS)
+        };
+        assert!(avec(false), "sans le mode, le DNS noté se remet");
+        assert!(!avec(true), "le mode tient le DNS : il est laissé");
     }
 
     #[test]

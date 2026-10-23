@@ -1700,6 +1700,10 @@ pub fn commande(liste: bool) {
         2,
         "",
     );
+    // Son état part avec le dossier de données : éteint d'abord, ses réglages reviennent comme avant.
+    if !liste {
+        crate::reseau::wifi_public::proposer_d_eteindre();
+    }
     let lieux = match Lieux::de_cet_ordinateur() {
         Ok(l) => l,
         Err(e) => {

@@ -205,6 +205,13 @@ impl Changement {
         identite.strip_prefix("launchd|").unwrap_or(identite).to_string()
     }
 
+    /// La commande qui pose la valeur `v` d'un réglage de DNS (mode Wi-Fi public).
+    pub fn commande_dns(&self, v: &str) -> Option<String> {
+        matches!(self, Changement::Dns { .. })
+            .then(|| self.commande(Some(v)))
+            .flatten()
+    }
+
     /// Le réglage de DNS rebâti d'après sa valeur d'avant notée, pour l'annuler.
     pub fn dns_note(avant: &str) -> Option<Changement> {
         let (service, _) = avant.split_once('\n')?;

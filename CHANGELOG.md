@@ -9,6 +9,25 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Mode Wi-Fi public** (`vanguard wifi-public`, Réseau et Internet › Mode Wi-Fi public). On l'allume en arrivant dans
+  un café, un hôtel ou un aéroport, on l'éteint en partant : l'ordinateur n'accepte plus aucune connexion venue de ce
+  réseau (une session SSH déjà ouverte reste), le partage de fichiers et l'annonce de son nom sont coupés (sous macOS,
+  le pare-feu ferme le partage ; Bonjour et AirDrop restent), et le DNS passe au Bouclier canadien « Protégé »,
+  chiffré sous Linux quand systemd-resolved répond (un résolveur sur l'ordinateur, comme NextDNS, ou un DNS déjà
+  chiffré et filtrant, est gardé). Les entrées qui n'ont pas pu être fermées (pas de nft, pare-feu illisible) sont
+  dites au menu et au bilan, jamais « tout est en place ». Sous Linux, une table nftables à part et des services
+  masqués jusqu'au redémarrage, puis mDNS, LLMNR et le DNS chiffré sur le seul profil du réseau public ; sous Windows,
+  catégorie Public, profil Public du pare-feu fermé aux entrées, NetBIOS coupé, en une seule demande
+  d'administrateur ; sous macOS, pare-feu en « tout bloquer » et mode furtif. Chaque changement est montré avec sa valeur d'avant,
+  notée et scellée avant la première commande ; l'extinction remet tout dans l'ordre inverse, relu, même après un
+  plantage ou un redémarrage (le menu et le bilan le disent). Un état changé hors de Vanguard n'est jamais remis :
+  extinction sûre à la place, qui ne retire que la table de Vanguard. Un pare-feu trouvé coupé est allumé et jamais
+  recoupé. `vanguard wifi-public portail` rouvre la page de connexion du réseau : le DNS chiffré se relâche jusqu'à
+  Entrée, dix minutes au plus, et le lancement suivant le remet strict si Vanguard a été fermé avant. Rien n'est
+  envoyé pour reconnaître un réseau public : une suggestion seulement. Essayé sous Linux (table posée puis retirée
+  dans un espace de noms à part, aperçus) ; Windows et macOS : compilés et testés en partie, pas encore essayés sur un
+  vrai système, ni le DNS chiffré sur un vrai réseau public.
+
 - **Petits correctifs de sûreté.** Sous Windows, les programmes du système (netstat, netsh, powercfg, wevtutil,
   tasklist, schtasks, ipconfig, cmd, PowerShell…) sont lancés par leur chemin dans System32, demandé à Windows
   lui-même : un faux programme du même nom posé à côté de Vanguard (Téléchargements) ou dans le dossier courant ne

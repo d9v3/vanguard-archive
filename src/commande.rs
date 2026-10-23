@@ -898,6 +898,31 @@ mod tests_sh_chaine {
             "id",
             "chiffres hexadécimaux et tirets, vérifié juste avant",
         ),
+        (
+            "reseau/wifi_public/linux.rs",
+            "unite",
+            "unité de la liste fermée etat::UNITES, vérifiée juste avant",
+        ),
+        (
+            "reseau/wifi_public/linux.rs",
+            "uuid",
+            "UUID vérifié par uuid_valide juste avant (hexadécimal et tirets)",
+        ),
+        (
+            "reseau/wifi_public/linux.rs",
+            "paires.join(\" \")",
+            "propriétés et valeurs des ensembles fermés etat::PROPRIETES_NM, vérifiées juste avant",
+        ),
+        (
+            "reseau/wifi_public/macos.rs",
+            "option",
+            "option de la liste fermée etat::OPTIONS_MAC, vérifiée juste avant",
+        ),
+        (
+            "reseau/wifi_public/macos.rs",
+            "valeur",
+            "« on » ou « off », vérifié juste avant",
+        ),
     ];
 
     pub(super) fn sources(dossier: &Path, base: &Path, sortie: &mut Vec<(String, String)>) {

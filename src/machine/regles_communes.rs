@@ -203,6 +203,15 @@ regle!(
 );
 
 regle!(
+    "COM-PUB-001",
+    Os::Tous,
+    697,
+    ("mode Wi-Fi public", "public Wi-Fi mode"),
+    &[],
+    || crate::reseau::wifi_public::constat()
+);
+
+regle!(
     "COM-SUR-001",
     Os::Tous,
     700,
