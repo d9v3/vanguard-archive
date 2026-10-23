@@ -249,14 +249,29 @@ fn lire_pilotes() -> Option<Vec<Pilote>> {
     )
 }
 
-/// La liste LOLDrivers, rafraîchie une fois par semaine ; la copie d'avant sert hors ligne.
+/// La liste LOLDrivers, rafraîchie une fois par semaine ; la copie d'avant sert hors ligne. Seule une réponse qui
+/// contient des empreintes la remplace : une page de maintenance ou d'erreur reçue avec un 200 effaçait la bonne
+/// copie, et la semaine d'attente laissait la vérification des pilotes vulnérables tomber sept jours.
 fn liste_loldrivers() -> Option<HashSet<[u8; 32]>> {
-    let dossier = crate::reseau::dossier_local().join("loldrivers");
-    let _ = std::fs::create_dir_all(&dossier);
-    let chemin = dossier.join("drivers.csv");
-    crate::protection::empreintes::rafraichir(LOLDRIVERS, &chemin, SEMAINE, LISTE_MAX, 120);
-    let liste = empreintes_de_la_liste(&std::fs::read_to_string(&chemin).ok()?);
+    let lieu = ("loldrivers", "drivers.csv");
+    let octets = if cfg!(test) || crate::parametres::hors_ligne() {
+        std::fs::read(crate::reseau::dossier_local().join(lieu.0).join(lieu.1)).ok()
+    } else {
+        let demande = crate::http::Demande {
+            taille_max: LISTE_MAX,
+            ..crate::http::Demande::get(LOLDRIVERS, Duration::from_secs(120))
+        };
+        crate::protection::abuse_ch::liste(demande, lieu, SEMAINE, liste_valide)
+            .copie
+            .map(|(o, _)| o)
+    };
+    let liste = empreintes_de_la_liste(&String::from_utf8_lossy(&octets?));
     (!liste.is_empty()).then_some(liste)
+}
+
+/// Une réponse qui est bien la liste : au moins une empreinte SHA-256.
+fn liste_valide(octets: &[u8]) -> bool {
+    !empreintes_de_la_liste(&String::from_utf8_lossy(octets)).is_empty()
 }
 
 fn pilotes() -> Vec<Constat> {
@@ -276,6 +291,17 @@ fn pilotes() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une page de maintenance ou d'erreur reçue avec un 200 ne remplace pas la copie de la liste.
+    #[test]
+    fn page_qui_n_est_pas_la_liste_refusee() {
+        let ligne = format!("\"id\",\"{}\"\n", "ab".repeat(32));
+        assert!(liste_valide(
+            format!("\"Id\",\"KnownVulnerableSamples_SHA256\"\n{ligne}").as_bytes()
+        ));
+        assert!(!liste_valide(b"<html><body>Maintenance en cours</body></html>"));
+        assert!(!liste_valide(b""));
+    }
 
     fn p(nom: &str, fichier: &str) -> Pilote {
         Pilote {

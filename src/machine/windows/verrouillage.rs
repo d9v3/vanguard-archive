@@ -17,7 +17,7 @@ pub(super) fn verrouillage() -> Constat {
     };
     let powercfg = |sous_groupe: &str, reglage: &str| {
         crate::commande::lancer(
-            std::process::Command::new("powercfg").args(["/q", "SCHEME_CURRENT", sous_groupe, reglage]),
+            crate::commande::systeme("powercfg").args(["/q", "SCHEME_CURRENT", sous_groupe, reglage]),
             15,
         )
         .filter(|r| r.code == Some(0))

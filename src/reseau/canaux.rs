@@ -4,6 +4,7 @@
 //! 80 MHz en occupe quatre d'un coup : ils se comptent par blocs. Lecture seule : le canal se règle dans
 //! l'administration de la box.
 
+#[cfg(unix)]
 use std::process::Command;
 
 use crate::commande::lancer;
@@ -168,7 +169,7 @@ fn lire() -> Result<Lecture, &'static str> {
 
 #[cfg(windows)]
 fn lire() -> Result<Lecture, &'static str> {
-    let netsh = |args: &[&str]| lancer(Command::new("netsh").args(args), 20).map(|r| r.sortie);
+    let netsh = |args: &[&str]| lancer(crate::commande::systeme("netsh").args(args), 20).map(|r| r.sortie);
     let active = netsh(&["wlan", "show", "interfaces"]).and_then(|s| wifi::borne_active_netsh(&s));
     let voisins = netsh(&["wlan", "show", "networks", "mode=bssid"]);
     let mut bornes = voisins.map_or_else(Vec::new, |s| wifi::bornes_netsh(&s));

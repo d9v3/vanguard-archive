@@ -230,7 +230,7 @@ fn constat_temperatures(mesures: &[(&'static str, f64, f64)]) -> Option<Constat>
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn degres_nvidia() -> Option<f64> {
     let r = crate::commande::lancer(
-        std::process::Command::new("nvidia-smi").args(["--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"]),
+        crate::commande::systeme("nvidia-smi").args(["--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"]),
         10,
     )?;
     if r.code != Some(0) {

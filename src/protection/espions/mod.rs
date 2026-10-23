@@ -13,7 +13,7 @@ mod clavier;
 mod connus;
 mod echap;
 #[cfg(any(target_os = "macos", test))]
-mod tcc;
+pub(crate) mod tcc;
 #[cfg(windows)]
 mod windows;
 

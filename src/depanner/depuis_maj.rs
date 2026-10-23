@@ -166,7 +166,7 @@ pub(super) fn apres_mise_a_jour() {
             "\n  Open Windows restore points? [y/N]: "
         ),
         || {
-            let _ = std::process::Command::new("rstrui.exe").spawn();
+            let _ = crate::commande::systeme("rstrui.exe").spawn();
         },
     );
 }

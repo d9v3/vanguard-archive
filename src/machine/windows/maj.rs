@@ -481,7 +481,7 @@ fn commandes_winget(programmes: &[(String, String)]) -> Vec<String> {
 /// Vanguard (Téléchargements, une clé passée sur une autre machine) : un winget.exe posé là serait lancé à la place
 /// du vrai, et son tableau vide ferait dire « Programmes à jour ». C'est un alias d'exécution (point d'analyse) :
 /// son entrée se lit sans le suivre. `LOCALAPPDATA` absent ou relatif : pas de chemin sûr, `None`.
-fn winget_du_store(local: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+pub(super) fn winget_du_store(local: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
     let chemin = std::path::Path::new(local?).join(r"Microsoft\WindowsApps\winget.exe");
     (chemin.is_absolute() && std::fs::symlink_metadata(&chemin).is_ok()).then_some(chemin)
 }

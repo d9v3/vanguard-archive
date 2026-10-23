@@ -5,10 +5,6 @@
 //! dans le PATH ; le fichier qu'elle lit, lui, est là. Chaque fonction lit ses fichiers puis confie le texte à un
 //! analyseur qui reçoit la racine en paramètre : les tests lui donnent une arborescence inventée. `None` veut dire
 //! « non vérifié » (base absente, format inconnu), jamais « rien trouvé ».
-//!
-//! Aucun appelant n'est encore converti : les lots suivants remplaceront les commandes une à une. D'ici là, rien
-//! n'appelle ces fonctions hors des tests, d'où le `dead_code` permis pour tout le module.
-#![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -41,6 +37,7 @@ pub(crate) fn chemin(cmd: &str) -> Option<PathBuf> {
 
 /// Un nom avec une barre oblique est un chemin, pris tel quel, comme le fait le shell. Le bit d'exécution compte :
 /// un fichier ordinaire du même nom dans le PATH ne se lance pas, et `command -v` l'ignore aussi.
+#[cfg(test)]
 fn present_dans(cmd: &str, path: &OsStr) -> bool {
     chemin_dans(cmd, path).is_some()
 }
@@ -463,39 +460,6 @@ fn paquets_dpkg_sous(racine: &Path) -> Option<Vec<(String, String)>> {
     Some(paquets_dpkg_selon(
         &std::fs::read_to_string(sous(racine, DPKG_STATUS)).ok()?,
     ))
-}
-
-/// Le paquet propriétaire de chaque fichier (`dpkg -S`), d'après les listes /var/lib/dpkg/info/*.list.
-pub(crate) fn proprietaire_dpkg(fichiers: &[&Path]) -> Option<HashMap<PathBuf, String>> {
-    proprietaire_dpkg_sous(Path::new(RACINE), fichiers)
-}
-
-/// Le nom de la liste est « <paquet>.list » ou « <paquet>:<architecture>.list » (paquets multi-architectures) :
-/// l'architecture est retirée, le nom est celui du paquet.
-fn proprietaire_dpkg_sous(racine: &Path, fichiers: &[&Path]) -> Option<HashMap<PathBuf, String>> {
-    let cherches: HashSet<&Path> = fichiers.iter().copied().collect();
-    let mut listes: Vec<PathBuf> = std::fs::read_dir(sous(racine, "/var/lib/dpkg/info"))
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension() == Some(OsStr::new("list")))
-        .collect();
-    listes.sort();
-    let mut trouves = HashMap::new();
-    for l in listes {
-        let Some(nom) = l
-            .file_stem()
-            .map(|s| s.to_string_lossy().split(':').next().unwrap_or_default().to_string())
-        else {
-            continue;
-        };
-        for ligne in std::fs::read_to_string(&l).unwrap_or_default().lines() {
-            if let Some(&f) = cherches.get(Path::new(ligne)) {
-                trouves.entry(f.to_path_buf()).or_insert_with(|| nom.clone());
-            }
-        }
-    }
-    Some(trouves)
 }
 
 /// Les architectures connues de dpkg (/var/lib/dpkg/arch, une par ligne), la native comprise quand dpkg l'y a
@@ -1247,7 +1211,7 @@ mod tests {
         Package: demi\nStatus: install ok half-configured\nVersion: 3\n";
 
     #[test]
-    fn dpkg_lit_status_info_et_arch() {
+    fn dpkg_lit_status_et_arch() {
         assert_eq!(
             paquets_dpkg_selon(STATUS),
             [
@@ -1258,34 +1222,11 @@ mod tests {
         let d = jetable("dpkg");
         assert_eq!(paquets_dpkg_sous(&d), None);
         assert_eq!(architectures_dpkg_sous(&d), None);
-        assert_eq!(proprietaire_dpkg_sous(&d, &[Path::new("/bin/bash")]), None);
         ecrire(&d, DPKG_STATUS, STATUS);
         ecrire(&d, "/var/lib/dpkg/arch", "amd64\ni386\n");
-        ecrire(&d, "/var/lib/dpkg/info/bash.list", "/.\n/bin\n/bin/bash\n");
-        ecrire(
-            &d,
-            "/var/lib/dpkg/info/libc6:amd64.list",
-            "/lib/x86_64-linux-gnu/libc.so.6\n",
-        );
         ecrire(&d, "/var/lib/dpkg/info/bash.md5sums", "abc  bin/bash\n");
         assert_eq!(paquets_dpkg_sous(&d).unwrap().len(), 2);
         assert_eq!(architectures_dpkg_sous(&d).unwrap(), ["amd64", "i386"]);
-        let p = proprietaire_dpkg_sous(
-            &d,
-            &[
-                Path::new("/bin/bash"),
-                Path::new("/lib/x86_64-linux-gnu/libc.so.6"),
-                Path::new("/orphelin"),
-            ],
-        )
-        .unwrap();
-        assert_eq!(p.len(), 2);
-        assert_eq!(p[Path::new("/bin/bash")], "bash");
-        assert_eq!(
-            p[Path::new("/lib/x86_64-linux-gnu/libc.so.6")],
-            "libc6",
-            "sans l'architecture"
-        );
         let _ = std::fs::remove_dir_all(&d);
     }
 

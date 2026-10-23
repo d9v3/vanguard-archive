@@ -133,8 +133,8 @@ fn empreinte_a_cote(fichier: &Path) -> Option<(Algo, String, PathBuf)> {
     })
 }
 
-/// L'empreinte du fichier : calculée ici sous Linux (sha2, sha1_smol, MD5 écrit plus bas), par l'outil du système
-/// ailleurs (BCrypt sous Windows, Get-FileHash en secours ; md5 et shasum sous macOS).
+/// L'empreinte du fichier : calculée ici sous Linux et macOS (sha2, sha1_smol, MD5 écrit plus bas), par Windows
+/// lui-même sous Windows (BCrypt, Get-FileHash en secours).
 pub(crate) fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
     #[cfg(windows)]
     let sortie = {
@@ -158,41 +158,10 @@ pub(crate) fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
                 .ok_or_else(|| tr!("Get-FileHash a échoué", "Get-FileHash failed").to_string())?
         }
     };
-    // Lu ici, sans md5sum ni sha256sum : rien à lancer, et rien qu'un faux programme du PATH puisse remplacer.
-    #[cfg(target_os = "linux")]
+    // Lu ici, sans md5sum, sha256sum, md5 ni shasum : rien à lancer, et rien qu'un faux programme du PATH (le dossier
+    // de Homebrew appartient au compte) puisse remplacer.
+    #[cfg(unix)]
     let sortie = empreinte_lue(fichier, algo).map_err(|e| affichable(&e.to_string()))?;
-    #[cfg(target_os = "macos")]
-    let sortie = {
-        use std::process::Command;
-        let mut commande = match algo {
-            Algo::Md5 => {
-                let mut c = Command::new("md5");
-                c.arg("-q");
-                c
-            }
-            autre => {
-                let mut c = Command::new("shasum");
-                c.args([
-                    "-a",
-                    match autre {
-                        Algo::Sha1 => "1",
-                        Algo::Sha512 => "512",
-                        _ => "256",
-                    },
-                ]);
-                c
-            }
-        };
-        commande.arg(fichier);
-        // Une image disque de plusieurs gigaoctets se lit en une minute ou deux.
-        let r = crate::commande::lancer(&mut commande, 900)
-            .ok_or_else(|| tr!("l'outil n'a pas pu aller au bout", "the tool could not finish").to_string())?;
-        if r.code != Some(0) {
-            // Le message de l'outil cite le fichier, au nom choisi par son auteur.
-            return Err(affichable(r.erreurs.lines().next().unwrap_or_default().trim()));
-        }
-        r.sortie
-    };
     // sha256sum commence la ligne par « \\ » quand le nom du fichier contient « \\ » ou un saut de ligne.
     let empreinte = sortie
         .split_whitespace()
@@ -780,7 +749,7 @@ pub fn nouveaux_a_signaler() -> Vec<(String, String)> {
 
 /// L'empreinte d'un fichier en hexadécimal minuscule, lu par morceaux : une image disque de plusieurs gigaoctets ne
 /// tient pas en mémoire.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(unix, test))]
 fn empreinte_lue(fichier: &Path, algo: Algo) -> std::io::Result<String> {
     use sha2::Digest;
     use std::io::Read;
@@ -822,7 +791,7 @@ fn empreinte_lue(fichier: &Path, algo: Algo) -> std::io::Result<String> {
     Ok(hex(&octets))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(unix, test))]
 fn hex(octets: &[u8]) -> String {
     use std::fmt::Write;
     octets.iter().fold(String::with_capacity(octets.len() * 2), |mut t, o| {
@@ -833,7 +802,7 @@ fn hex(octets: &[u8]) -> String {
 
 /// MD5 (RFC 1321), écrit ici : ni sha2 ni sha1_smol ne l'ont. Il ne protège plus d'une falsification, mais une
 /// empreinte MD5 publiée à côté d'un vieux téléchargement dit encore s'il est arrivé entier.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(unix, test))]
 struct Md5 {
     etat: [u32; 4],
     bloc: [u8; 64],
@@ -842,7 +811,7 @@ struct Md5 {
 }
 
 /// Les constantes de la RFC : la partie entière de 2³² × |sin(i + 1)|.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(unix, test))]
 const MD5_K: [u32; 64] = [
     0xd76a_a478,
     0xe8c7_b756,
@@ -911,10 +880,10 @@ const MD5_K: [u32; 64] = [
 ];
 
 /// Les rotations de chaque étape, quatre par tour.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(unix, test))]
 const MD5_R: [[u32; 4]; 4] = [[7, 12, 17, 22], [5, 9, 14, 20], [4, 11, 16, 23], [6, 10, 15, 21]];
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(unix, test))]
 impl Md5 {
     fn new() -> Md5 {
         Md5 {

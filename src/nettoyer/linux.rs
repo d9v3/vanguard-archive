@@ -209,17 +209,37 @@ fn paquets_telecharges(gestion: Paquets) -> Element {
             vec!["sudo zypper clean --all"],
         ),
     };
+    // Seul paccache garde de quoi revenir en arrière : pacman -Sc, apt-get clean, dnf clean all et zypper clean
+    // effacent les anciennes versions, celles qu'on réinstalle après une mise à jour qui casse (depuis_maj.rs le
+    // conseille). Recommandé seulement avec paccache, et la prudence dite sinon.
+    let garde = commandes.first().is_some_and(|c| c.contains("paccache"));
+    paquets_telecharges_element(taille, commandes.into_iter().map(String::from).collect(), garde)
+}
+
+fn paquets_telecharges_element(taille: Option<u64>, commandes: Vec<String>, garde: bool) -> Element {
     Element {
         titre: tr!("Paquets téléchargés", "Downloaded packages"),
-        effet: tr!(
-            "Les paquets gardés après chaque mise à jour. Sous Arch, les deux dernières versions restent, pour pouvoir revenir en arrière.",
-            "Packages kept after each update. On Arch, the last two versions stay, so you can roll back."
-        )
+        effet: if garde {
+            tr!(
+                "Les paquets gardés après chaque mise à jour. Les deux dernières versions de chacun restent, pour pouvoir revenir en arrière.",
+                "Packages kept after each update. The last two versions of each stay, so you can roll back."
+            )
+        } else {
+            tr!(
+                "Les paquets gardés après chaque mise à jour.",
+                "Packages kept after each update."
+            )
+        }
         .into(),
-        prudence: None,
+        prudence: (!garde).then(|| {
+            tr!(
+                "Efface aussi les anciennes versions, celles qui permettent de revenir en arrière après une mise à jour qui casse.",
+                "Also erases the old versions, the ones that let you roll back after an update that breaks something."
+            )
+        }),
         taille,
-        commandes: commandes.into_iter().map(String::from).collect(),
-        recommande: true,
+        commandes,
+        recommande: garde,
         admin: true,
     }
 }
@@ -492,6 +512,19 @@ pub fn executer(choisis: &[&Element]) -> Vec<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sans paccache, vider le cache efface de quoi revenir en arrière : pas recommandé, et la prudence le dit.
+    #[test]
+    fn paquets_telecharges_prudents_sans_paccache() {
+        let sans = paquets_telecharges_element(Some(1 << 30), vec!["sudo apt-get clean".into()], false);
+        assert!(!sans.recommande && sans.prudence.is_some());
+        let avec = paquets_telecharges_element(Some(1 << 30), vec!["sudo paccache -rk2".into()], true);
+        assert!(avec.recommande && avec.prudence.is_none());
+        for p in [Paquets::Apt, Paquets::Zypper] {
+            let e = paquets_telecharges(p);
+            assert!(!e.recommande && e.prudence.is_some(), "{:?}", e.commandes);
+        }
+    }
 
     #[test]
     fn sorties_lues() {

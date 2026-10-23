@@ -4,7 +4,6 @@
 //! vingtaine de PowerShell démarrant ensemble. Les règles de blocage de Vanguard se lisent dans le registre.
 
 use std::collections::HashMap;
-use std::process::Command;
 
 /// Un port ouvert en écoute.
 pub(crate) struct Ecoute {
@@ -19,7 +18,8 @@ pub(crate) struct Ecoute {
 /// Les ports en écoute (TCP et UDP) et le nom de leur programme. `None` si netstat ne répond pas : l'appelant se
 /// replie alors sur PowerShell. Les noms viennent de la liste des processus de Windows (Toolhelp32).
 pub(crate) fn ecoutes() -> Option<Vec<Ecoute>> {
-    let sockets = crate::commande::lancer(Command::new("netstat").arg("-ano"), 20).filter(|r| r.code == Some(0))?;
+    let sockets =
+        crate::commande::lancer(crate::commande::systeme("netstat").arg("-ano"), 20).filter(|r| r.code == Some(0))?;
     let noms: HashMap<u32, String> = super::processus::liste().into_iter().map(|p| (p.pid, p.nom)).collect();
     let ecoutes = lire_netstat(&sockets.sortie)
         .into_iter()

@@ -823,81 +823,74 @@ mod linux {
 
 // ───────────────────────────────────────── macOS ─────────────────────────────────────────
 
-/// Les lignes de la base TCC (service, application, autorisation, date de l'autorisation en secondes Unix),
-/// séparées par des tabulations. Autorisation : 2 permise, 3 limitée ; 0 refusée, 1 inconnue.
+/// Les accès d'une base TCC, lue par le lecteur SQLite de Vanguard (comme les autorisations d'épier, voir
+/// espions/tcc.rs) : caméra, micro et contacts autorisés (`auth_value` 2) ou autorisés en partie (3), avec la date du
+/// réglage. Avant Big Sur, la colonne s'appelait `allowed` (0 ou 1) : 1 vaut alors une autorisation pleine. `None` :
+/// la base ne se lit pas.
 #[cfg(any(target_os = "macos", test))]
-fn lire_tcc(texte: &str) -> Vec<Acces> {
-    let mut acces = Vec::new();
-    for ligne in texte.lines() {
-        let c: Vec<&str> = ligne.split('\t').collect();
-        let [service, application, autorisation, date, ..] = c.as_slice() else {
-            continue;
-        };
-        let permission = match *service {
-            "kTCCServiceCamera" => Permission::Camera,
-            "kTCCServiceMicrophone" => Permission::Micro,
-            "kTCCServiceAddressBook" => Permission::Contacts,
-            _ => continue,
-        };
-        let source = match autorisation.trim() {
-            "2" => tr!("autorisée", "allowed"),
-            "3" => tr!("autorisée en partie", "partly allowed"),
-            _ => continue,
-        };
-        let quand = date
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .filter(|s| *s > 0)
-            .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
-            .map(|d| {
-                let jour = d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string();
-                trf!("réglée le {jour}", "set on {jour}")
-            });
-        acces.push(Acces {
-            permission,
-            application: (*application).to_string(),
-            source: source.to_string(),
-            quand,
-            en_cours: false,
-        });
-    }
-    acces
+fn lire_tcc(octets: &[u8]) -> Option<Vec<Acces>> {
+    let lignes = crate::sqlite::lignes(
+        octets,
+        "access",
+        &["service", "client", "auth_value", "allowed", "last_modified"],
+    )?;
+    Some(
+        lignes
+            .into_iter()
+            .filter_map(|l| {
+                let permission = match l[0].texte()? {
+                    "kTCCServiceCamera" => Permission::Camera,
+                    "kTCCServiceMicrophone" => Permission::Micro,
+                    "kTCCServiceAddressBook" => Permission::Contacts,
+                    _ => return None,
+                };
+                let source = match l[2].entier().or_else(|| l[3].entier().map(|a| a.saturating_mul(2)))? {
+                    2 => tr!("autorisée", "allowed"),
+                    3 => tr!("autorisée en partie", "partly allowed"),
+                    _ => return None,
+                };
+                let quand = l[4]
+                    .entier()
+                    .filter(|s| *s > 0)
+                    .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
+                    .map(|d| {
+                        let jour = d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string();
+                        trf!("réglée le {jour}", "set on {jour}")
+                    });
+                Some(Acces {
+                    permission,
+                    application: l[1].texte().unwrap_or_default().to_string(),
+                    source: source.to_string(),
+                    quand,
+                    en_cours: false,
+                })
+            })
+            .collect(),
+    )
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
     use super::{Bilan, Permission, lire_tcc};
     use crate::tr;
-    use std::process::Command;
-
-    const SERVICES: &str = "('kTCCServiceCamera','kTCCServiceMicrophone','kTCCServiceAddressBook')";
 
     pub(super) fn lire(b: &mut Bilan) {
         let base = crate::nettoyer::maison().join("Library/Application Support/com.apple.TCC/TCC.db");
-        let requete = |colonne: &str| {
-            let sql =
-                format!("SELECT service, client, {colonne}, last_modified FROM access WHERE service IN {SERVICES};");
-            crate::commande::lancer(
-                Command::new("/usr/bin/sqlite3")
-                    .arg("-readonly")
-                    .args(["-separator", "\t"])
-                    .arg(&base)
-                    .arg(sql),
-                15,
-            )
-        };
-        // Avant Big Sur, la colonne s'appelait « allowed » (0 ou 1) : 1 vaut alors une autorisation pleine.
-        let r = requete("auth_value").and_then(|r| {
-            if r.code != Some(0) && r.erreurs.contains("no such column") {
-                requete("allowed * 2")
-            } else {
-                Some(r)
+        match crate::protection::espions::tcc::lire_base_avec(&base, lire_tcc) {
+            Some((acces, wal)) => {
+                b.ajouter(acces);
+                if wal {
+                    b.remarque(
+                        None,
+                        true,
+                        tr!(
+                            "Caméra, micro et contacts : changements récents peut-être absents (journal WAL non lu).",
+                            "Camera, microphone and contacts: recent changes may be missing (WAL journal not read)."
+                        ),
+                    );
+                }
             }
-        });
-        match r {
-            Some(r) if r.code == Some(0) => b.ajouter(lire_tcc(&r.sortie)),
-            _ => {
+            None => {
                 for p in [Permission::Contacts, Permission::Camera, Permission::Micro] {
                     b.remarque(
                         Some(p),
@@ -1288,22 +1281,20 @@ mod tests {
         assert_eq!(lire_snap(""), Vec::<Acces>::new());
     }
 
+    /// La base TCC lue par le lecteur SQLite de Vanguard, dans les deux formats (bases inventées) : seulement la
+    /// caméra, le micro et les contacts autorisés ; une tabulation dans un nom ne décale plus les colonnes.
     #[test]
     fn base_tcc_de_macos() {
-        let sortie = "kTCCServiceCamera\tus.zoom.xos\t2\t1792285200\n\
-                      kTCCServiceMicrophone\tus.zoom.xos\t0\t1792285200\n\
-                      kTCCServiceAddressBook\tcom.exemple.Courrier\t3\t0\n\
-                      kTCCServiceMicrophone\t/Users/alice/Downloads/outil\t2\t1792285200\n\
-                      kTCCServiceScreenCapture\tcom.exemple.Capture\t2\t1792285200\n\
-                      ligne abîmée\n";
-        let a = lire_tcc(sortie);
+        let base = include_bytes!("../../assets/essais/tcc-acces.sqlite");
+        let a = lire_tcc(base).unwrap();
         let resume: Vec<(Permission, &str)> = a.iter().map(|x| (x.permission, x.application.as_str())).collect();
         assert_eq!(
             resume,
             [
-                (Permission::Camera, "us.zoom.xos"),
-                (Permission::Contacts, "com.exemple.Courrier"),
+                (Permission::Camera, "com.example.Visio"),
+                (Permission::Contacts, "com.example.Courrier"),
                 (Permission::Micro, "/Users/alice/Downloads/outil"),
+                (Permission::Camera, "com.example.Avec\ttabulation"),
             ]
         );
         assert!(
@@ -1313,6 +1304,26 @@ mod tests {
         );
         assert_eq!(a[1].quand, None);
         assert_eq!(a[1].source, "autorisée en partie");
+        assert_eq!(a[3].source, "autorisée");
         assert!(super::super::camera::lieu_suspect(&a[2].application));
+        // Avant Big Sur : « allowed » 1 vaut une autorisation pleine, sans date.
+        let ancien = lire_tcc(include_bytes!("../../assets/essais/tcc-acces-ancien.sqlite")).unwrap();
+        let resume: Vec<(Permission, &str, &str)> = ancien
+            .iter()
+            .map(|x| (x.permission, x.application.as_str(), x.source.as_str()))
+            .collect();
+        assert_eq!(resume, [(Permission::Camera, "com.example.Ancien", "autorisée")]);
+        assert_eq!(ancien[0].quand, None);
+        // Les bases des autorisations d'épier : rien de la caméra, du micro ni des contacts n'y est permis.
+        assert_eq!(
+            lire_tcc(include_bytes!("../../assets/essais/tcc-bigsur.sqlite")),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            lire_tcc(include_bytes!("../../assets/essais/tcc-ancien.sqlite")),
+            Some(Vec::new())
+        );
+        // Une base coupée ne se lit pas : jamais une liste vide à sa place.
+        assert_eq!(lire_tcc(&base[..1000]), None);
     }
 }

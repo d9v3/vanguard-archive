@@ -1,4 +1,4 @@
-//! Vanguard — sécurise et optimise ta machine et ton réseau : bilan, correctifs, réglages.
+//! Vanguard — cyberdéfense portable des postes et des réseaux : bilan, correctifs, réglages.
 //!
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
@@ -62,7 +62,7 @@ use ui::*;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Sécurise et optimise ta machine et ton réseau local : bilan, correctifs, réglages. Sans argument : menu."
+    about = "Cyberdéfense portable des postes et des réseaux : bilan, correctifs, réglages. Sans argument : menu."
 )]
 struct Args {
     #[command(subcommand)]
@@ -861,8 +861,8 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
     let mut lignes: Vec<Ligne> = lignes_cadre(
         &format!("{ACCENT}VANGUARD{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
         tr!(
-            "sécurise et optimise ta machine et ton réseau",
-            "secures and optimizes your machine and network"
+            "Cyberdéfense portable des postes et des réseaux",
+            "Portable cyber defense for endpoints and networks"
         ),
     )
     .into_iter()
@@ -1998,8 +1998,8 @@ fn ligne_de_commande() -> clap::Command {
     if !langue::anglais() {
         return c;
     }
-    let mut c = c
-        .about("Secures and optimizes your machine and your local network: check, fixes, settings. No argument: menu.");
+    let mut c =
+        c.about("Portable cyber defense for endpoints and networks: check, fixes, settings. No argument: menu.");
     for &(nom, aide) in AIDES_EN {
         c = c.mut_subcommand(nom, |s| s.about(aide));
     }
@@ -2021,9 +2021,10 @@ fn portee(dossier: Option<std::path::PathBuf>, complet: bool) -> protection::ant
 
 #[tokio::main]
 async fn main() {
-    // Couleurs ANSI dans l'ancienne console Windows (Windows Terminal les gère déjà).
+    // Couleurs ANSI dans l'ancienne console Windows (Windows Terminal les gère déjà) : crossterm ouvre CONOUT$ et y
+    // active ENABLE_VIRTUAL_TERMINAL_PROCESSING, le même appel que faisait une crate à part pour cela seul.
     #[cfg(windows)]
-    let _ = enable_ansi_support::enable_ansi_support();
+    let _ = crossterm::ansi_support::supports_ansi();
     // Le processus élevé ne fait que sa liste : rien d'autre ne doit tourner avec le jeton administrateur (journal,
     // passage, reconnaissance de la clé écrivent dans des dossiers que le compte contrôle).
     #[cfg(windows)]
@@ -2234,6 +2235,34 @@ async fn main() {
 #[cfg(test)]
 mod tests_menu {
     use super::*;
+
+    /// Le menu, `--help` et le lanceur reprennent l'accroche de la vitrine (la ligne en gras du README, sans
+    /// « depuis une clé USB ») : changée d'un côté seulement, les deux se contredisaient sans que rien le voie.
+    #[test]
+    fn l_accroche_est_celle_de_la_vitrine() {
+        let lire = |f: &str| std::fs::read_to_string(format!("{}/{f}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let (menu, lanceur) = (lire("src/main.rs"), lire("src/raccourci.rs"));
+        for (readme, fin) in [
+            ("README.md", ", depuis une clé USB."),
+            ("README.en.md", ", from a USB key."),
+        ] {
+            let texte = lire(readme);
+            let accroche = texte
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("<b>")?.split("</b>").next()?.strip_suffix(fin))
+                .unwrap_or_else(|| panic!("accroche introuvable dans {readme}"));
+            let citee = format!("\"{accroche}");
+            // Dans main.rs : le menu et `--help`.
+            assert!(
+                menu.matches(&citee).count() >= 2,
+                "{readme} : « {accroche} » manque dans main.rs"
+            );
+            assert!(
+                lanceur.contains(&citee),
+                "{readme} : « {accroche} » manque dans raccourci.rs"
+            );
+        }
+    }
 
     #[test]
     fn chaque_commande_a_son_aide_en_anglais() {
