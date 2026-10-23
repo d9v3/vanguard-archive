@@ -1,0 +1,6 @@
+[Unit]
+Description=Vanguard : rappel du matin d'une alerte de la veille non vue
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/vanguard-veille/courante/matin.sh

@@ -292,6 +292,29 @@ fn pilotes() -> Vec<Constat> {
 mod tests {
     use super::*;
 
+    /// Les canaris de la veille de nuit (compilés sous Linux, où ce module n'existe pas) recopient la demande et la
+    /// validation de la liste LOLDrivers : elles doivent rester celles du programme.
+    #[test]
+    fn canaris_de_la_veille_a_l_identique() {
+        assert_eq!(
+            (LOLDRIVERS, LISTE_MAX),
+            (crate::canaris::LOLDRIVERS, crate::canaris::LOLDRIVERS_MAX)
+        );
+        let empreinte = "ab".repeat(32);
+        for essai in [
+            format!("\"Id\",\"KnownVulnerableSamples_SHA256\"\n\"x\",\"{empreinte}\"\n"),
+            "<html>maintenance</html>".to_string(),
+            format!("{empreinte}0"),
+            String::new(),
+        ] {
+            assert_eq!(
+                liste_valide(essai.as_bytes()),
+                crate::canaris::loldrivers_lisible(essai.as_bytes()),
+                "{essai}"
+            );
+        }
+    }
+
     /// Une page de maintenance ou d'erreur reçue avec un 200 ne remplace pas la copie de la liste.
     #[test]
     fn page_qui_n_est_pas_la_liste_refusee() {

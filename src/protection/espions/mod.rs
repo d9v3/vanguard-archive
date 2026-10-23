@@ -21,6 +21,9 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use echap::{Genre, Indicateurs};
+// Les canaris de la veille de nuit relisent la vraie liste par ce lecteur-ci.
+#[cfg(test)]
+pub(crate) use echap::{comptes as echap_comptes, demande as echap_demande};
 
 use crate::machine::{Constat, alerte, impossible, ok};
 use crate::protection::sortantes::ConnexionVue;

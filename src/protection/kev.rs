@@ -45,19 +45,13 @@ pub(crate) fn catalogue() -> Result<Vec<Exploitee>, String> {
 pub(crate) fn catalogue_selon(coupure: Option<&str>) -> Result<Vec<Exploitee>, String> {
     use crate::protection::abuse_ch::{self, Echec};
     let (octets, age) = match coupure {
-        None => {
-            let demande = crate::http::Demande {
-                taille_max: 64 << 20,
-                ..crate::http::Demande::get(ADRESSE, Duration::from_secs(60))
-            };
-            abuse_ch::liste(demande, LIEU, FRAICHE, |_| true)
-                .resultat(false)
-                .map_err(|e| match e {
-                    Echec::Reponse(code) => trf!("la CISA a répondu {code}", "CISA answered {code}"),
-                    Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
-                    autre => autre.raison(),
-                })?
-        }
+        None => abuse_ch::liste(demande(), LIEU, FRAICHE, |_| true)
+            .resultat(false)
+            .map_err(|e| match e {
+                Echec::Reponse(code) => trf!("la CISA a répondu {code}", "CISA answered {code}"),
+                Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
+                autre => autre.raison(),
+            })?,
         Some(pourquoi) => {
             let fichier = crate::reseau::dossier_local().join(LIEU.0).join(LIEU.1);
             let age = std::fs::metadata(&fichier)
@@ -83,6 +77,14 @@ pub(crate) fn catalogue_selon(coupure: Option<&str>) -> Result<Vec<Exploitee>, S
         )
         .to_string()
     })
+}
+
+/// La demande du catalogue : la même pour le programme et pour les canaris de la veille de nuit (`canaris`).
+pub(crate) fn demande() -> crate::http::Demande<'static> {
+    crate::http::Demande {
+        taille_max: 64 << 20,
+        ..crate::http::Demande::get(ADRESSE, Duration::from_secs(60))
+    }
 }
 
 /// `{"vulnerabilities": [{"cveID": "CVE-…", "dateAdded": "2026-10-20", …}, …]}`. `None` pour tout autre texte :

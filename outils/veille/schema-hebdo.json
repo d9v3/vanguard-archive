@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["constats", "propositions"],
+  "properties": {
+    "constats": {
+      "type": "array",
+      "maxItems": 60,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["commit", "fichier", "ligne", "gravite", "resume"],
+        "properties": {
+          "commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+          "fichier": {"type": "string", "maxLength": 160},
+          "ligne": {"type": "integer", "minimum": 0},
+          "gravite": {"enum": ["bloquant", "important", "mineur"]},
+          "resume": {"type": "string", "maxLength": 400}
+        }
+      }
+    },
+    "propositions": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sujet", "pourquoi", "evident"],
+        "properties": {
+          "sujet": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"},
+          "pourquoi": {"type": "string", "maxLength": 600},
+          "fichier": {"type": "string", "maxLength": 160},
+          "ligne": {"type": "integer", "minimum": 0},
+          "evident": {"type": "boolean"}
+        }
+      }
+    },
+    "injection_vue": {"type": "boolean"}
+  }
+}

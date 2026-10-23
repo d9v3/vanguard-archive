@@ -7,6 +7,8 @@ mod a_laisser;
 mod apprentissage;
 mod archives;
 mod audit;
+#[cfg(test)]
+mod canaris;
 mod changements;
 mod chiffrement;
 mod commande;

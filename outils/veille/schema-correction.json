@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["diagnostic", "correction", "tests", "verifie", "reste"],
+  "properties": {
+    "diagnostic": {"type": "string", "maxLength": 1500},
+    "correction": {"type": "string", "maxLength": 1500},
+    "tests": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 200}},
+    "verifie": {"type": "boolean"},
+    "reste": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 300}},
+    "injection_vue": {"type": "boolean"}
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "blockReadsOutsideWorkingDirectories": true,
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.config/**)",
+      "Read(~/.claude/**)",
+      "Read(~/.cache/vanguard-dev/veille/**)",
+      "Read(~/.local/share/vanguard/**)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "autoAllowBashIfSandboxed": false,
+    "network": {
+      "allowedDomains": []
+    },
+    "filesystem": {
+      "allowWrite": [
+        "@ARBRE@",
+        "@CIBLE_IA@",
+        "@CARGO_IA@"
+      ],
+      "denyRead": [
+        "@MAISON@/.ssh",
+        "@MAISON@/.gnupg",
+        "@MAISON@/.config/gh",
+        "@MAISON@/.claude",
+        "@MAISON@/.cache/vanguard-dev/veille",
+        "@MAISON@/.local/share/vanguard"
+      ]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=Vanguard : rappel du matin de la veille, à 08 h 30
+
+[Timer]
+OnCalendar=*-*-* 08:30
+
+[Install]
+WantedBy=timers.target
