@@ -120,6 +120,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
          de surveillance (lecture seule ; vanguard logiciels-espions)
        Logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java, 7-Zip… et leurs failles
          exploitées (lecture seule ; vanguard logiciels-perimes)
+       Signaler une faille à un éditeur : brouillon au format du programme (MSRC, Mozilla, avis GHSA…),
+         ce qui est personnel retiré ; rien n'est jamais envoyé (vanguard signaler)
        Blocage des menaces : « Bloquer » d'un clic pour chaque menace trouvée (geste montré, noté, annulable) ;
          la protection active, une fois mise en marche, bloque toute seule ce qui ne fait aucun doute
          (vanguard blocage)

@@ -9,6 +9,25 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Préparer un signalement à un éditeur (`vanguard signaler`, alias `disclose`).** L'assistant trie d'abord : une
+  faille déjà connue (CVE, catalogue de la CISA) se corrige par une mise à jour, un logiciel malveillant, une
+  détection ratée ou un site d'hameçonnage ne sont pas des failles de l'éditeur (où envoyer soi-même est nommé, rien
+  n'est préparé), un contournement d'AppLocker ou de l'accès contrôlé aux dossiers est dit non corrigé par défaut chez
+  Microsoft. Pour un comportement anormal, il prépare un brouillon au format du programme choisi (MSRC, Google,
+  Chrome, Mozilla, Apple, avis GHSA, CERT/CC, CERT-FR, Vanguard), avec le fil de l'incident ou l'examen d'un outil,
+  l'état du journal (falsifié : « non vérifié » ; adopté ou incomplet : « non prouvé »), et ce que seule la personne
+  sait (titré INCOMPLET tant qu'il manque ses étapes, ce qui s'est passé, ou la preuve de concept exigée par MSRC,
+  Apple et Chrome). Ce qui est personnel est retiré en trois couches : rien d'inutile (ni ligne de commande, ni compte
+  d'un proche, ni nom de fichier personnel), tout masqué (chemins, noms, adresses, requêtes des adresses web), puis un
+  contrôle final qui refuse d'écrire si un nom connu survit ; le décompte est montré. Un chemin coupé à gauche par
+  « … » est réduit en entier, un mot avant « : » (« fichier: », « file:// ») n'est plus pris pour un lecteur, et
+  l'examen des logiciels périmés n'emporte que le produit touché par une faille exploitée, jamais la liste des
+  logiciels installés. Un examen sain, non vérifié ou falsifié ne tranche rien, un tri tiré d'un journal non vérifié
+  le dit, et sans CVE citée le catalogue de la CISA est « non vérifié », jamais « absente ». Les valeurs venues de
+  l'extérieur vont dans des blocs de code, le reste est neutralisé (ni mention, ni image, ni lien). Le texte est
+  montré en entier, écrit après accord dans le dossier de cet ordinateur (fichier 0600), noté au journal sans son
+  contenu ; `--effacer` les retire, la désinstallation les compte avant. Rien n'est jamais envoyé : aucun code réseau
+  dans le module (vérifié par une liste fermée des appels), ni presse-papier ni courriel.
 - **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
   carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
   `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la

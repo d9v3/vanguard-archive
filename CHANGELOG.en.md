@@ -9,6 +9,24 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Prepare a report for a vendor (`vanguard disclose`, French name `signaler`).** The assistant sorts first: an
+  already known flaw (CVE, CISA's catalog) is fixed by an update; malware, a missed detection or a phishing site are
+  not flaws of the vendor (where to send them yourself is named, nothing is prepared); a bypass of AppLocker or
+  controlled folder access is said not fixed by default by Microsoft. For abnormal behavior, it prepares a draft in
+  the chosen program's format (MSRC, Google, Chrome, Mozilla, Apple, GHSA advisory, CERT/CC, CERT-FR, Vanguard), with
+  the incident's thread or a tool's examination, the log's state (tampered: “not verified”; adopted or incomplete:
+  “not proven”), and what only the person knows (titled INCOMPLETE while its steps, what happened, or the proof of
+  concept required by MSRC, Apple and Chrome are missing). What is personal is removed in three layers: nothing
+  useless (no command line, no relative's account, no personal file name), everything masked (paths, names, addresses,
+  query strings of web addresses), then a final check that refuses to write if a known name survives; the count is
+  shown. A path cut on the left by “…” is reduced whole, a word before “:” (“fichier:”, “file://”) is no longer taken
+  for a drive, and the outdated software examination only carries the product hit by an exploited flaw, never the list
+  of installed programs. A healthy, unchecked or tampered examination settles nothing, a triage drawn from an
+  unverified log says so, and with no CVE cited CISA's catalog is “not checked”, never “not in it”. Values from
+  outside go into code blocks, the rest is neutralized (no mention, image or link). The text is shown in full, written
+  after consent in this computer's folder (file 0600), recorded in the log without its content; `--effacer` removes
+  them, uninstalling counts them first. Nothing is ever sent: no network code in the module (checked by a closed list
+  of calls), no clipboard, no email.
 - **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
   adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
   can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category

@@ -76,3 +76,9 @@ serveur https://formulae.brew.sh/api/
 serveur https://slack.com/api/desktop.latestRelease
 # L'archive des avis de sécurité de Mozilla (600 Kio en gzip) : seul compte que codeload réponde.
 serveur https://codeload.github.com/mozilla/foundation-security-advisories/
+
+# Programmes de signalement (src/signaler/programmes.rs), ouverts à la main le 23 oct. 2026. Microsoft refuse les
+# programmes (403) sur les pages de MSRC et de WDSI ; le formulaire de Bugzilla répond 400 sans produit choisi.
+protege https://www.microsoft.com/en-us/msrc/
+protege https://www.microsoft.com/en-us/wdsi/
+essai https://bugzilla.mozilla.org/enter_bug.cgi https://bugzilla.mozilla.org/enter_bug.cgi?product=Firefox
