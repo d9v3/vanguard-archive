@@ -4,6 +4,7 @@
 //! par réglage, lue avant la ligne fautive (sshd garde la première valeur trouvée), et ne recharge sshd qu'après
 //! « sshd -t » : un rechargement ne coupe aucune connexion en cours.
 
+use super::super::sshd::{correspond, premiere_valeur, version_dans_le_programme, version_openssh};
 use super::super::unix::partie_globale_sshd;
 use super::*;
 use crate::machine::regles::{Os, regle};
@@ -87,17 +88,6 @@ pub(super) fn faiblesse(nom: &str) -> Option<bool> {
     nom.ends_with("-cbc").then_some(false)
 }
 
-/// Le motif d'OpenSSH (« * » : n'importe quelle suite, « ? » : un caractère) correspond-il au nom ?
-pub(super) fn correspond(motif: &[u8], nom: &[u8]) -> bool {
-    match (motif.first(), nom.first()) {
-        (None, _) => nom.is_empty(),
-        (Some(b'*'), _) => correspond(&motif[1..], nom) || (!nom.is_empty() && correspond(motif, &nom[1..])),
-        (Some(b'?'), Some(_)) => correspond(&motif[1..], &nom[1..]),
-        (Some(m), Some(n)) if m.eq_ignore_ascii_case(n) => correspond(&motif[1..], &nom[1..]),
-        _ => false,
-    }
-}
-
 /// Une entrée d'une liste écrite (nom ou motif) : cassée, faible, ou sûre (`None`). Un motif vaut ce que vaut le
 /// pire des algorithmes qu'il ouvre.
 fn faiblesse_entree(entree: &str) -> Option<bool> {
@@ -131,23 +121,6 @@ pub(crate) fn liste_sure(valeur: &str) -> bool {
             .split(',')
             .map(str::trim)
             .all(|e| !e.is_empty() && faiblesse_entree(e).is_none())
-}
-
-/// La première valeur d'un réglage dans la configuration lue dans l'ordre de sshd : (fichier lu, mot écrit, valeur
-/// telle qu'écrite). La casse est gardée : les noms GSSAPI finissent par du base64.
-fn premiere_valeur<'a>(segments: &'a [(String, String)], noms: &[&str]) -> Option<(usize, &'a str, &'a str)> {
-    segments.iter().enumerate().find_map(|(i, (_, texte))| {
-        texte.lines().map(str::trim).find_map(|l| {
-            if l.starts_with('#') {
-                return None;
-            }
-            let (cle, valeur) = l.split_once(|c: char| c.is_whitespace() || c == '=')?;
-            let valeur = valeur.trim().trim_start_matches('=').trim().trim_matches('"');
-            noms.iter()
-                .any(|n| cle.eq_ignore_ascii_case(n))
-                .then_some((i, cle, valeur))
-        })
-    })
 }
 
 /// Un réglage qui rouvre des algorithmes cassés ou faibles.
@@ -393,18 +366,10 @@ fn inclure(motif: &str) -> Option<Vec<(String, String)>> {
     Some(segments)
 }
 
-/// La version d'OpenSSH dans « OpenSSH_9.6p1 Ubuntu-3ubuntu13, OpenSSL 3.0.13 ».
-pub(super) fn version_openssh(texte: &str) -> Option<(u32, u32)> {
-    let reste = &texte[texte.find("OpenSSH_")? + "OpenSSH_".len()..];
-    let (majeure, reste) = reste.split_once('.')?;
-    let mineure: String = reste.chars().take_while(char::is_ascii_digit).collect();
-    Some((majeure.parse().ok()?, mineure.parse().ok()?))
-}
-
 /// La version du serveur, sans le lancer : celle du paquet (openssh sous Arch, openssh-server sous Debian, epoch
 /// retirée), sinon la chaîne « OpenSSH_x.y » écrite dans le programme lui-même (rpm, compilé à la main). « sshd -V »
 /// et « ssh -V » ne servent qu'en dernier recours.
-fn version_sshd() -> Option<(u32, u32)> {
+pub(crate) fn version_sshd() -> Option<(u32, u32)> {
     let sshd = ["/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"]
         .into_iter()
         .find(|p| Path::new(p).exists());
@@ -436,30 +401,34 @@ fn version_de_paquet(version: &str) -> Option<(u32, u32)> {
     version_openssh(&format!("OpenSSH_{sans_epoque}"))
 }
 
-/// La version écrite dans le programme sshd (« OpenSSH_9.6p1 », suivie d'un zéro ou d'une espace). Il y garde
-/// aussi des motifs de compatibilité pour reconnaître les vieux clients (« OpenSSH_2.*,OpenSSH_3.0* ») : ceux-là
-/// finissent par « * » ou « , » et ne comptent pas ; parmi les vraies, la plus haute.
-fn version_dans_le_programme(octets: &[u8]) -> Option<(u32, u32)> {
-    const MOTIF: &[u8] = b"OpenSSH_";
-    octets
-        .windows(MOTIF.len())
-        .enumerate()
-        .filter(|(_, f)| *f == MOTIF)
-        .filter_map(|(i, _)| {
-            let reste = &octets[i + MOTIF.len()..];
-            let longueur = reste
-                .iter()
-                .take_while(|o| o.is_ascii_alphanumeric() || **o == b'.')
-                .count();
-            if !matches!(reste.get(longueur), Some(0 | b' ')) {
-                return None;
-            }
-            let texte = std::str::from_utf8(&reste[..longueur]).ok()?;
-            // Une version commence par « chiffres.chiffres » ; « OpenSSH_for_Windows » n'en est pas une.
-            texte.split('.').next()?.parse::<u32>().ok()?;
-            version_openssh(&format!("OpenSSH_{texte}"))
-        })
-        .max()
+/// Le serveur SSH tourne-t-il ? `None` sans systemd : on ne sait pas quels services tournent.
+pub(crate) fn sshd_en_marche() -> Option<bool> {
+    systemd().then(sshd_actif)
+}
+
+/// La configuration de sshd dans son ordre de lecture (`ordonner`), pour les règles communes.
+pub(crate) fn sshd_dans_l_ordre() -> Result<Vec<(String, String)>, crate::modele::Echec> {
+    let principal =
+        std::fs::read_to_string(SSHD_PRINCIPAL).map_err(|e| crate::modele::Echec::io("bilan/sshd-config", &e))?;
+    ordonner(&principal, inclure)
+        .ok_or_else(|| crate::modele::Echec::new("bilan/sshd-config", crate::modele::Raison::Droits))
+}
+
+/// La version du client ssh, sans le lancer : celle du paquet (openssh sous Arch, openssh-client sous Debian),
+/// sinon celle écrite dans le programme.
+pub(crate) fn version_ssh() -> Option<(u32, u32)> {
+    let pacman = || Some(natif::desc_pacman("openssh")?.get("VERSION")?.first()?.clone());
+    let dpkg = || {
+        natif::paquets_dpkg()?
+            .into_iter()
+            .find(|(p, _)| p == "openssh-client")
+            .map(|(_, v)| v)
+    };
+    pacman().or_else(dpkg).and_then(|v| version_de_paquet(&v)).or_else(|| {
+        ["/usr/bin/ssh", "/bin/ssh"]
+            .iter()
+            .find_map(|p| version_dans_le_programme(&std::fs::read(p).ok()?))
+    })
 }
 
 fn algorithmes_ssh() -> Option<Constat> {

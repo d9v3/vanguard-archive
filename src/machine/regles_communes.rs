@@ -40,6 +40,18 @@ regle!(
 );
 
 regle!(
+    "COM-NAV-004",
+    Os::Tous,
+    535,
+    (
+        "échange de clés post-quantique des navigateurs",
+        "browsers' post-quantum key exchange"
+    ),
+    &["CIS Controls v8 3.10", "Mozilla : PostQuantumKeyAgreementEnabled"],
+    super::navigateur::post_quantique
+);
+
+regle!(
     "COM-NAV-003",
     Os::Tous,
     540,

@@ -401,9 +401,11 @@ DOMAINES_EXEMPLES = re.compile(r"(?:^|\.)(?:example\.(?:com|net|org)|exemple\.[a
                                r"localhost|local)$|^users\.noreply\.github\.com$", re.IGNORECASE)
 ROLES = {"noreply", "no-reply", "security", "support", "contact", "info", "admin", "abuse", "postmaster",
          "webmaster", "git"}
-COURRIELS_PUBLICS = {"ublock0@raymondhill.net"}
+# kexguess2@matt.ucc.asn.au : extension de l'échange de clés de Dropbear (serveur SSH), un nom de protocole public.
+COURRIELS_PUBLICS = {"ublock0@raymondhill.net", "kexguess2@matt.ucc.asn.au"}
 # Noms d'algorithmes du protocole SSH (« hmac-md5-etm@openssh.com ») : la forme d'un courriel, pas une personne.
-# Toujours des mots reliés par des tirets, ce que les comptes de ces domaines n'ont pas.
+# Toujours des mots reliés par des tirets, ce que les comptes de ces domaines n'ont pas. Aussi tels qu'écrits dans
+# sshd_config (« KexAlgorithms +nom », « -nom », « ^nom ») et sans égard à la casse (OpenSSH les compare ainsi).
 ALGORITHME_SSH = re.compile(r"[a-z0-9]+(?:-[a-z0-9.]+)+@(?:openssh\.com|libssh\.org|lysator\.liu\.se)")
 SID = re.compile(r"S-1-5-21-(\d+)-(\d+)-(\d+)")
 # SID d'exemple de la documentation de Microsoft.
@@ -447,7 +449,7 @@ def compte_de_personne(nom, inventes=True):
 def courriel_de_personne(adresse):
     locale, _, domaine = adresse.rpartition("@")
     return not (DOMAINES_EXEMPLES.search(domaine) or locale.lower() in ROLES or adresse.lower() in COURRIELS_PUBLICS
-                or ALGORITHME_SSH.fullmatch(adresse))
+                or ALGORITHME_SSH.fullmatch(adresse.lower().lstrip("+-^")))
 
 
 def donnees_d_autrui(texte, courriels=True):

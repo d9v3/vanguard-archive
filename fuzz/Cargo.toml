@@ -118,3 +118,17 @@ path = "fuzz_targets/echap.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "kexinit"
+path = "fuzz_targets/kexinit.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "reponse_tls_pq"
+path = "fuzz_targets/reponse_tls_pq.rs"
+test = false
+doc = false
+bench = false

@@ -9,6 +9,25 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Bilan post-quantique, en lecture seule.** Un trafic chiffré capté aujourd'hui se garde et se lira le jour où un
+  ordinateur quantique existera : le bilan dit où cet ordinateur n'a pas d'échange de clés post-quantique, sans rien
+  changer. Serveur et client SSH (COM-PQC-001, 002) : la liste que sshd et ssh retiennent vraiment, selon la version
+  d'OpenSSH lue sans le lancer (sntrup depuis 8.5, par défaut depuis 9.0, ML-KEM depuis 9.9) et les « + », « - », « ^ »
+  écrits ; le conseil ne nomme jamais un algorithme que la version ne connaît pas, ne place jamais un nom devant un « +
+  », un « - » ou un « ^ » (sshd ne redémarrerait pas), et dit « sshd -t » d'abord ; un réglage pour un seul hôte reste
+  une information, sans son nom. Navigateurs (COM-NAV-004) : X25519MLKEM768 coupé par une préférence de Firefox ou une
+  stratégie (Firefox, et Chrome ou Edge jusqu'à 146 ; au-delà, la stratégie est dite sans effet ; Firefox :
+  policies.json, et sous Windows le registre (la stratégie et ses Preferences) puis distribution\policies.json ; une
+  préférence mise à false seulement par défaut compte tant que le profil n'écrit rien ; security.tls.enable_kyber, que
+  Firefox refuse dans Preferences, ne compte pas) ; sans coupure, la version : Firefox avant 132 et Chrome avant 124 ne
+  le proposent pas par défaut, Chrome de 124 à 130 propose X25519Kyber768, une version illisible (Brave, Vivaldi, Zen…)
+  n'est pas vérifiée. WireGuard (COM-PQC-003) : les pairs sans clé pré-partagée, comptés sans jamais garder une clé
+  (fichiers lus seulement en administrateur ; sans droits, sans fichier ou chiffré pour SYSTEM : non vérifié, raison
+  dite). À l'audit du réseau : l'administration de la box (SSH, HTTPS trouvés ouverts par le scan) qui ne propose rien
+  de post-quantique, en une information regroupée (COM-TLS-004), et le chemin vers Internet qui retirerait l'échange
+  (COM-TLS-005), par une sonde TLS écrite à la main vers le site de référence déjà contacté, sans calculer aucune clé ;
+  un refus n'est conclu que si l'interception se voit déjà au certificat, sinon non vérifié ; un proxy réglé, ou
+  illisible, laisse non vérifié (sous Linux, celui du bureau GNOME ou KDE aussi). Aucune bibliothèque ajoutée.
 - **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
   carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
   `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la

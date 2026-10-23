@@ -2,13 +2,16 @@
 //! DNS chiffré. Un navigateur n'écrit un réglage que s'il a été changé : sans valeur écrite, on retient sa valeur
 //! par défaut. Une stratégie imposée (fichier de /etc sous Linux, registre sous Windows, policies.json de Firefox)
 //! passe avant les Paramètres : un logiciel indésirable s'en sert pour couper la protection sans qu'on puisse la
-//! rallumer. Celles de macOS (profils gérés) ne sont pas lues.
+//! rallumer. Celles de macOS (profils gérés) ne sont pas lues. À part (COM-NAV-004) : l'échange de clés
+//! post-quantique (X25519MLKEM768) coupé par une préférence ou une stratégie, pour ne pas mêler sa clé à celles
+//! des réglages ci-dessus.
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use super::{Constat, alerte, impossible, ok};
+use super::{Constat, alerte, impossible, ok, sans_objet};
+use crate::modele::{Absence, Objet};
 use crate::risk::Niveau;
 use crate::{tr, trf};
 
@@ -81,7 +84,7 @@ struct Strategies {
 
 /// Le JSON des stratégies tel que Chrome le lit : commentaires `//` et `/* */`, virgule avant `}` ou `]` permis, par
 /// le lecteur commun (`socle::jsonc`).
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", windows, test))]
 fn json_souple(texte: &str) -> Option<Value> {
     crate::socle::jsonc::lire_json(texte.as_bytes())
 }
@@ -122,7 +125,8 @@ fn firefox_coupe(politiques: &Value) -> (Option<&'static str>, Option<&'static s
 }
 
 /// Les stratégies du navigateur `nom` (celui de `extensions::racines`). Pas lues : celles de macOS (profils gérés),
-/// de Firefox sous Windows (registre Mozilla), des navigateurs en Flatpak (extensions de politiques).
+/// des navigateurs en Flatpak (extensions de politiques). Firefox sous Windows : le registre (la stratégie
+/// post-quantique et les Preferences), sinon distribution\policies.json.
 #[cfg(target_os = "linux")]
 fn strategies(nom: &str) -> Strategies {
     use std::path::Path;
@@ -183,6 +187,53 @@ fn strategies(nom: &str) -> Strategies {
         "Chromium" => r"SOFTWARE\Policies\Chromium",
         "Brave" => r"SOFTWARE\Policies\BraveSoftware\Brave",
         "Edge" => r"SOFTWARE\Policies\Microsoft\Edge",
+        "Firefox" => {
+            // Le registre passe avant distribution\policies.json, et HKLM avant HKCU, comme dans Firefox.
+            let cle = r"SOFTWARE\Policies\Mozilla\Firefox";
+            for (racine, court) in [(HKEY_LOCAL_MACHINE, "HKLM"), (HKEY_CURRENT_USER, "HKCU")] {
+                let Ok(k) = RegKey::predef(racine).open_subkey(cle) else {
+                    continue;
+                };
+                let pq = k.get_value::<u32, _>("PostQuantumKeyAgreementEnabled").ok();
+                // REG_SZ ou REG_MULTI_SZ (lignes jointes par winreg) : le JSON de la stratégie Preferences.
+                let texte = k.get_value::<String, _>("Preferences").ok();
+                let anciennes: Vec<(String, u32)> = k
+                    .open_subkey("Preferences")
+                    .map(|p| {
+                        PREFS_PQ
+                            .into_iter()
+                            .filter_map(|n| Some((n.to_string(), p.get_value::<u32, _>(n).ok()?)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let (objet, illisible) = firefox_du_registre(pq, texte.as_deref(), &anciennes);
+                if illisible {
+                    s.illisibles.push(format!(r"{court}\{cle}\Preferences"));
+                }
+                if let Some(objet) = objet {
+                    s.firefox = Some((objet, format!(r"{court}\{cle}")));
+                    break;
+                }
+            }
+            if s.firefox.is_none() {
+                for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+                    let Some(base) = std::env::var_os(variable) else {
+                        continue;
+                    };
+                    let c = std::path::Path::new(&base).join(r"Mozilla Firefox\distribution\policies.json");
+                    if !c.exists() {
+                        continue;
+                    }
+                    let ou = c.display().to_string();
+                    match std::fs::read_to_string(&c).ok().as_deref().and_then(json_souple) {
+                        Some(v) => s.firefox = Some((v["policies"].clone(), ou)),
+                        None => s.illisibles.push(ou),
+                    }
+                    break;
+                }
+            }
+            return s;
+        }
         _ => return s,
     };
     // HKLM lu en dernier : il passe avant HKCU.
@@ -192,7 +243,11 @@ fn strategies(nom: &str) -> Strategies {
             let Ok(k) = RegKey::predef(racine).open_subkey(&chemin) else {
                 continue;
             };
-            for v in ["SafeBrowsingProtectionLevel", "SafeBrowsingEnabled"] {
+            for v in [
+                "SafeBrowsingProtectionLevel",
+                "SafeBrowsingEnabled",
+                "PostQuantumKeyAgreementEnabled",
+            ] {
                 // DWORD, ou chiffres en REG_SZ : Chrome applique les deux.
                 let valeur = k
                     .get_value::<u32, _>(v)
@@ -211,6 +266,33 @@ fn strategies(nom: &str) -> Strategies {
 #[cfg(target_os = "macos")]
 fn strategies(_nom: &str) -> Strategies {
     Strategies::default()
+}
+
+/// Les stratégies de Firefox lues dans une racine du registre, mises sous la forme de policies.json pour être
+/// jugées pareil : la valeur PostQuantumKeyAgreementEnabled, le JSON de la valeur Preferences, et l'ancienne
+/// forme (une valeur DWORD par préférence sous la clé Preferences, verrouillée comme une valeur nue). `None` :
+/// rien de lu ; le booléen : un texte Preferences présent mais illisible, dont rien n'est conclu.
+#[cfg(any(windows, test))]
+fn firefox_du_registre(pq: Option<u32>, texte: Option<&str>, anciennes: &[(String, u32)]) -> (Option<Value>, bool) {
+    let mut objet = serde_json::Map::new();
+    if let Some(v) = pq {
+        objet.insert("PostQuantumKeyAgreementEnabled".into(), Value::from(v != 0));
+    }
+    let mut prefs: serde_json::Map<String, Value> = anciennes
+        .iter()
+        .map(|(n, v)| (n.clone(), Value::from(*v != 0)))
+        .collect();
+    let mut illisible = false;
+    if let Some(t) = texte {
+        match json_souple(t) {
+            Some(Value::Object(o)) => prefs.extend(o),
+            _ => illisible = true,
+        }
+    }
+    if !prefs.is_empty() {
+        objet.insert("Preferences".into(), Value::Object(prefs));
+    }
+    ((!objet.is_empty()).then_some(Value::Object(objet)), illisible)
 }
 
 /// Une stratégie qui coupe la protection : les Paramètres ne peuvent pas la rallumer.
@@ -365,6 +447,364 @@ pub fn navigateurs() -> Vec<Constat> {
     constats
 }
 
+// ── Échange de clés post-quantique (COM-NAV-004) ──
+
+/// Les préférences de Firefox qui coupent l'échange post-quantique : TLS, HTTP/3, WebRTC. La stratégie
+/// PostQuantumKeyAgreementEnabled les verrouille toutes les trois.
+const PREFS_PQ: [&str; 3] = [
+    "security.tls.enable_kyber",
+    "network.http.http3.enable_kyber",
+    "media.webrtc.enable_pq_hybrid_kex",
+];
+
+/// La dernière version de Chrome et d'Edge qui applique la stratégie PostQuantumKeyAgreementEnabled : Chromium la
+/// marque « deprecated », supported_on chrome.*:116-146, et Microsoft la dit sans effet après Edge 146.
+const DERNIERE_VERSION_STRATEGIE_PQ: u32 = 146;
+
+/// La préférence de Firefox (prefs.js et user.js d'un profil) qui coupe l'échange post-quantique.
+fn pq_coupe_firefox(prefs: &str) -> Option<&'static str> {
+    PREFS_PQ
+        .into_iter()
+        .find(|n| pref(prefs, n).as_deref() == Some("false"))
+}
+
+/// Ce qui coupe l'échange post-quantique d'un profil Firefox : une préférence du profil, sinon la valeur par
+/// défaut de la stratégie (`defaut` : la préférence et l'endroit). Le profil garde la main sur celle-ci : s'il
+/// écrit true, il gagne ; s'il n'écrit rien, le false de la stratégie compte.
+fn coupure_profil(prefs: &str, defaut: Option<&(&'static str, String)>) -> Option<CoupurePq> {
+    pq_coupe_firefox(prefs).map(CoupurePq::Preference).or_else(|| {
+        defaut
+            .filter(|(n, _)| pref(prefs, n).is_none())
+            .map(|(n, ou)| CoupurePq::DefautStrategie {
+                pref: n,
+                ou: ou.clone(),
+            })
+    })
+}
+
+/// Le TLS post-quantique allumé à la main dans le profil : actif même sur une version qui ne l'a pas par défaut.
+fn pq_allume_firefox(prefs: &str) -> bool {
+    pref(prefs, "security.tls.enable_kyber").as_deref() == Some("true")
+}
+
+/// Celles que la stratégie Preferences de Firefox accepte. Firefox y refuse security.tls.enable_kyber (absente de
+/// sa liste des security.* permis) : seule PostQuantumKeyAgreementEnabled la verrouille.
+fn prefs_pq_de_strategie() -> impl Iterator<Item = &'static str> {
+    PREFS_PQ.into_iter().filter(|n| !n.starts_with("security."))
+}
+
+/// Firefox : la stratégie qui coupe l'échange post-quantique (PostQuantumKeyAgreementEnabled, ou une des
+/// préférences verrouillée à false), comme elle s'écrit.
+fn firefox_pq_impose(politiques: &Value) -> Option<String> {
+    if politiques["PostQuantumKeyAgreementEnabled"] == false {
+        return Some("PostQuantumKeyAgreementEnabled = false".into());
+    }
+    let prefs = &politiques["Preferences"];
+    prefs_pq_de_strategie()
+        .find(|n| prefs[*n] == false || (prefs[*n]["Value"] == false && prefs[*n]["Status"] == "locked"))
+        .map(|n| format!("Preferences : {n} = false"))
+}
+
+/// Firefox : la préférence que la stratégie met à false seulement par défaut (« default », « user », sans
+/// Status). Jamais écrite dans prefs.js, elle vaut tant que le profil n'écrit rien lui-même.
+fn firefox_pq_par_defaut(politiques: &Value) -> Option<&'static str> {
+    let prefs = &politiques["Preferences"];
+    prefs_pq_de_strategie().find(|n| prefs[*n]["Value"] == false && prefs[*n]["Status"] != "locked")
+}
+
+/// Famille Chromium : la stratégie imposée qui coupe l'échange post-quantique, et son origine.
+fn chromium_pq_coupe(s: &BTreeMap<String, (Value, String)>) -> Option<(String, String)> {
+    let (v, ou) = s.get("PostQuantumKeyAgreementEnabled")?;
+    (nombre(v) == Some(0)).then(|| ("PostQuantumKeyAgreementEnabled = false".to_string(), ou.clone()))
+}
+
+/// La version majeure d'un navigateur de la famille Chromium, d'après le fichier « Last Version » de son dossier
+/// (« 141.0.7390.54 »). Brave et Vivaldi numérotent à leur façon : leur version n'est pas crue.
+fn version_majeure(nom: &str, contenu: &str) -> Option<u32> {
+    if !matches!(nom, "Chrome" | "Chromium" | "Edge") {
+        return None;
+    }
+    contenu.trim().split('.').next()?.parse().ok().filter(|v| *v > 0)
+}
+
+/// La version majeure de Firefox, d'après compatibility.ini du profil (« LastVersion=128.0_20240101/… »). Zen,
+/// Floorp et Waterfox numérotent à leur façon : leur version n'est pas crue.
+fn version_firefox(nom: &str, compatibilite: &str) -> Option<u32> {
+    if !matches!(nom, "Firefox" | "LibreWolf") {
+        return None;
+    }
+    compatibilite
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("LastVersion="))?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+        .filter(|v| *v > 0)
+}
+
+/// Les premières versions qui proposent l'échange post-quantique sans réglage : Firefox 132 (X25519MLKEM768),
+/// Chrome 124 (X25519Kyber768, remplacé par X25519MLKEM768 en 131).
+const FIREFOX_PQ_PAR_DEFAUT: u32 = 132;
+const CHROMIUM_KYBER: u32 = 124;
+const CHROMIUM_MLKEM: u32 = 131;
+
+/// La version d'un navigateur, quand la stratégie en dépend.
+#[derive(Debug, PartialEq)]
+enum Version {
+    /// Firefox : la stratégie vaut quelle que soit la version.
+    SansObjet,
+    /// Famille Chromium : la version majeure.
+    Lue(u32),
+    Illisible,
+}
+
+/// Ce qui coupe l'échange post-quantique d'un navigateur.
+#[derive(Debug, PartialEq)]
+enum CoupurePq {
+    /// Une stratégie imposée : la règle, l'endroit, et la version du navigateur si elle compte.
+    Strategie {
+        regle: String,
+        ou: String,
+        version: Version,
+    },
+    /// Une préférence du profil, écrite à la main ou par un logiciel.
+    Preference(&'static str),
+    /// Une préférence mise à false par défaut par la stratégie (le profil garde la main), et l'endroit.
+    DefautStrategie { pref: &'static str, ou: String },
+}
+
+/// Un navigateur dont rien ne coupe l'échange post-quantique : sa famille, sa version, et si une préférence du
+/// profil l'allume (Firefox avant 132).
+#[derive(Debug)]
+struct SansCoupure {
+    firefox: bool,
+    version: Version,
+    allume: bool,
+}
+
+/// COM-NAV-004 pour un navigateur (ou un profil). Sans coupure, la version dit si l'échange est là par défaut.
+fn juger_pq(navigateur: &str, coupure: Option<&CoupurePq>, sans: &SansCoupure) -> Constat {
+    let pourquoi = |regle: &str| {
+        trf!(
+            "{navigateur} : échange de clés post-quantique coupé ({regle}). Le trafic HTTPS enregistré aujourd'hui serait lisible demain. Si personne ne gère cet ordinateur, la cause peut être un logiciel qui inspecte le HTTPS, ou un réglage fait à la main contre une panne de réseau.",
+            "{navigateur}: post-quantum key exchange turned off ({regle}). HTTPS traffic recorded today would be readable tomorrow. If nobody manages this computer, the cause may be software that inspects HTTPS, or a manual workaround for a network failure."
+        )
+    };
+    match coupure {
+        None => juger_sans_coupure(navigateur, sans),
+        Some(CoupurePq::Strategie { regle, version: Version::Lue(v), .. }) if *v > DERNIERE_VERSION_STRATEGIE_PQ => ok(
+            CAT_PQ,
+            trf!(
+                "{navigateur} : stratégie {regle} présente, mais sans effet depuis la version 147 (version {v} ici) : l'échange post-quantique ne se coupe plus.",
+                "{navigateur}: policy {regle} present, but without effect since version 147 (version {v} here): post-quantum key exchange can no longer be turned off."
+            ),
+        ),
+        Some(CoupurePq::Strategie { regle, version: Version::Illisible, .. }) => alerte(
+            CAT_PQ,
+            Niveau::Info,
+            trf!(
+                "{navigateur} : stratégie {regle} présente, probablement sans effet (ignorée depuis la version 147 ; version de ce navigateur illisible).",
+                "{navigateur}: policy {regle} present, probably without effect (ignored since version 147; this browser's version unreadable)."
+            ),
+        ),
+        Some(CoupurePq::Strategie { regle, ou, .. }) => alerte(CAT_PQ, Niveau::Moyen, pourquoi(regle)).manuel(
+            trf!(
+                "Retirer la stratégie (droits d'administrateur) : {ou} ; puis chercher le logiciel qui l'a posée",
+                "Remove the policy (administrator rights): {ou}; then look for the software that set it"
+            ),
+            &[],
+        ),
+        Some(CoupurePq::Preference(p)) => alerte(CAT_PQ, Niveau::Info, pourquoi(p)).manuel(
+            trf!(
+                "Remettre {p} à sa valeur par défaut (about:config, Réinitialiser), puis vérifier que les sites s'ouvrent",
+                "Reset {p} to its default value (about:config, Reset), then check that sites open"
+            ),
+            &[],
+        ),
+        Some(CoupurePq::DefautStrategie { pref, ou }) => {
+            alerte(CAT_PQ, Niveau::Info, pourquoi(&format!("Preferences : {pref} = false"))).manuel(
+                trf!(
+                    "Retirer {pref} de la stratégie (droits d'administrateur) : {ou} ; ou le mettre à true dans about:config",
+                    "Remove {pref} from the policy (administrator rights): {ou}; or set it to true in about:config"
+                ),
+                &[],
+            )
+        }
+    }
+}
+
+/// Rien ne coupe l'échange : encore faut-il que la version le propose. Une version illisible ne conclut rien.
+fn juger_sans_coupure(navigateur: &str, sans: &SansCoupure) -> Constat {
+    let actif = |groupe: &str| {
+        ok(
+            CAT_PQ,
+            trf!(
+                "{navigateur} : échange de clés post-quantique ({groupe}) laissé actif.",
+                "{navigateur}: post-quantum key exchange ({groupe}) left on."
+            ),
+        )
+    };
+    let premiere = if sans.firefox {
+        FIREFOX_PQ_PAR_DEFAUT
+    } else {
+        CHROMIUM_KYBER
+    };
+    match sans.version {
+        _ if sans.allume => ok(
+            CAT_PQ,
+            trf!(
+                "{navigateur} : échange de clés post-quantique allumé dans les préférences du profil.",
+                "{navigateur}: post-quantum key exchange turned on in the profile preferences."
+            ),
+        ),
+        Version::Lue(v) if v < premiere => alerte(
+            CAT_PQ,
+            Niveau::Info,
+            trf!(
+                "{navigateur} : version {v}, qui ne propose pas d'échange de clés post-quantique par défaut (il l'est depuis la {premiere}). Le trafic HTTPS enregistré aujourd'hui serait lisible demain.",
+                "{navigateur}: version {v}, which does not offer post-quantum key exchange by default (it does since {premiere}). HTTPS traffic recorded today would be readable tomorrow."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Mettre le navigateur à jour (ou passer à sa version la plus récente)",
+                "Update the browser (or switch to its latest release)"
+            ),
+            &[],
+        ),
+        Version::Lue(v) if !sans.firefox && v < CHROMIUM_MLKEM => actif("X25519Kyber768"),
+        Version::Lue(_) | Version::SansObjet => actif("X25519MLKEM768"),
+        Version::Illisible => impossible(
+            CAT_PQ,
+            &trf!(
+                "{navigateur} : version illisible, échange de clés post-quantique par défaut non vérifié",
+                "{navigateur}: version unreadable, default post-quantum key exchange not checked"
+            ),
+        ),
+    }
+}
+
+const CAT_PQ: &str = "Post-quantique";
+
+/// COM-NAV-004 : un constat par navigateur de la famille Chromium, un par profil de la famille Firefox (ou un seul
+/// quand une stratégie les verrouille tous).
+pub fn post_quantique() -> Vec<Constat> {
+    let mut constats = Vec::new();
+    let mut vus: Vec<&str> = Vec::new();
+    let mut profils_vus = Vec::new();
+    for (nom, racine, firefox) in super::extensions::racines() {
+        let profils = super::extensions::profils(&racine, firefox);
+        if profils.is_empty() {
+            continue;
+        }
+        let premier = !vus.contains(&nom);
+        vus.push(nom);
+        if !firefox {
+            if !premier {
+                continue;
+            }
+            let s = strategies(nom);
+            let version = std::fs::read_to_string(racine.join("Last Version"))
+                .ok()
+                .and_then(|t| version_majeure(nom, &t));
+            let lue = || version.map_or(Version::Illisible, Version::Lue);
+            let coupure = chromium_pq_coupe(&s.imposees).map(|(regle, ou)| CoupurePq::Strategie {
+                regle,
+                ou,
+                version: lue(),
+            });
+            let sans = SansCoupure {
+                firefox: false,
+                version: lue(),
+                allume: false,
+            };
+            constats.push(juger_pq(nom, coupure.as_ref(), &sans).avec_objet(Objet::de("pq", nom)));
+            continue;
+        }
+        let s = strategies(nom);
+        if let Some((politiques, ou)) = &s.firefox
+            && let Some(regle) = firefox_pq_impose(politiques)
+        {
+            if premier {
+                let c = CoupurePq::Strategie {
+                    regle,
+                    ou: ou.clone(),
+                    version: Version::SansObjet,
+                };
+                let sans = SansCoupure {
+                    firefox: true,
+                    version: Version::SansObjet,
+                    allume: false,
+                };
+                constats.push(juger_pq(nom, Some(&c), &sans).avec_objet(Objet::de("pq", nom)));
+            }
+            continue;
+        }
+        let defaut = s
+            .firefox
+            .as_ref()
+            .and_then(|(v, ou)| Some((firefox_pq_par_defaut(v)?, ou.clone())));
+        let plusieurs = profils.len() > 1;
+        for (dossier, chemin) in profils {
+            let reel = chemin.canonicalize().unwrap_or_else(|_| chemin.clone());
+            if profils_vus.contains(&reel) {
+                continue;
+            }
+            profils_vus.push(reel);
+            let court = dossier.split_once('.').map_or(dossier.as_str(), |(_, n)| n).to_string();
+            let navigateur = if plusieurs {
+                format!("{nom} ({court})")
+            } else {
+                nom.to_string()
+            };
+            let lire = |f: &str| match std::fs::read_to_string(chemin.join(f)) {
+                Ok(t) => Ok(t),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+                Err(e) => Err(format!("{f} : {e}")),
+            };
+            let objet = Objet::de("pq", &format!("{nom}/{court}"));
+            constats.push(
+                match lire("prefs.js").and_then(|p| Ok(p + &lire("user.js")?)) {
+                    Ok(prefs) => {
+                        let coupure = coupure_profil(&prefs, defaut.as_ref());
+                        let compatibilite =
+                            std::fs::read_to_string(chemin.join("compatibility.ini")).unwrap_or_default();
+                        let sans = SansCoupure {
+                            firefox: true,
+                            version: version_firefox(nom, &compatibilite).map_or(Version::Illisible, Version::Lue),
+                            allume: pq_allume_firefox(&prefs),
+                        };
+                        juger_pq(&navigateur, coupure.as_ref(), &sans)
+                    }
+                    Err(raison) => impossible(
+                        CAT_PQ,
+                        &trf!(
+                            "réglages de {navigateur} illisibles ({raison})",
+                            "{navigateur} settings unreadable ({raison})"
+                        ),
+                    ),
+                }
+                .avec_objet(objet),
+            );
+        }
+    }
+    if constats.is_empty() {
+        constats.push(
+            sans_objet(
+                CAT_PQ,
+                Absence::Logiciel,
+                tr!(
+                    "Aucun navigateur avec un profil trouvé : rien à juger pour l'échange post-quantique.",
+                    "No browser with a profile found: nothing to judge for post-quantum key exchange."
+                ),
+            )
+            .avec_objet(Objet::Seul),
+        );
+    }
+    constats
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,5 +943,216 @@ mod tests {
         let v = json_souple(r#"{"U": "https://exemple.org/a,}", "B": 1,}"#).unwrap();
         assert_eq!(v["U"], "https://exemple.org/a,}");
         assert!(json_souple("{\"A\": ").is_none() && json_souple("pas du json").is_none());
+    }
+    /// Un navigateur sans coupure, de version récente.
+    fn recent(firefox: bool) -> SansCoupure {
+        SansCoupure {
+            firefox,
+            version: Version::Lue(141),
+            allume: false,
+        }
+    }
+
+    #[test]
+    fn post_quantique_coupe() {
+        // Préférences du profil : false coupe ; absente ou true, non.
+        assert_eq!(
+            pq_coupe_firefox("user_pref(\"security.tls.enable_kyber\", false);\n"),
+            Some("security.tls.enable_kyber")
+        );
+        assert_eq!(
+            pq_coupe_firefox("user_pref(\"media.webrtc.enable_pq_hybrid_kex\", false);\n"),
+            Some("media.webrtc.enable_pq_hybrid_kex")
+        );
+        assert_eq!(
+            pq_coupe_firefox("user_pref(\"security.tls.enable_kyber\", true);\n"),
+            None
+        );
+        assert_eq!(pq_coupe_firefox(""), None);
+        let c = juger_pq(
+            "Firefox",
+            Some(&CoupurePq::Preference("security.tls.enable_kyber")),
+            &recent(true),
+        );
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        assert!(c.message.contains("security.tls.enable_kyber"));
+        assert_eq!(juger_pq("Firefox", None, &recent(true)).probleme, None);
+        // policies.json : la stratégie, ou une préférence verrouillée (forme nue et « Status: locked »).
+        let json = |t: &str| serde_json::from_str::<Value>(t).unwrap();
+        assert!(firefox_pq_impose(&json(r#"{"PostQuantumKeyAgreementEnabled":false}"#)).is_some());
+        assert!(firefox_pq_impose(&json(r#"{"PostQuantumKeyAgreementEnabled":true}"#)).is_none());
+        // Firefox refuse security.tls.enable_kyber dans Preferences : elle ne coupe rien.
+        assert!(firefox_pq_impose(&json(r#"{"Preferences":{"security.tls.enable_kyber":false}}"#)).is_none());
+        assert!(
+            firefox_pq_impose(&json(
+                r#"{"Preferences":{"network.http.http3.enable_kyber":{"Value":false,"Status":"locked"}}}"#
+            ))
+            .is_some()
+        );
+        assert!(
+            firefox_pq_impose(&json(
+                r#"{"Preferences":{"network.http.http3.enable_kyber":{"Value":false,"Status":"default"}}}"#
+            ))
+            .is_none()
+        );
+        let imposee = |version| CoupurePq::Strategie {
+            regle: "PostQuantumKeyAgreementEnabled = false".into(),
+            ou: "/etc/opt/chrome/policies/managed/x.json".into(),
+            version,
+        };
+        // Firefox (sans version) et Chromium ≤ 146 : Moyen ; ≥ 147 : sans effet ; version illisible : Info.
+        assert_eq!(
+            juger_pq("Firefox", Some(&imposee(Version::SansObjet)), &recent(true)).probleme,
+            Some(Niveau::Moyen)
+        );
+        assert_eq!(
+            juger_pq("Chrome", Some(&imposee(Version::Lue(140))), &recent(false)).probleme,
+            Some(Niveau::Moyen)
+        );
+        assert_eq!(
+            juger_pq("Chrome", Some(&imposee(Version::Lue(146))), &recent(false)).probleme,
+            Some(Niveau::Moyen)
+        );
+        let c = juger_pq("Edge", Some(&imposee(Version::Lue(147))), &recent(false));
+        assert!(c.probleme.is_none() && c.verifie && c.message.contains("147"));
+        assert_eq!(
+            juger_pq("Brave", Some(&imposee(Version::Illisible)), &recent(false)).probleme,
+            Some(Niveau::Info)
+        );
+        // Stratégies Chromium : booléen, nombre ou chiffres d'un REG_SZ.
+        for v in ["false", "0", r#""0""#] {
+            let s: BTreeMap<String, (Value, String)> = [(
+                "PostQuantumKeyAgreementEnabled".to_string(),
+                (json(v), "ici".to_string()),
+            )]
+            .into();
+            assert!(chromium_pq_coupe(&s).is_some(), "{v}");
+        }
+        let s: BTreeMap<String, (Value, String)> = [(
+            "PostQuantumKeyAgreementEnabled".to_string(),
+            (json("true"), "ici".to_string()),
+        )]
+        .into();
+        assert!(chromium_pq_coupe(&s).is_none());
+        assert_eq!(version_majeure("Chrome", "141.0.7390.54\n"), Some(141));
+        assert_eq!(version_majeure("Edge", "147.0.1.2"), Some(147));
+        assert_eq!(version_majeure("Brave", "141.1.83.118"), None);
+        assert_eq!(version_majeure("Vivaldi", "7.6.3797.52"), None);
+        assert_eq!(version_majeure("Chrome", "abîmé"), None);
+    }
+
+    #[test]
+    fn post_quantique_par_defaut_de_la_strategie() {
+        let json = |t: &str| serde_json::from_str::<Value>(t).unwrap();
+        // « default », « user » ou sans Status : la valeur de départ, que Firefox n'écrit jamais dans prefs.js.
+        for n in ["network.http.http3.enable_kyber", "media.webrtc.enable_pq_hybrid_kex"] {
+            for statut in ["", r#","Status":"default""#, r#","Status":"user""#] {
+                let p = json(&format!(r#"{{"Preferences":{{"{n}":{{"Value":false{statut}}}}}}}"#));
+                assert_eq!(firefox_pq_par_defaut(&p), Some(n), "{n}{statut}");
+                assert!(firefox_pq_impose(&p).is_none());
+            }
+            let verrouillee = json(&format!(
+                r#"{{"Preferences":{{"{n}":{{"Value":false,"Status":"locked"}}}}}}"#
+            ));
+            assert_eq!(firefox_pq_par_defaut(&verrouillee), None);
+            let vraie = json(&format!(r#"{{"Preferences":{{"{n}":{{"Value":true}}}}}}"#));
+            assert_eq!(firefox_pq_par_defaut(&vraie), None);
+        }
+        // Firefox refuse security.tls.enable_kyber dans Preferences, sous toutes ses formes.
+        let refusee = json(r#"{"Preferences":{"security.tls.enable_kyber":{"Value":false}}}"#);
+        assert_eq!(firefox_pq_par_defaut(&refusee), None);
+        // Le jugement d'un profil : la valeur par défaut compte tant que le profil n'écrit rien lui-même.
+        let n = "network.http.http3.enable_kyber";
+        let defaut = Some((n, "/etc/firefox/policies/policies.json".to_string()));
+        let coupure = |prefs: &str| coupure_profil(prefs, defaut.as_ref());
+        let c = coupure("");
+        assert!(matches!(c, Some(CoupurePq::DefautStrategie { .. })));
+        let j = juger_pq("Firefox", c.as_ref(), &recent(true));
+        assert!(
+            j.probleme == Some(Niveau::Info) && j.message.contains(n),
+            "{}",
+            j.message
+        );
+        assert!(j.correctif.as_ref().unwrap().action.contains("policies.json"));
+        assert_eq!(coupure(&format!("user_pref(\"{n}\", true);\n")), None);
+    }
+
+    #[test]
+    fn post_quantique_selon_la_version() {
+        let sans = |firefox, version, allume| SansCoupure {
+            firefox,
+            version,
+            allume,
+        };
+        // Firefox avant 132 : pas actif par défaut ; allumé à la main, si.
+        let c = juger_pq("Firefox", None, &sans(true, Version::Lue(128), false));
+        assert!(c.verifie && c.probleme == Some(Niveau::Info), "{}", c.message);
+        assert_eq!(
+            juger_pq("Firefox", None, &sans(true, Version::Lue(128), true)).probleme,
+            None
+        );
+        assert_eq!(
+            juger_pq("Firefox", None, &sans(true, Version::Lue(132), false)).probleme,
+            None
+        );
+        // Chrome : rien avant 124, Kyber de 124 à 130, ML-KEM ensuite.
+        assert_eq!(
+            juger_pq("Chrome", None, &sans(false, Version::Lue(120), false)).probleme,
+            Some(Niveau::Info)
+        );
+        let c = juger_pq("Chrome", None, &sans(false, Version::Lue(127), false));
+        assert!(
+            c.probleme.is_none() && c.message.contains("X25519Kyber768"),
+            "{}",
+            c.message
+        );
+        let c = juger_pq("Chrome", None, &sans(false, Version::Lue(141), false));
+        assert!(
+            c.probleme.is_none() && c.message.contains("X25519MLKEM768"),
+            "{}",
+            c.message
+        );
+        // Version illisible : rien n'est conclu, jamais « actif ».
+        let c = juger_pq("Brave", None, &sans(false, Version::Illisible, false));
+        assert!(!c.verifie && c.coherent());
+        // compatibility.ini : Firefox et LibreWolf seulement.
+        let ini = "[Compatibility]\nLastVersion=128.0_20240101000000/20240101000000\nLastOSABI=Linux_x86_64-gcc3\n";
+        assert_eq!(version_firefox("Firefox", ini), Some(128));
+        assert_eq!(version_firefox("LibreWolf", ini), Some(128));
+        assert_eq!(version_firefox("Zen", ini), None);
+        assert_eq!(version_firefox("Firefox", ""), None);
+        assert!(pq_allume_firefox("user_pref(\"security.tls.enable_kyber\", true);\n"));
+        assert!(!pq_allume_firefox(""));
+    }
+
+    #[test]
+    fn firefox_dans_le_registre() {
+        // La valeur Preferences telle qu'elle sort du registre (REG_MULTI_SZ joint) : jugée comme policies.json.
+        let texte = "{\n\"network.http.http3.enable_kyber\": false\n}";
+        let (v, illisible) = firefox_du_registre(None, Some(texte), &[]);
+        assert!(!illisible && firefox_pq_impose(&v.unwrap()).is_some());
+        let (v, _) = firefox_du_registre(Some(0), None, &[]);
+        assert!(firefox_pq_impose(&v.unwrap()).is_some());
+        // L'ancienne forme, une valeur DWORD par préférence : verrouillée.
+        let (v, _) = firefox_du_registre(None, None, &[("media.webrtc.enable_pq_hybrid_kex".into(), 0)]);
+        assert!(firefox_pq_impose(&v.unwrap()).is_some());
+        // Une valeur par défaut, et security.tls.enable_kyber, que Firefox refuse.
+        let texte = r#"{"network.http.http3.enable_kyber":{"Value":false,"Status":"default"}}"#;
+        let (v, _) = firefox_du_registre(None, Some(texte), &[]);
+        let v = v.unwrap();
+        assert!(firefox_pq_impose(&v).is_none() && firefox_pq_par_defaut(&v).is_some());
+        let (v, _) = firefox_du_registre(None, Some(r#"{"security.tls.enable_kyber":false}"#), &[]);
+        assert!(firefox_pq_impose(&v.unwrap()).is_none());
+        // Rien : pas de stratégie ; texte abîmé : dit illisible.
+        assert_eq!(firefox_du_registre(None, None, &[]), (None, false));
+        assert_eq!(firefox_du_registre(None, Some("{\"a\":"), &[]), (None, true));
+    }
+
+    /// La vraie règle sur cet ordinateur, en lecture seule : jamais vide, toujours cohérente.
+    #[test]
+    fn post_quantique_reel() {
+        let c = post_quantique();
+        assert!(!c.is_empty());
+        assert!(c.iter().all(Constat::coherent));
     }
 }

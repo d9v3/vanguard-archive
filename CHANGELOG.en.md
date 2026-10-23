@@ -9,6 +9,25 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Read-only post-quantum check.** Encrypted traffic recorded today can be kept and read once a quantum computer
+  exists: the check says where this computer has no post-quantum key exchange, without changing anything. SSH server and
+  client (COM-PQC-001, 002): the list sshd and ssh really keep, from the OpenSSH version read without running it (sntrup
+  since 8.5, by default since 9.0, ML-KEM since 9.9) and the written “+”, “-”, “^”; the advice never names an algorithm
+  the version does not know, never puts a name before a “+”, “-” or “^” (sshd would not restart), and says “sshd -t”
+  first; a setting for one host only stays information, without its name. Browsers (COM-NAV-004): X25519MLKEM768 turned
+  off by a Firefox preference or a policy (Firefox, and Chrome or Edge up to 146; beyond, the policy is said to have no
+  effect; Firefox: policies.json, and on Windows the registry (the policy and its Preferences) then
+  distribution\policies.json; a preference set to false only by default counts as long as the profile writes nothing;
+  security.tls.enable_kyber, which Firefox refuses in Preferences, does not count); without a cut, the version: Firefox
+  before 132 and Chrome before 124 do not offer it by default, Chrome 124 to 130 offers X25519Kyber768, an unreadable
+  version (Brave, Vivaldi, Zen…) is not checked. WireGuard (COM-PQC-003): peers without a pre-shared key, counted
+  without ever keeping a key (files read only as administrator; without rights, without a file or encrypted for SYSTEM:
+  not checked, reason given). In the network audit: the router administration (SSH, HTTPS found open by the scan) that
+  offers nothing post-quantum, as one grouped piece of information (COM-TLS-004), and the path to the Internet that
+  would remove the exchange (COM-TLS-005), through a hand-written TLS probe to the reference site already contacted,
+  computing no key; a refusal is concluded only if interception already shows in the certificate, otherwise not checked;
+  a proxy that is set, or unreadable, leaves it not checked (on Linux, the GNOME or KDE desktop one too). No library
+  added.
 - **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
   adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
   can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category
