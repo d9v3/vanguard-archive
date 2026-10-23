@@ -694,27 +694,36 @@ fn a_signaler(fichiers: &[(String, u64, Vec<u8>)], depuis: u64) -> Vec<(String, 
     notes
 }
 
-fn fichier_surveillance() -> PathBuf {
-    crate::socle::dossier_local().join("surveillance-telechargements.json")
+#[derive(serde::Serialize, serde::Deserialize)]
+struct EtatSurveillance {
+    depuis: u64,
+}
+
+/// Depuis quand regarder, d'après les sceaux. Absent : le premier passage, muet. Intact ou adopté : l'heure notée.
+/// Changé hors de Vanguard, inconnu ou illisible : depuis toujours, rien n'est tu (`a_signaler` plafonne à trois
+/// notes) ; un « depuis » posé dans le futur taisait sinon tout fichier arrivé.
+fn depuis_lu(lu: crate::sceau::Lecture) -> Option<u64> {
+    use crate::sceau::Lecture;
+    match lu {
+        Lecture::Absent => None,
+        Lecture::Intact(o) | Lecture::Adopte(o) => {
+            Some(serde_json::from_slice::<EtatSurveillance>(&o).map_or(0, |e| e.depuis))
+        }
+        Lecture::Falsifie(_) | Lecture::Inconnu | Lecture::Illisible(_) => Some(0),
+    }
 }
 
 /// Pour la surveillance horaire : les programmes et fichiers déguisés arrivés dans Téléchargements depuis le passage
 /// précédent, à notifier. Rien n'est bloqué, déplacé ni ouvert ; le premier passage note seulement l'heure.
 pub fn nouveaux_a_signaler() -> Vec<(String, String)> {
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct Etat {
-        depuis: u64,
-    }
     let Some(dossier) = dossier_telechargements().filter(|d| d.is_dir()) else {
         return Vec::new();
     };
     let maintenant = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let avant: Option<Etat> = std::fs::read_to_string(fichier_surveillance())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok());
-    let notes = avant.map_or_else(Vec::new, |avant| {
+    let avant = depuis_lu(crate::sceau::lire(crate::sceau::TELECHARGEMENTS));
+    let notes = avant.map_or_else(Vec::new, |depuis| {
         let fichiers: Vec<(String, u64, Vec<u8>)> = std::fs::read_dir(&dossier)
             .into_iter()
             .flatten()
@@ -724,7 +733,7 @@ pub fn nouveaux_a_signaler() -> Vec<(String, String)> {
                     .ok()
                     .filter(std::fs::Metadata::is_file)?;
                 let arrivee = arrivee(&meta);
-                if arrivee <= avant.depuis {
+                if arrivee <= depuis {
                     return Some((e.file_name().to_string_lossy().into_owned(), arrivee, Vec::new()));
                 }
                 let mut debut = [0u8; 4];
@@ -738,11 +747,10 @@ pub fn nouveaux_a_signaler() -> Vec<(String, String)> {
                 ))
             })
             .collect();
-        a_signaler(&fichiers, avant.depuis)
+        a_signaler(&fichiers, depuis)
     });
-    if let Ok(texte) = serde_json::to_string(&Etat { depuis: maintenant }) {
-        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
-        let _ = std::fs::write(fichier_surveillance(), texte);
+    if let Ok(texte) = serde_json::to_string(&EtatSurveillance { depuis: maintenant }) {
+        let _ = crate::sceau::ecrire(crate::sceau::TELECHARGEMENTS, texte);
     }
     notes
 }
@@ -1026,5 +1034,23 @@ mod tests {
         assert_eq!(notes.len(), 4);
         assert!(notes[3].1.starts_with("2 autre(s)"));
         assert_eq!(a_signaler(&beaucoup, 300), Vec::<(String, String)>::new());
+    }
+
+    /// Un « depuis » futur écrit hors de Vanguard (sans sceau) ne tait plus un fichier arrivé : il est lu « depuis
+    /// toujours ». Celui que Vanguard a écrit sert tel quel ; aucun fichier, c'est le premier passage, muet.
+    #[test]
+    fn depuis_futur_pose_hors_de_vanguard_ne_tait_rien() {
+        let d = std::env::temp_dir().join(format!("vanguard-telechargements-sceau-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let lu = || crate::sceau::lire_dans(&d, crate::sceau::TELECHARGEMENTS);
+        assert_eq!(depuis_lu(lu()), None);
+        crate::sceau::ecrire_dans(&d, crate::sceau::TELECHARGEMENTS, br#"{"depuis":150}"#).unwrap();
+        assert_eq!(depuis_lu(lu()), Some(150));
+        std::fs::write(d.join(crate::sceau::TELECHARGEMENTS), br#"{"depuis":99999999999}"#).unwrap();
+        let depuis = depuis_lu(lu()).unwrap();
+        assert_eq!(depuis, 0);
+        let arrive = [("setup.exe".to_string(), 200, b"MZ\x90\0".to_vec())];
+        assert_eq!(a_signaler(&arrive, depuis).len(), 1);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

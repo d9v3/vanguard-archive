@@ -242,7 +242,9 @@ fn etat_d_avant(lu: crate::sceau::Lecture) -> Option<EtatMachine> {
     match lu {
         Lecture::Absent => None,
         Lecture::Intact(o) => Some(serde_json::from_slice(&o).unwrap_or_default()),
-        Lecture::Adopte(_) | Lecture::Falsifie(_) | Lecture::Illisible(_) => Some(EtatMachine::default()),
+        Lecture::Adopte(_) | Lecture::Falsifie(_) | Lecture::Illisible(_) | Lecture::Inconnu => {
+            Some(EtatMachine::default())
+        }
     }
 }
 
@@ -387,8 +389,20 @@ struct EtatAudit {
     constats: Vec<String>,
 }
 
-fn fichier_audit() -> std::path::PathBuf {
-    crate::socle::dossier_local().join("surveillance-audit.json")
+/// L'audit du passage d'avant, d'après ses sceaux. Absent : premier passage, on mémorise seulement. Changé hors de
+/// Vanguard (une redirection écrite d'avance), effacé avec les sceaux, adopté ou illisible : un état vide, où toutes
+/// les redirections et tous les constats suivis sont nouveaux, jamais un silence.
+fn audit_d_avant(lu: crate::sceau::Lecture) -> Option<EtatAudit> {
+    use crate::sceau::Lecture;
+    let vide = EtatAudit {
+        redirections: Some(Vec::new()),
+        constats: Vec::new(),
+    };
+    match lu {
+        Lecture::Absent => None,
+        Lecture::Intact(o) => Some(serde_json::from_slice(&o).unwrap_or(vide)),
+        Lecture::Adopte(_) | Lecture::Falsifie(_) | Lecture::Illisible(_) | Lecture::Inconnu => Some(vide),
+    }
 }
 
 /// La clé d'une redirection, stable d'une passe à l'autre.
@@ -515,9 +529,7 @@ fn nouveautes_audit(
 async fn veiller_audit(r: &reseau::Rapport, machine: Vec<Constat>) {
     let a = crate::audit::auditer(r, Some(machine), false, true).await;
     let apres = etat_audit(r, &a);
-    let avant: Option<EtatAudit> = std::fs::read_to_string(fichier_audit())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok());
+    let avant = audit_d_avant(crate::sceau::lire(crate::sceau::AUDIT));
     if let Some(avant) = &avant {
         let redirections = crate::audit::redirections_du_scan(r).unwrap_or_default();
         let constats: Vec<&Constat> = a.domaines.iter().flat_map(|d| &d.constats).collect();
@@ -526,8 +538,7 @@ async fn veiller_audit(r: &reseau::Rapport, machine: Vec<Constat>) {
         }
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
-        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
-        let _ = std::fs::write(fichier_audit(), texte);
+        let _ = crate::sceau::ecrire(crate::sceau::AUDIT, texte);
     }
 }
 
@@ -540,8 +551,13 @@ struct Passerelle {
     mac: String,
 }
 
-fn fichier_passerelle() -> std::path::PathBuf {
-    crate::socle::dossier_local().join("surveillance-passerelle.json")
+/// La box du passage d'avant, seulement telle que Vanguard l'a notée : posée ou changée à côté (la MAC d'un
+/// usurpateur écrite d'avance), elle ne sert pas de référence, et la comparaison repart de ce passage.
+fn passerelle_d_avant(lu: crate::sceau::Lecture) -> Option<Passerelle> {
+    match lu {
+        crate::sceau::Lecture::Intact(o) => serde_json::from_slice(&o).ok(),
+        _ => None,
+    }
 }
 
 fn passerelle_de(r: &reseau::Rapport) -> Option<Passerelle> {
@@ -572,9 +588,7 @@ fn veiller_passerelle(r: &reseau::Rapport) {
         return;
     }
     let Some(apres) = passerelle_de(r) else { return };
-    let avant: Option<Passerelle> = std::fs::read_to_string(fichier_passerelle())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok());
+    let avant = passerelle_d_avant(crate::sceau::lire(crate::sceau::PASSERELLE));
     if let Some((ancienne, nouvelle)) = avant.as_ref().and_then(|a| mac_changee(a, &apres)) {
         alerter(
             Genre::Passerelle,
@@ -590,8 +604,7 @@ fn veiller_passerelle(r: &reseau::Rapport) {
         );
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
-        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
-        let _ = std::fs::write(fichier_passerelle(), texte);
+        let _ = crate::sceau::ecrire(crate::sceau::PASSERELLE, texte);
     }
 }
 
@@ -2397,6 +2410,8 @@ mod tests {
             Lecture::Falsifie(None),
             Lecture::Adopte(pose),
             Lecture::Illisible("refusé".into()),
+            // Effacé avec les sceaux : jamais un premier passage.
+            Lecture::Inconnu,
         ] {
             let avant = etat_d_avant(lu).unwrap();
             let notes = nouveautes_machine(&avant, &apres);
@@ -2404,6 +2419,48 @@ mod tests {
         }
         // Premier passage : mémoriser seulement.
         assert!(etat_d_avant(Lecture::Absent).is_none());
+    }
+
+    /// Une redirection UPnP écrite d'avance dans l'audit d'avant, ou l'audit effacé avec les sceaux : la nouvelle
+    /// redirection est quand même notifiée. Une box posée à côté ne sert pas de référence.
+    #[test]
+    fn audit_et_passerelle_poses_a_cote_ne_taisent_rien() {
+        use crate::sceau::Lecture;
+        let r = upnp::Redirection {
+            protocole: "TCP".into(),
+            port_public: 4444,
+            appareil: "192.168.1.20".into(),
+            port_appareil: 4444,
+            description: String::new(),
+            bail: 0,
+            hote_distant: String::new(),
+            active: true,
+        };
+        let apres = EtatAudit {
+            redirections: Some(vec![cle_redirection(&r)]),
+            constats: Vec::new(),
+        };
+        let pose = serde_json::to_vec(&apres).unwrap();
+        let avant = audit_d_avant(Lecture::Intact(pose.clone())).unwrap();
+        assert_eq!(
+            nouveautes_audit(&avant, &apres, std::slice::from_ref(&r), &[]),
+            Vec::<(String, String, Genre)>::new()
+        );
+        for lu in [
+            Lecture::Falsifie(Some(pose.clone())),
+            Lecture::Falsifie(None),
+            Lecture::Adopte(pose),
+            Lecture::Illisible("refusé".into()),
+            Lecture::Inconnu,
+        ] {
+            let avant = audit_d_avant(lu).unwrap();
+            assert_eq!(nouveautes_audit(&avant, &apres, std::slice::from_ref(&r), &[]).len(), 1);
+        }
+        assert!(audit_d_avant(Lecture::Absent).is_none());
+        let boite = br#"{"reseau":"192.168.1.0/24","nom":"Salon","ip":"192.168.1.1","mac":"00:1a:2b:3c:4d:5e"}"#;
+        assert!(passerelle_d_avant(Lecture::Intact(boite.to_vec())).is_some());
+        assert!(passerelle_d_avant(Lecture::Falsifie(Some(boite.to_vec()))).is_none());
+        assert!(passerelle_d_avant(Lecture::Adopte(boite.to_vec())).is_none());
     }
 
     #[test]

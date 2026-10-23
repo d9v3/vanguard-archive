@@ -36,6 +36,10 @@ pub mod scan {
     pub fn reseau_local() -> Option<(String, Ipv4Addr)> {
         None
     }
+
+    pub fn passerelle() -> Option<Ipv4Addr> {
+        None
+    }
 }
 
 /// Le dossier de Vanguard : un dossier qui n'existe pas, rien n'y est lu ni écrit pendant le fuzzing.

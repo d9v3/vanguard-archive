@@ -8,8 +8,10 @@ use std::net::IpAddr;
 use crate::commande::sh_chaine;
 use crate::{tr, trf};
 
-/// Le pare-feu par lequel Vanguard bloque sur cet ordinateur.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Le pare-feu par lequel Vanguard bloque sur cet ordinateur. Noté avec un blocage (`changements::Inverse`) : la
+/// règle inverse en est refaite à l'annulation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum PareFeu {
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Ufw,

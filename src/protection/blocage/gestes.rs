@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use super::gardes;
 use super::menaces::{Geste, Menace};
 use super::pare_feu::{self, PareFeu};
-use crate::changements::{self, Annulation, Blocage};
+use crate::changements::{self, Annulation, Blocage, Inverse};
 use crate::machine::regles::Os;
 use crate::protection::preuve::{self, Preuve};
-use crate::ui::chemin_affichable;
+use crate::ui::{affichable, chemin_affichable};
 use crate::{tr, trf};
 
 /// Ce que le geste a besoin de savoir de cet ordinateur, lu une fois par passage.
@@ -122,6 +122,10 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<
                     annulation: Annulation::Commandes {
                         commandes: regle.retirer,
                         port: None,
+                        inverse: Some(Inverse::Sortante {
+                            pare_feu: pf,
+                            adresse: ip.to_canonical(),
+                        }),
                     },
                     retenir: None,
                 },
@@ -159,6 +163,7 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<
                     annulation: Annulation::Commandes {
                         commandes: annuler_pilotes(*avant),
                         port: None,
+                        inverse: Some(Inverse::Pilotes { avant: *avant }),
                     },
                     retenir: None,
                 },
@@ -191,6 +196,10 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<
                     annulation: Annulation::Commandes {
                         commandes: regle.retirer,
                         port: retenir.map(|p| format!("{p}/tcp")),
+                        inverse: Some(Inverse::Entrante {
+                            pare_feu: pf,
+                            port: *port,
+                        }),
                     },
                     retenir,
                 },
@@ -688,10 +697,16 @@ pub(crate) fn defaire(b: &Blocage) -> Result<String, String> {
         return Err(tr!("rien à défaire", "nothing to undo").to_string());
     };
     let fait = match annulation {
-        Annulation::Commandes { commandes, port } => {
-            if crate::machine::appliquer(commandes) {
+        Annulation::Commandes {
+            commandes,
+            port,
+            inverse,
+        } => {
+            let (commandes, port) = commandes_d_annulation(commandes, port.as_deref(), *inverse)
+                .ok_or_else(|| refus_d_annulation(commandes))?;
+            if crate::machine::appliquer(&commandes) {
                 if let Some(p) = port {
-                    crate::machine::oublier_port(p);
+                    crate::machine::oublier_port(&p);
                 }
                 Ok(())
             } else {
@@ -736,9 +751,95 @@ pub(crate) fn defaire(b: &Blocage) -> Result<String, String> {
     })
 }
 
+/// Les commandes qui défont un blocage, refaites ici depuis ses champs typés, et le port retenu à oublier : jamais
+/// les chaînes relues du relevé, que n'importe quel programme du compte peut écrire. Une note d'avant les champs
+/// typés n'est rejouée que si elle est exactement ce que Vanguard aurait écrit pour une adresse, un port ou une valeur
+/// (`inverse_reconnue`) ; sinon, `None` : refusée (`refus_d_annulation` dit ce qu'elle contient, à faire à la main).
+pub(super) fn commandes_d_annulation(
+    commandes: &[String],
+    port: Option<&str>,
+    inverse: Option<Inverse>,
+) -> Option<(Vec<String>, Option<String>)> {
+    let inverse = match inverse {
+        Some(i) => i,
+        None => inverse_reconnue(commandes, port)?,
+    };
+    match inverse {
+        Inverse::Sortante { pare_feu, adresse } => Some((pare_feu::sortante(pare_feu, adresse).retirer, None)),
+        Inverse::Entrante { pare_feu, port } => {
+            let regle = pare_feu::entrante(pare_feu, port)?;
+            let retenu = (pare_feu == PareFeu::Ufw).then(|| format!("{port}/tcp"));
+            Some((regle.retirer, retenu))
+        }
+        #[cfg(any(windows, test))]
+        Inverse::Pilotes { avant } => Some((annuler_pilotes(avant), None)),
+        // Hors de Windows, rien à remettre : la note ne vient pas d'ici.
+        #[cfg(not(any(windows, test)))]
+        Inverse::Pilotes { .. } => None,
+    }
+}
+
+/// Le refus d'une annulation qui ne se refait pas (`commandes_d_annulation`), avec ses commandes montrées.
+pub(super) fn refus_d_annulation(commandes: &[String]) -> String {
+    trf!(
+        "annulation notée sous une forme que Vanguard ne rejoue pas (elle a pu être écrite par un autre programme) : rien n'est lancé. Si ce blocage est bien le tien, défais-le à la main : {}",
+        "undo noted in a form Vanguard does not replay (another program may have written it): nothing is run. If this block really is yours, undo it by hand: {}",
+        commandes
+            .iter()
+            .map(|c| super::commande_montree(c))
+            .collect::<Vec<_>>()
+            .join(" ; ")
+    )
+}
+
+/// Une note d'avant les champs typés : les commandes sont-elles exactement celles que Vanguard écrivait pour une
+/// adresse, un port ou une valeur d'avant ? Les valeurs essayées sont celles qui se lisent dans les commandes ; tout
+/// autre texte (une commande ajoutée, changée d'un caractère) ne colle à rien.
+pub(crate) fn inverse_reconnue(commandes: &[String], port: Option<&str>) -> Option<Inverse> {
+    const TOUS: [PareFeu; 4] = [PareFeu::Ufw, PareFeu::Nftables, PareFeu::Windows, PareFeu::Pf];
+    let morceaux: Vec<&str> = commandes
+        .iter()
+        .flat_map(|c| c.split(|x: char| !(x.is_ascii_hexdigit() || x == '.' || x == ':')))
+        .filter(|m| !m.is_empty())
+        .collect();
+    for ip in morceaux.iter().filter_map(|m| m.parse::<std::net::IpAddr>().ok()) {
+        for pf in TOUS {
+            if pare_feu::sortante(pf, ip).retirer == commandes && port.is_none() {
+                return Some(Inverse::Sortante {
+                    pare_feu: pf,
+                    adresse: ip.to_canonical(),
+                });
+            }
+        }
+    }
+    for p in morceaux.iter().filter_map(|m| m.parse::<u16>().ok()) {
+        for pf in TOUS {
+            let retenu = (pf == PareFeu::Ufw).then(|| format!("{p}/tcp"));
+            if pare_feu::entrante(pf, p).is_some_and(|r| r.retirer == commandes)
+                && (port.is_none() || port == retenu.as_deref())
+            {
+                return Some(Inverse::Entrante { pare_feu: pf, port: p });
+            }
+        }
+    }
+    #[cfg(any(windows, test))]
+    {
+        let valeurs = morceaux.iter().filter_map(|m| m.parse::<u32>().ok()).map(Some);
+        for avant in std::iter::once(None).chain(valeurs) {
+            if annuler_pilotes(avant) == commandes && port.is_none() {
+                return Some(Inverse::Pilotes { avant });
+            }
+        }
+    }
+    None
+}
+
 /// Remet la copie d'avant, seulement si le fichier est encore celui que Vanguard a écrit : sinon une modification
 /// faite depuis serait perdue.
 pub(crate) fn remettre_copie(fichier: &Path, copie: &Path, empreinte: &str) -> Result<(), String> {
+    if !copie_admise(fichier, copie) {
+        return Err(refus_de_copie(fichier, copie));
+    }
     let actuel = std::fs::read(fichier).map_err(|e| e.to_string())?;
     if empreinte_texte(&actuel) != empreinte {
         return Err(trf!(
@@ -749,6 +850,42 @@ pub(crate) fn remettre_copie(fichier: &Path, copie: &Path, empreinte: &str) -> R
     }
     let avant = std::fs::read(copie).map_err(|e| e.to_string())?;
     std::fs::write(fichier, avant).map_err(|e| e.to_string())
+}
+
+/// La note de copie a la forme que `Faire::Permissions` écrit : la copie, un fichier ordinaire (pas un lien), dans
+/// blocage/copies du dossier de Vanguard, nommée « <id>-<nom du fichier> » ; le fichier, un settings.json ou
+/// settings.local.json ordinaire d'un dossier .claude. changements.jsonl n'est pas scellé : sans cela, un programme du
+/// compte y noterait une « copie » à lui de /etc/passwd ou du fichier hosts, que Vanguard lancé en administrateur
+/// (même dossier de données) ou par sudo -E remettrait.
+pub(crate) fn copie_admise(fichier: &Path, copie: &Path) -> bool {
+    let copies = crate::socle::dossier_local().join("blocage").join("copies");
+    let ordinaire = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file());
+    let nom = fichier
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| matches!(*n, "settings.json" | "settings.local.json"));
+    let dans_claude = fichier
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|d| d == ".claude");
+    let nom_de_copie = copie.file_name().and_then(|n| n.to_str());
+    copie.parent() == Some(copies.as_path())
+        && ordinaire(copie)
+        && ordinaire(fichier)
+        && dans_claude
+        && nom
+            .zip(nom_de_copie)
+            .is_some_and(|(n, c)| c.ends_with(&format!("-{n}")))
+}
+
+/// Le refus d'une note de copie hors de ce que Vanguard écrit, avec le geste à faire à la main si elle est bien à soi.
+pub(crate) fn refus_de_copie(fichier: &Path, copie: &Path) -> String {
+    trf!(
+        "copie notée hors de ce que Vanguard écrit (un autre programme a pu l'écrire) : rien n'est remis ; à faire à la main : {} → {}",
+        "copy noted outside what Vanguard writes (another program may have written it): nothing is put back; to do by hand: {} → {}",
+        affichable(&copie.to_string_lossy()),
+        affichable(&fichier.to_string_lossy())
+    )
 }
 
 /// La clé que le basculeur « Liste de blocage des pilotes vulnérables » de Sécurité Windows écrit.
@@ -893,8 +1030,13 @@ mod tests {
     fn copie_remise_seulement_sur_le_fichier_ecrit() {
         let d = std::env::temp_dir().join(format!("vanguard-blocage-copie-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        let (fichier, copie) = (d.join("settings.json"), d.join("copie.json"));
+        std::fs::create_dir_all(d.join(".claude")).unwrap();
+        let copies = crate::socle::dossier_local().join("blocage").join("copies");
+        std::fs::create_dir_all(&copies).unwrap();
+        let (fichier, copie) = (
+            d.join(".claude").join("settings.json"),
+            copies.join("c0ffee-settings.json"),
+        );
         std::fs::write(&copie, "{\"permissions\": {\"defaultMode\": \"bypassPermissions\"}}").unwrap();
         let ecrit = "{\"permissions\": {\"defaultMode\": \"default\"}}";
         std::fs::write(&fichier, ecrit).unwrap();
@@ -907,6 +1049,49 @@ mod tests {
         std::fs::write(&fichier, ecrit).unwrap();
         remettre_copie(&fichier, &copie, &empreinte).unwrap();
         assert!(std::fs::read_to_string(&fichier).unwrap().contains("bypassPermissions"));
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_file(&copie);
+    }
+
+    /// Une note de copie forgée dans changements.jsonl (non scellé) : une cible hors d'un settings.json de .claude
+    /// (/etc/hosts, ici une copie jetable) ou une copie hors de blocage/copies n'est jamais remise, et la cible reste
+    /// telle quelle, même avec la bonne empreinte.
+    #[test]
+    fn copie_forgee_jamais_remise() {
+        let d = std::env::temp_dir().join(format!("vanguard-blocage-copie-forgee-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("etc")).unwrap();
+        std::fs::create_dir_all(d.join(".claude")).unwrap();
+        let copies = crate::socle::dossier_local().join("blocage").join("copies");
+        std::fs::create_dir_all(&copies).unwrap();
+        let hosts = d.join("etc").join("hosts");
+        std::fs::write(&hosts, "127.0.0.1 localhost\n").unwrap();
+        let piege = copies.join("c0ffee-hosts");
+        std::fs::write(&piege, "203.0.113.7 banque.example\n").unwrap();
+        let empreinte = empreinte_texte(&std::fs::read(&hosts).unwrap());
+        // Cible qui n'est pas un settings.json de .claude.
+        assert!(!copie_admise(&hosts, &piege));
+        let e = remettre_copie(&hosts, &piege, &empreinte).unwrap_err();
+        assert!(e.contains("main") || e.contains("hand"), "{e}");
+        assert_eq!(std::fs::read_to_string(&hosts).unwrap(), "127.0.0.1 localhost\n");
+        // Bonne cible, copie hors de blocage/copies.
+        let settings = d.join(".claude").join("settings.json");
+        std::fs::write(&settings, "{}").unwrap();
+        let ailleurs = d.join("c0ffee-settings.json");
+        std::fs::write(&ailleurs, "{\"permissions\": {\"defaultMode\": \"bypassPermissions\"}}").unwrap();
+        let empreinte = empreinte_texte(b"{}");
+        assert!(remettre_copie(&settings, &ailleurs, &empreinte).is_err());
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{}");
+        // Copie en lien vers un fichier choisi : refusée aussi.
+        #[cfg(unix)]
+        {
+            let lien = copies.join("c0ffee-settings.json");
+            let _ = std::fs::remove_file(&lien);
+            std::os::unix::fs::symlink(&ailleurs, &lien).unwrap();
+            assert!(!copie_admise(&settings, &lien));
+            let _ = std::fs::remove_file(&lien);
+        }
+        let _ = std::fs::remove_file(&piege);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -986,6 +1171,87 @@ mod tests {
 
     /// Garde-fous à la préparation : session à distance, droits manquants sans personne pour répondre, pare-feu
     /// absent ; rien ne se prépare, la raison est dite.
+    /// Un programme du compte forge dans le relevé un blocage « en place » dont l'annulation est une commande sudo à
+    /// lui : elle n'est jamais lancée. L'annulation se refait depuis les champs typés, ou depuis une note d'avant
+    /// qui est exactement ce que Vanguard écrivait ; tout le reste est refusé.
+    #[test]
+    fn annulation_relue_jamais_rejouee_telle_quelle() {
+        let forgee = vec!["sudo sh -c 'id > /tmp/vanguard-preuve-root'".to_string()];
+        assert_eq!(commandes_d_annulation(&forgee, None, None), None);
+        let e = refus_d_annulation(&forgee);
+        assert!(e.contains("à la main") || e.contains("by hand"), "{e}");
+        // Une vraie commande d'avant, suivie d'une commande ajoutée : refusée aussi.
+        let mut ajoutee = pare_feu::sortante(PareFeu::Ufw, "203.0.113.7".parse().unwrap()).retirer;
+        ajoutee.push("sudo sh -c 'id'".into());
+        assert_eq!(commandes_d_annulation(&ajoutee, None, None), None);
+        // Les champs typés l'emportent sur les commandes relues, quelles qu'elles soient.
+        let typee = Inverse::Sortante {
+            pare_feu: PareFeu::Ufw,
+            adresse: "203.0.113.7".parse().unwrap(),
+        };
+        let (c, port) = commandes_d_annulation(&forgee, Some("22/tcp"), Some(typee)).unwrap();
+        assert_eq!(
+            (c, port),
+            (vec!["sudo ufw delete deny out to '203.0.113.7'".to_string()], None)
+        );
+        let (c, port) = commandes_d_annulation(
+            &[],
+            None,
+            Some(Inverse::Entrante {
+                pare_feu: PareFeu::Ufw,
+                port: 11434,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            (c, port.as_deref()),
+            (vec!["sudo ufw delete deny '11434/tcp'".to_string()], Some("11434/tcp"))
+        );
+        // Les notes d'avant, telles que Vanguard les écrivait, se reconnaissent sur chaque pare-feu.
+        for pf in [PareFeu::Ufw, PareFeu::Nftables, PareFeu::Windows, PareFeu::Pf] {
+            for ip in ["203.0.113.7", "2001:db8::7"] {
+                let ip: std::net::IpAddr = ip.parse().unwrap();
+                let ancienne = pare_feu::sortante(pf, ip).retirer;
+                assert_eq!(
+                    inverse_reconnue(&ancienne, None),
+                    Some(Inverse::Sortante {
+                        pare_feu: pf,
+                        adresse: ip
+                    }),
+                    "{pf:?} {ip}"
+                );
+            }
+            if let Some(r) = pare_feu::entrante(pf, 11434) {
+                let port = (pf == PareFeu::Ufw).then_some("11434/tcp");
+                assert_eq!(
+                    inverse_reconnue(&r.retirer, port),
+                    Some(Inverse::Entrante {
+                        pare_feu: pf,
+                        port: 11434
+                    })
+                );
+            }
+        }
+        for avant in [None, Some(0), Some(1)] {
+            assert_eq!(
+                inverse_reconnue(&annuler_pilotes(avant), None),
+                Some(Inverse::Pilotes { avant })
+            );
+        }
+        // Les champs typés se relisent tels quels du relevé.
+        let a = Annulation::Commandes {
+            commandes: Vec::new(),
+            port: None,
+            inverse: Some(typee),
+        };
+        let texte = serde_json::to_string(&a).unwrap();
+        assert!(
+            texte.contains(r#""inverse":{"genre":"sortante","pare_feu":"ufw","adresse":"203.0.113.7"}"#),
+            "{texte}"
+        );
+        assert_eq!(serde_json::from_str::<Annulation>(&texte).unwrap(), a);
+    }
+
     #[test]
     fn gestes_refuses_avant_d_y_toucher() {
         let adresse = |ip: &str| {
@@ -1000,7 +1266,7 @@ mod tests {
         assert_eq!(p.commandes[0], "sudo ufw prepend deny out to '203.0.113.7'");
         assert!(matches!(
             &p.faire,
-            Faire::Commandes { annulation: Annulation::Commandes { commandes, port: None }, .. }
+            Faire::Commandes { annulation: Annulation::Commandes { commandes, port: None, inverse: Some(_) }, .. }
                 if commandes == &["sudo ufw delete deny out to '203.0.113.7'".to_string()]
         ));
         // Surveillance (personne pour répondre) sans droits : rien.

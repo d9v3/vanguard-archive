@@ -33,21 +33,66 @@ pub(crate) fn hasard() -> u64 {
 }
 
 /// Passe à `lire` chaque message reçu sur `socket` jusqu'à `fin`, et rend la première réponse qu'elle reconnaît.
-/// Rien au délai écoulé, ni à une erreur de réception (sous Windows, la réponse ICMP à un envoi précédent en est une).
+/// Rien au délai écoulé. Une erreur de réception ne coupe pas l'écoute : sous Windows, un datagramme plus gros que le
+/// tampon (WSAEMSGSIZE) ou la réponse ICMP à un envoi précédent (WSAECONNRESET) en sont une, et n'importe quel
+/// appareil du réseau en provoquait une juste après la question, pour que la vraie réponse ne soit jamais lue (« UPnP
+/// coupé », alors qu'il est actif).
 pub(crate) fn recevoir<T>(
     socket: &UdpSocket,
     fin: Instant,
     tampon: &mut [u8],
+    lire: impl FnMut(&[u8], SocketAddr) -> Option<T>,
+) -> Option<T> {
+    recevoir_avec(
+        |tampon, reste| {
+            socket.set_read_timeout(Some(reste))?;
+            socket.recv_from(tampon)
+        },
+        fin,
+        tampon,
+        lire,
+    )
+}
+
+/// Au-delà, des erreurs qui ne consomment rien (une socket hors d'usage) arrêtent l'écoute : elle ne tourne pas à
+/// vide jusqu'au délai. Un datagramme trop gros ou un ICMP « port injoignable » (Windows) n'y comptent pas : chacun
+/// est retiré de la file, et compté, un appareil du réseau local qui en envoie 257 coupait l'écoute avant la box.
+const ERREURS_MAX: u32 = 256;
+/// WSAEMSGSIZE : sous Windows, un datagramme plus gros que le tampon, retiré de la file.
+const WSAEMSGSIZE: i32 = 10040;
+
+/// `recevoir`, avec la réception donnée (les tests y passent la leur).
+fn recevoir_avec<T>(
+    mut recevoir_un: impl FnMut(&mut [u8], std::time::Duration) -> std::io::Result<(usize, SocketAddr)>,
+    fin: Instant,
+    tampon: &mut [u8],
     mut lire: impl FnMut(&[u8], SocketAddr) -> Option<T>,
 ) -> Option<T> {
+    let mut erreurs = 0;
     loop {
         let reste = fin.saturating_duration_since(Instant::now());
-        if reste.is_zero() || socket.set_read_timeout(Some(reste)).is_err() {
+        if reste.is_zero() {
             return None;
         }
-        let (n, de) = socket.recv_from(tampon).ok()?;
-        if let Some(reponse) = lire(&tampon[..n], de) {
-            return Some(reponse);
+        match recevoir_un(tampon, reste) {
+            Ok((n, de)) => {
+                if let Some(reponse) = lire(&tampon[..n.min(tampon.len())], de) {
+                    return Some(reponse);
+                }
+            }
+            // Le délai : fini.
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                return None;
+            }
+            // WSAEMSGSIZE et WSAECONNRESET consomment un datagramme (ou un ICMP) : l'écoute avance. Seules les autres
+            // erreurs (socket hors d'usage) comptent pour le plafond.
+            Err(e) if e.raw_os_error() == Some(WSAEMSGSIZE) || e.kind() == std::io::ErrorKind::ConnectionReset => {}
+            Err(_) => {
+                erreurs += 1;
+                if erreurs > ERREURS_MAX {
+                    return None;
+                }
+            }
         }
     }
 }
@@ -304,6 +349,13 @@ pub fn tester() {
             None,
             tr!("inconnu (box non interrogée)", "unknown (router not queried)"),
         ),
+        Etat::Usurpee(_) => (
+            None,
+            tr!(
+                "inconnu (un autre appareil se dit box)",
+                "unknown (another device claims to be the router)"
+            ),
+        ),
     };
     let publique = mesure.vues[0].1;
     println!();
@@ -359,6 +411,82 @@ pub fn tester() {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+
+    /// Un datagramme trop gros (WSAEMSGSIZE sous Windows) ou un faux « port injoignable » (WSAECONNRESET) juste après
+    /// la question : l'écoute continue, et la vraie réponse est lue. Seul le délai l'arrête.
+    #[test]
+    fn une_erreur_de_reception_ne_coupe_pas_l_ecoute() {
+        let box_ = SocketAddr::from(([192, 168, 1, 1], 1900));
+        let mut suite = vec![
+            Err(std::io::Error::other("WSAEMSGSIZE")),
+            Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset)),
+            Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
+            Ok((2, box_)),
+        ]
+        .into_iter();
+        let fin = Instant::now() + std::time::Duration::from_secs(5);
+        let mut tampon = [7u8; 8];
+        let lu = recevoir_avec(
+            |_, _| suite.next().unwrap(),
+            fin,
+            &mut tampon,
+            |m, de| Some((m.len(), de)),
+        );
+        assert_eq!(lu, Some((2, box_)));
+        // Le délai, lui, arrête.
+        let lu = recevoir_avec(
+            |_, _| Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)),
+            fin,
+            &mut tampon,
+            |_, _| Some(()),
+        );
+        assert_eq!(lu, None);
+        // Une socket hors d'usage n'est pas écoutée à vide jusqu'au délai.
+        let lu = recevoir_avec(
+            |_, _| Err(std::io::Error::other("hors d'usage")),
+            fin,
+            &mut tampon,
+            |_, _| Some(()),
+        );
+        assert_eq!(lu, None);
+        assert!(Instant::now() < fin);
+    }
+
+    /// Plus de datagrammes trop gros (ou d'ICMP) que le plafond, puis la box : ils ont chacun été retirés de la file,
+    /// l'écoute continue et la box est lue (avant, 257 suffisaient à rendre « UPnP coupé »).
+    #[test]
+    fn datagrammes_trop_gros_au_dela_du_plafond() {
+        let box_ = SocketAddr::from(([192, 168, 1, 1], 1900));
+        let mut suite = (0..300)
+            .map(|_| Err(std::io::Error::from_raw_os_error(WSAEMSGSIZE)))
+            .chain((0..300).map(|_| Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset))))
+            .chain(std::iter::once(Ok((2, box_))));
+        let fin = Instant::now() + std::time::Duration::from_secs(5);
+        let mut tampon = [7u8; 8];
+        let lu = recevoir_avec(
+            |_, _| suite.next().unwrap(),
+            fin,
+            &mut tampon,
+            |m, de| Some((m.len(), de)),
+        );
+        assert_eq!(lu, Some((2, box_)));
+    }
+
+    /// Pour de vrai, sur la boucle locale : un datagramme plus gros que le tampon, puis la réponse attendue.
+    #[test]
+    fn datagramme_trop_gros_puis_reponse() {
+        let ecoute = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let envoi = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let vers = ecoute.local_addr().unwrap();
+        envoi.send_to(&[0u8; 8192], vers).unwrap();
+        envoi.send_to(b"HTTP/1.1 200 OK", vers).unwrap();
+        let mut tampon = vec![0u8; 4096];
+        let fin = Instant::now() + std::time::Duration::from_secs(3);
+        let lu = recevoir(&ecoute, fin, &mut tampon, |m, _| {
+            m.starts_with(b"HTTP/1.1").then_some(())
+        });
+        assert_eq!(lu, Some(()));
+    }
 
     /// Réponse « Binding Success » avec une XOR-MAPPED-ADDRESS (et un attribut inconnu avant, de longueur impaire).
     pub(super) fn reponse(id: &[u8; 12], vue: SocketAddr) -> Vec<u8> {

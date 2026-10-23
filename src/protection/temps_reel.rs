@@ -13,8 +13,10 @@
 //! tout seul (`blocage::pour_agir`).
 //!
 //! Un autre programme du compte peut écrire ce fichier : couper d'abord ce qui surveille est un geste de logiciel
-//! malveillant. Une coupure ne reste donc jamais muette : la surveillance la notifie à sa première passe, puis une
-//! fois par jour tant qu'elle dure, et l'entretien du mois la redit.
+//! malveillant. Le réglage et le moment du dernier rappel sont donc scellés (`sceau`) : un réglage écrit hors de
+//! Vanguard ne coupe rien (il se lit « illisible », la protection reste en marche), et un rappel posé d'avance ne
+//! tait plus la notification. Une coupure ne reste jamais muette : la surveillance la notifie à sa première passe,
+//! puis une fois par jour tant qu'elle dure, et l'entretien du mois la redit.
 
 #[cfg(unix)]
 use crate::socle::personnel::dossier_personnel_de;
@@ -156,8 +158,8 @@ pub(crate) fn dossier_local_appelant() -> (PathBuf, bool) {
 }
 
 /// Le fichier du rappel : quand la coupure a été notifiée pour la dernière fois.
-fn fichier_rappel() -> PathBuf {
-    crate::socle::dossier_local().join("temps-reel-rappel.txt")
+fn dossier_rappel() -> PathBuf {
+    crate::socle::dossier_local()
 }
 
 /// Sous sudo ou pkexec (root, avec le numéro du compte qui l'a lancé) : le dossier de données de ce compte. Sous
@@ -188,26 +190,37 @@ fn maintenant() -> i64 {
 }
 
 /// L'état de `chemin` à l'instant `maintenant`.
+/// Le dossier et le nom d'un fichier d'état (`chemin` : `<dossier>/temps-reel.json`).
+fn dossier_et_nom(chemin: &Path) -> (&Path, &str) {
+    (
+        chemin.parent().unwrap_or(Path::new(".")),
+        chemin
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(crate::sceau::TEMPS_REEL),
+    )
+}
+
 fn lire_de(chemin: &Path, maintenant: i64) -> Etat {
-    use std::io::Read;
-    // Sans suivre de lien : Vanguard écrit un vrai fichier. Un lien, un tube ou un périphérique (qu'un Vanguard en
-    // administrateur lirait sinon sans fin, ou avec ses droits) n'est pas le sien.
-    match std::fs::symlink_metadata(chemin) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Etat::EnMarche,
-        Err(e) => return Etat::Illisible(e.to_string()),
-        Ok(m) if !m.file_type().is_file() => {
-            return Etat::Illisible(tr!("pas un simple fichier", "not a plain file").to_string());
+    use crate::sceau::Lecture;
+    // Lu par les sceaux : un simple fichier (ni lien, ni tube, ni périphérique, qu'un Vanguard en administrateur
+    // lirait sinon sans fin, ou avec ses droits), tel que Vanguard l'a écrit. Écrit hors de Vanguard, il ne coupe
+    // rien : un programme du compte ne coupe pas la surveillance en posant ce fichier. Sous sudo, le dossier du
+    // compte n'est que lu (`socle::ecriture_sure`).
+    let (dossier, nom) = dossier_et_nom(chemin);
+    let octets = match crate::sceau::lire_dans(dossier, nom) {
+        Lecture::Absent | Lecture::Inconnu | Lecture::Falsifie(None) => return Etat::EnMarche,
+        Lecture::Intact(o) | Lecture::Adopte(o) => o,
+        Lecture::Falsifie(Some(_)) => {
+            return Etat::Illisible(tr!("changé hors de Vanguard", "changed outside Vanguard").to_string());
         }
-        Ok(m) if m.len() > TAILLE_MAX => {
-            return Etat::Illisible(trf!("plus de {} Kio", "over {} KiB", TAILLE_MAX >> 10));
-        }
-        Ok(_) => {}
+        Lecture::Illisible(e) => return Etat::Illisible(e),
+    };
+    if octets.len() as u64 > TAILLE_MAX {
+        return Etat::Illisible(trf!("plus de {} Kio", "over {} KiB", TAILLE_MAX >> 10));
     }
-    let mut texte = String::new();
-    let lu = std::fs::File::open(chemin)
-        .and_then(|f| f.take(TAILLE_MAX + 1).read_to_string(&mut texte))
-        .map_err(|e| e.to_string())
-        .and_then(|_| serde_json::from_str::<Fichier>(texte.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()));
+    let texte = String::from_utf8_lossy(&octets);
+    let lu = serde_json::from_str::<Fichier>(texte.trim_start_matches('\u{feff}')).map_err(|e| e.to_string());
     let f = match lu {
         Ok(f) => f,
         Err(e) => return Etat::Illisible(e),
@@ -252,6 +265,9 @@ fn mettre_de_cote(chemin: &Path) -> std::io::Result<PathBuf> {
         .find(|c| !c.exists())
         .ok_or_else(|| std::io::Error::other(tr!("trop de fichiers mis de côté", "too many files set aside")))?;
     std::fs::rename(chemin, &copie)?;
+    // Mis de côté par Vanguard lui-même : son sceau part avec lui, sinon le bilan le dirait supprimé hors de Vanguard.
+    let (dossier, nom) = dossier_et_nom(chemin);
+    let _ = crate::sceau::effacer_dans(dossier, nom);
     Ok(copie)
 }
 
@@ -265,7 +281,8 @@ fn couper_dans(chemin: &Path, duree: Duree, maintenant: i64) -> Result<Coupure, 
         jusqu_a: duree.secondes().map(|s| maintenant.saturating_add(s)),
     };
     let texte = serde_json::to_string_pretty(&f).map_err(|e| e.to_string())?;
-    crate::socle::ecrire_atomique(chemin, texte).map_err(|e| e.to_string())?;
+    let (dossier, nom) = dossier_et_nom(chemin);
+    crate::sceau::ecrire_dans(dossier, nom, texte.as_bytes()).map_err(|e| e.to_string())?;
     Ok(Coupure {
         depuis: f.coupee_le,
         jusqu_a: f.jusqu_a,
@@ -277,10 +294,10 @@ fn reprendre_dans(chemin: &Path, maintenant: i64) -> Result<(), String> {
     match lire_de(chemin, maintenant) {
         Etat::EnMarche => Ok(()),
         Etat::Illisible(_) => mettre_de_cote(chemin).map(|_| ()).map_err(|e| e.to_string()),
-        Etat::Coupee(_) | Etat::Echue(_) => match std::fs::remove_file(chemin) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
-            _ => Ok(()),
-        },
+        Etat::Coupee(_) | Etat::Echue(_) => {
+            let (dossier, nom) = dossier_et_nom(chemin);
+            crate::sceau::effacer_dans(dossier, nom).map_err(|e| e.to_string())
+        }
     }
 }
 
@@ -505,17 +522,27 @@ fn texte_du_rappel(c: &Coupure, maintenant: i64) -> (&'static str, String) {
 /// Redit la coupure par une notification, si c'est le moment ; le moment du rappel est noté.
 fn rappeler(c: &Coupure) {
     let maintenant = maintenant();
-    let chemin = fichier_rappel();
-    let dernier = std::fs::read_to_string(&chemin)
-        .ok()
-        .and_then(|t| t.trim().parse::<i64>().ok());
-    if !rappel_du(c, dernier, maintenant) {
+    let dossier = dossier_rappel();
+    if !rappel_du(c, dernier_rappel(&dossier), maintenant) {
         return;
     }
     let (titre, texte) = texte_du_rappel(c, maintenant);
     crate::reseau::surveillance::alerter(crate::reseau::tableau::Genre::Autre, titre, &texte);
     // Non noté (disque plein, dossier refusé) : la passe suivante la redit, plutôt que de se taire.
-    let _ = crate::socle::ecrire_atomique(&chemin, maintenant.to_string());
+    let _ = crate::sceau::ecrire_dans(
+        &dossier,
+        crate::sceau::TEMPS_REEL_RAPPEL,
+        maintenant.to_string().as_bytes(),
+    );
+}
+
+/// Le moment du dernier rappel, seulement tel que Vanguard l'a noté : posé, adopté, changé ou illisible, il ne
+/// vaut rien, et la coupure se redit tout de suite.
+fn dernier_rappel(dossier: &Path) -> Option<i64> {
+    match crate::sceau::lire_dans(dossier, crate::sceau::TEMPS_REEL_RAPPEL) {
+        crate::sceau::Lecture::Intact(o) => std::str::from_utf8(&o).ok()?.trim().parse::<i64>().ok(),
+        _ => None,
+    }
 }
 
 /// Au début de chaque passe de la surveillance : `true` si la passe s'arrête là (coupée ; c'est notifié à la première
@@ -620,6 +647,34 @@ mod tests {
 
     const MIDI: i64 = 1_792_000_000;
 
+    /// Un réglage tel que Vanguard l'écrit (scellé).
+    fn poser(f: &Path, texte: &str) {
+        let (dossier, nom) = dossier_et_nom(f);
+        crate::sceau::ecrire_dans(dossier, nom, texte.as_bytes()).unwrap();
+    }
+
+    /// Un programme du compte coupe la protection en posant le réglage, puis un rappel tout frais pour taire la
+    /// notification : le réglage posé ne coupe rien, et le rappel posé ne vaut rien (la coupure se redit).
+    #[test]
+    fn reglage_et_rappel_poses_a_cote_ne_coupent_ni_ne_taisent_rien() {
+        let f = jetable("pose");
+        let d = f.parent().unwrap().to_path_buf();
+        // Les sceaux existent déjà (Vanguard a servi ici).
+        crate::sceau::ecrire_dans(&d, crate::sceau::APPRIS, b"{}").unwrap();
+        std::fs::write(&f, format!("{{\"coupee_le\": {}}}", MIDI - 60)).unwrap();
+        assert!(
+            matches!(lire_de(&f, MIDI), Etat::Illisible(_)),
+            "{:?}",
+            lire_de(&f, MIDI)
+        );
+        std::fs::write(d.join(crate::sceau::TEMPS_REEL_RAPPEL), (MIDI - 30).to_string()).unwrap();
+        assert_eq!(dernier_rappel(&d), None);
+        // Noté par Vanguard : cru.
+        crate::sceau::ecrire_dans(&d, crate::sceau::TEMPS_REEL_RAPPEL, (MIDI - 30).to_string().as_bytes()).unwrap();
+        assert_eq!(dernier_rappel(&d), Some(MIDI - 30));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// Sans fichier : en marche. Coupée pour une heure : coupée, puis échue passé l'heure ; jusqu'à reprise : coupée
     /// même un an après. La reprise retire le fichier.
     #[test]
@@ -701,23 +756,25 @@ mod tests {
         assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
         // Une échéance plus lointaine que quatre heures, ou d'avant la coupure : pas la sienne.
         for fin in [MIDI + 4 * 3600 + 1, MIDI, MIDI - 1] {
-            std::fs::write(&f, format!("{{\"coupee_le\": {MIDI}, \"jusqu_a\": {fin}}}")).unwrap();
+            poser(&f, &format!("{{\"coupee_le\": {MIDI}, \"jusqu_a\": {fin}}}"));
             assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)), "{fin}");
         }
         // Des nombres extrêmes ne font pas planter la lecture.
-        std::fs::write(
+        poser(
             &f,
-            format!("{{\"coupee_le\": {}, \"jusqu_a\": {}}}", i64::MIN, i64::MAX),
-        )
-        .unwrap();
+            &format!("{{\"coupee_le\": {}, \"jusqu_a\": {}}}", i64::MIN, i64::MAX),
+        );
         assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
         // Jusqu'à reprise, une date de début que Vanguard ne donne jamais (0, i64::MIN, d'avant le réglage) ne coupe
         // rien : un autre programme ne coupe pas la surveillance pour toujours avec « coupee_le: 0 ».
         for debut in [i64::MIN, 0, PLUS_ANCIENNE - 1] {
-            std::fs::write(&f, format!("{{\"coupee_le\": {debut}}}")).unwrap();
+            poser(&f, &format!("{{\"coupee_le\": {debut}}}"));
             assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)), "{debut}");
         }
+        // Écrite hors de Vanguard, une coupure valable ne coupe rien.
         std::fs::write(&f, format!("{{\"coupee_le\": {MIDI}}}")).unwrap();
+        assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
+        poser(&f, &format!("{{\"coupee_le\": {MIDI}}}"));
         assert!(lire_de(&f, MIDI + 365 * 86_400).coupure().is_some());
         // Jusqu'à reprise, une coupure datée de bien après maintenant (horloge retardée) ne se croit plus.
         assert!(matches!(lire_de(&f, MIDI - 3600), Etat::Echue(_)));
@@ -740,6 +797,14 @@ mod tests {
         let c = couper_dans(&f, Duree::UneHeure, MIDI).unwrap();
         assert_eq!(lire_de(&f, MIDI), Etat::Coupee(c));
         assert_eq!(de_cote(), 2);
+        // Mis de côté puis retiré par Vanguard : rien n'est dit « supprimé hors de Vanguard ».
+        reprendre_dans(&f, MIDI).unwrap();
+        std::fs::write(&f, "{abîmé").unwrap();
+        reprendre_dans(&f, MIDI).unwrap();
+        assert_eq!(
+            crate::sceau::lire_dans(&d, crate::sceau::TEMPS_REEL),
+            crate::sceau::Lecture::Absent
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 

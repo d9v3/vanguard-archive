@@ -780,6 +780,7 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
   done
   menu "$point"
   sync -f "$point/ventoy/ventoy.json"
+  redire_au_manifeste "$point" "${copiees[@]}"
   if ((${#copiees[@]})); then
     avertir "Clé VANGUARD : images à jour" "$(printf '%s\n' "${copiees[@]}")"
   fi
@@ -794,6 +795,25 @@ Les images en option passent après les autres. La remettre s'il reste la place 
     avertir "Clé VANGUARD : copie ratée" "$(printf '%s\n' "${echecs[@]}")"
     return 1
   fi
+}
+
+# Le manifeste de la clé (src/protection/manifeste.rs) relève ISO/ (taille) et ventoy/ (empreinte) : ce qui est posé
+# ici lui est redit, seulement les images copiées et vérifiées à l'instant, et le menu qui vient d'être réécrit. Une
+# image que ce script n'a pas posée reste hors de la référence : le bilan la dit nouvelle. Sans vanguard, ou sans
+# référence pour cette clé (pas encore déployée, ou d'avant les images) : dit, le bilan les dira changées.
+redire_au_manifeste() { # point, images copiées…
+  local point=$1 programme n args=()
+  shift
+  programme=$(command -v vanguard || true)
+  # Hors des essais (outils/essais-cle.sh), la copie de cargo install, que le PATH des services n'a pas.
+  [[ -n $programme || -n ${VANGUARD_ESSAI:-} ]] || programme=$HOME/.cargo/bin/vanguard
+  if [[ -z $programme || ! -x $programme ]]; then
+    echo "· manifeste de la clé : vanguard introuvable, images non redites (le bilan les dira changées)"
+    return 0
+  fi
+  for n in "$@"; do args+=(--image "$n"); done
+  "$programme" manifeste --images "$point" "${args[@]}" ||
+    echo "· manifeste de la clé : images non redites (le bilan les dira changées)"
 }
 
 # ventoy.json : Ventoy ne cherche que dans ISO/ (pas dans les dossiers de Vanguard), menu en français, un nom clair pour
@@ -870,7 +890,7 @@ case ${1:-} in
   --verifier) verifier_cache ;;
   --cle) copier_sur_cle "${2:-}" ;;
   --toutes) copier_sur_cle "${2:?point de montage de la clé}" toutes ;;
-  --menu) menu "${2:?point de montage de la clé}" ;;
+  --menu) menu "${2:?point de montage de la clé}" && redire_au_manifeste "$2" ;;
   --etat) etat ;;
   --sortes) echo "${SORTES[*]}" ;;
   *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;

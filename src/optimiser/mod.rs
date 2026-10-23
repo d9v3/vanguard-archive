@@ -127,7 +127,7 @@ fn charger_dans(dossier: &std::path::Path) -> Historique {
     use crate::sceau::Lecture;
     let chemin = dossier.join(crate::sceau::REGLAGES);
     let octets = match crate::sceau::lire_dans(dossier, crate::sceau::REGLAGES) {
-        Lecture::Absent => return Historique::default(),
+        Lecture::Absent | Lecture::Inconnu => return Historique::default(),
         Lecture::Intact(o) | Lecture::Adopte(o) => o,
         Lecture::Falsifie(_) => {
             let copie = mettre_de_cote(&chemin, "falsifie");

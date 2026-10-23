@@ -50,7 +50,8 @@ libfuzzer_sys::fuzz_target!(|octets: &[u8]| {
     }
     let _ = igd::erreur_soap(xml);
     let _ = igd::valeur(xml, "NewExternalIPAddress");
-    if let Some(r) = igd::lire_reponse_ssdp(xml) {
-        assert!(http_local::Adresse::lire(&r.emplacement).is_some());
+    if let Some(r) = igd::lire_reponse_ssdp(xml, std::net::Ipv4Addr::new(10, 0, 0, 1)) {
+        // Jamais un autre appareil que celui qui a répondu.
+        assert!(http_local::Adresse::lire(&r.emplacement).is_some_and(|a| a.ip == r.source));
     }
 });

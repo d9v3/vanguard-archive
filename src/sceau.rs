@@ -1,7 +1,8 @@
 //! Les sceaux de l'état de Vanguard : les fichiers qu'il garde sur cet ordinateur et qui décident de ce qu'il dit (les
 //! alertes déclarées normales, la référence des fichiers critiques et les changements déjà signalés, les connexions
 //! à des botnets déjà signalées, la plus haute version signée déjà vue, l'état de la machine au dernier passage de
-//! la surveillance, les valeurs d'avant des réglages d'Optimiser, les alertes de la surveillance déclarées normales).
+//! la surveillance, les valeurs d'avant des réglages d'Optimiser, les alertes de la surveillance déclarées normales,
+//! l'heure du dernier regard sur les téléchargements, les menaces que le blocage n'a pas pu bloquer déjà signalées).
 //! Un programme qui tourne sous le compte pouvait réécrire l'un d'eux pour faire
 //! taire sa propre alerte, sans que rien ne le dise. Chaque écriture de Vanguard note donc l'empreinte BLAKE3 du
 //! fichier dans `sceaux.json` ; une lecture qui ne la retrouve pas rend le fichier « falsifié », que chaque lecteur
@@ -13,6 +14,16 @@
 //! `sceaux.json` refait ce premier usage : les fichiers alors acceptés tels quels restent marqués « adoptés » (lus
 //! `Adopte`) jusqu'à ce que Vanguard les réécrive, et le bilan le dit (COM-ETA-001), au lieu de les croire en
 //! silence. Qui efface les sceaux puis en réécrit de valables n'est toujours pas vu.
+//!
+//! « Jamais écrit » n'est pas « disparu » : des sceaux refaits alors qu'une version qui scelle avait déjà servi sur
+//! cet ordinateur (son `sceaux.verrou` est resté), ou illisibles, ne savent plus quels fichiers existaient. Un fichier protégé absent se lit alors `Inconnu`, que
+//! chaque lecteur traite comme un état vide (tout est redit), jamais comme un premier passage muet ; et le bilan dit
+//! que les sceaux ont été refaits. Effacer d'un coup les sceaux et l'état de la machine ne fait donc plus taire la
+//! passe suivante.
+//!
+//! Un fichier d'état n'est lu que s'il est un simple fichier de taille raisonnable (`socle::lire_ordinaire`) : un tube
+//! nommé posé à sa place figeait la surveillance pour toujours. En root, les sceaux ne s'écrivent que dans un dossier
+//! à root (`socle::ecriture_sure`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -52,6 +63,31 @@ pub(crate) const REGLAGES: &str = "reglages.json";
 /// programme qui s'y ajouterait ferait taire sa propre alerte.
 pub(crate) const NORMALES: &str = "normales.json";
 
+/// La protection en temps réel coupée (`protection::temps_reel`) : un programme qui l'écrirait couperait la
+/// surveillance.
+pub(crate) const TEMPS_REEL: &str = "temps-reel.json";
+/// Le dernier rappel de la coupure (`protection::temps_reel`) : posé d'avance, il taisait la notification.
+pub(crate) const TEMPS_REEL_RAPPEL: &str = "temps-reel-rappel.txt";
+/// Ce que l'audit du réseau a déjà signalé (`reseau::surveillance`) : une redirection UPnP posée d'avance ne se
+/// notifiait plus.
+pub(crate) const AUDIT: &str = "surveillance-audit.json";
+/// Les sites dangereux déjà signalés (`protection::sortantes`).
+pub(crate) const SITES: &str = "surveillance-sites.txt";
+/// La passerelle déjà vue (`reseau::surveillance`).
+pub(crate) const PASSERELLE: &str = "surveillance-passerelle.json";
+/// L'heure du dernier regard de la surveillance sur Téléchargements (`protection::telechargement`) : un « depuis »
+/// posé dans le futur taisait tout fichier arrivé depuis.
+pub(crate) const TELECHARGEMENTS: &str = "surveillance-telechargements.json";
+/// Les menaces que le blocage automatique n'a pas pu bloquer, déjà signalées (`protection::blocage`) : une clé de
+/// menace ajoutée d'avance taisait « Vanguard n'a pas pu bloquer ».
+pub(crate) const BLOCAGE_SIGNALEES: &str = "blocage-non-bloquees.txt";
+/// La clé principale des versions révoquée par la clé de secours (`mise_a_jour::github`).
+pub(crate) const REVOCATION: &str = "versions/principale-revoquee.txt";
+
+/// Au-delà, ce n'est pas un fichier d'état de Vanguard (le plus gros fait quelques dizaines de Kio) : il n'est pas
+/// chargé.
+const TAILLE_MAX: u64 = 4 << 20;
+
 /// Les fichiers protégés : ceux que l'inventaire des fichiers d'état dit scellés (`modele::inventaire`). Un fichier
 /// d'état s'ajoute là, avec sa constante ici : on ne peut plus en sceller un sans l'inventorier.
 fn proteges() -> impl Iterator<Item = &'static str> {
@@ -61,7 +97,17 @@ fn proteges() -> impl Iterator<Item = &'static str> {
 /// Les fichiers protégés après le premier sceau : une version d'avant les écrivait déjà sans sceau, et des sceaux
 /// existants les feraient passer pour falsifiés à la mise à jour. La première fois que des sceaux les rencontrent,
 /// ils sont acceptés tels quels (« adoptés », dit au bilan comme tout premier usage), puis jugés comme les autres.
-const TARDIFS: [&str; 2] = [REGLAGES, NORMALES];
+const TARDIFS: [&str; 9] = [
+    REGLAGES,
+    NORMALES,
+    TEMPS_REEL,
+    TEMPS_REEL_RAPPEL,
+    AUDIT,
+    SITES,
+    PASSERELLE,
+    TELECHARGEMENTS,
+    BLOCAGE_SIGNALEES,
+];
 
 const REGISTRE: &str = "sceaux.json";
 const VERROU: &str = "sceaux.verrou";
@@ -82,6 +128,13 @@ struct Registre {
     /// fichier posé sans sceau est falsifié, comme les autres.
     #[serde(default)]
     vus: BTreeSet<String>,
+    /// Les sceaux ont été refaits (effacés ou illisibles) alors que Vanguard avait déjà servi ici.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    refaits: bool,
+    /// Les fichiers protégés absents quand les sceaux ont été refaits : ont-ils existé ? On ne le sait plus, jusqu'à
+    /// ce que Vanguard les écrive ou les oublie lui-même.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    inconnus: BTreeSet<String>,
 }
 
 /// Ce que Vanguard retrouve d'un de ses fichiers.
@@ -95,8 +148,11 @@ pub(crate) enum Lecture {
     Adopte(Vec<u8>),
     /// Changé hors de Vanguard : le contenu actuel, ou `None` s'il a été supprimé.
     Falsifie(Option<Vec<u8>>),
-    /// Là, mais il ne se lit pas (droits, dossier à sa place) : le pourquoi.
+    /// Là, mais il ne se lit pas (droits, dossier, tube ou lien à sa place, trop gros) : le pourquoi.
     Illisible(String),
+    /// Absent, mais les sceaux ont été refaits (ou ne se lisent plus) : peut-être effacé par un autre programme.
+    /// Jamais un premier passage : chaque lecteur le traite comme un état vide, où rien n'est tu.
+    Inconnu,
 }
 
 /// L'empreinte d'un fichier d'état : son nom en fait partie, un sceau ne vaut pas pour un autre fichier.
@@ -112,13 +168,19 @@ fn empreinte(nom: &str, octets: &[u8]) -> String {
 /// lecteur qui passerait entre l'écriture d'un fichier et celle de son sceau le croirait falsifié. Tenu quelques
 /// millisecondes ; au-delà de deux secondes (un processus figé), on avance sans lui plutôt que de tout bloquer.
 fn verrou(dossier: &Path) -> Option<std::fs::File> {
+    if !crate::socle::ecriture_sure(dossier) {
+        return None;
+    }
     std::fs::create_dir_all(dossier).ok()?;
-    let f = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(dossier.join(VERROU))
-        .ok()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    // Ni lien suivi, ni tube nommé attendu : un tube posé à sa place figeait open() pour toujours.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    let f = options.open(dossier.join(VERROU)).ok()?;
+    if !f.metadata().ok()?.file_type().is_file() {
+        return None;
+    }
     let fin = Instant::now() + Duration::from_secs(2);
     loop {
         match f.try_lock() {
@@ -133,7 +195,7 @@ fn verrou(dossier: &Path) -> Option<std::fs::File> {
 
 /// Les sceaux : `Ok(None)` s'il n'y en a pas encore (une version d'avant), `Err` s'ils ne se lisent plus.
 fn registre(dossier: &Path) -> Result<Option<Registre>, ()> {
-    match std::fs::read(dossier.join(REGISTRE)) {
+    match crate::socle::lire_ordinaire(&dossier.join(REGISTRE), TAILLE_MAX) {
         Ok(o) => serde_json::from_slice(&o).map(Some).map_err(|_| ()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err(()),
@@ -141,31 +203,64 @@ fn registre(dossier: &Path) -> Result<Option<Registre>, ()> {
 }
 
 fn enregistrer_registre(dossier: &Path, r: &Registre) -> std::io::Result<()> {
+    if !crate::socle::ecriture_sure(dossier) {
+        return Err(dossier_d_un_autre());
+    }
     crate::socle::ecrire_atomique(
         &dossier.join(REGISTRE),
         serde_json::to_vec_pretty(r).map_err(std::io::Error::other)?,
     )
 }
 
+/// Root n'écrit pas dans le dossier d'un compte (`socle::ecriture_sure`).
+fn dossier_d_un_autre() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        tr!(
+            "en administrateur, le dossier de données d'un autre compte n'est pas écrit",
+            "as administrator, another account's data folder is not written"
+        ),
+    )
+}
+
 /// Le contenu d'un fichier d'état, `Ok(None)` s'il n'existe pas.
 fn contenu(chemin: &Path) -> Result<Option<Vec<u8>>, String> {
-    match std::fs::read(chemin) {
+    match crate::socle::lire_ordinaire(chemin, TAILLE_MAX) {
         Ok(o) => Ok(Some(o)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.to_string()),
     }
 }
 
+/// Une version qui scelle a déjà servi ici : seule elle crée `sceaux.verrou` (`verrou`), et rien ne l'efface. Relu
+/// avant que `verrou` ne le crée.
+fn deja_scelle(dossier: &Path) -> bool {
+    std::fs::symlink_metadata(dossier.join(VERROU)).is_ok()
+}
+
 /// Premier passage d'une version qui scelle : les fichiers déjà là sont scellés tels quels, et ce départ est daté.
-fn adopter(dossier: &Path) -> Registre {
+/// Si une version qui scelle avait déjà servi ici (`deja_scelle`), les sceaux ont été effacés : un fichier protégé
+/// absent est alors inconnu, pas encore jamais écrit. Une version d'avant les sceaux (0.85) laisse son historique
+/// et ses fichiers de surveillance, mais jamais `sceaux.verrou` : sa mise à jour n'est pas des sceaux effacés (elle
+/// se disait refaite, en alerte élevée, et l'annonce des versions se taisait). Et effacer avec les sceaux
+/// l'historique et ces fichiers ne fait plus passer pour un premier usage : le verrou, lui, est resté.
+fn adopter(dossier: &Path, deja_scelle: bool) -> Registre {
+    let refaits = deja_scelle;
     let mut r = Registre {
         depuis: chrono::Local::now().format("%Y-%m-%d").to_string(),
+        refaits,
         ..Registre::default()
     };
     for nom in proteges() {
-        if let Ok(Some(o)) = contenu(&dossier.join(nom)) {
-            r.fichiers.insert(nom.to_string(), empreinte(nom, &o));
-            r.adoptes.insert(nom.to_string());
+        match contenu(&dossier.join(nom)) {
+            Ok(Some(o)) => {
+                r.fichiers.insert(nom.to_string(), empreinte(nom, &o));
+                r.adoptes.insert(nom.to_string());
+            }
+            Ok(None) if refaits => {
+                r.inconnus.insert(nom.to_string());
+            }
+            _ => {}
         }
     }
     r.vus = TARDIFS.iter().map(|n| (*n).to_string()).collect();
@@ -204,7 +299,8 @@ fn juger(nom: &str, lu: Result<Option<Vec<u8>>, String>, sceaux: Option<&Registr
     };
     let attendu = sceaux.and_then(|r| r.fichiers.get(nom));
     match (lu, attendu) {
-        // Même sans sceaux lisibles : un fichier absent ne fait rien croire.
+        // Sans sceaux lisibles, ou refaits sans lui : absent, mais peut-être effacé.
+        (None, None) if sceaux.is_none_or(|r| r.inconnus.contains(nom)) => Lecture::Inconnu,
         (None, None) => Lecture::Absent,
         (None, Some(_)) => Lecture::Falsifie(None),
         (Some(o), Some(e)) if *e == empreinte(nom, &o) => {
@@ -222,10 +318,11 @@ fn juger(nom: &str, lu: Result<Option<Vec<u8>>, String>, sceaux: Option<&Registr
 
 /// Un fichier d'état de `dossier`, jugé d'après ses sceaux.
 pub(crate) fn lire_dans(dossier: &Path, nom: &str) -> Lecture {
+    let deja = deja_scelle(dossier);
     let _verrou = verrou(dossier);
     let sceaux = match registre(dossier) {
         Ok(Some(r)) => Some(rattraper(dossier, r)),
-        Ok(None) => Some(adopter(dossier)),
+        Ok(None) => Some(adopter(dossier, deja)),
         Err(()) => None,
     };
     juger(nom, contenu(&dossier.join(nom)), sceaux.as_ref())
@@ -234,16 +331,25 @@ pub(crate) fn lire_dans(dossier: &Path, nom: &str) -> Lecture {
 /// Écrit un fichier d'état de `dossier` (d'un coup) et son sceau. Des sceaux illisibles repartent de celui-ci : les
 /// autres fichiers restent falsifiés jusqu'à ce que Vanguard les réécrive.
 pub(crate) fn ecrire_dans(dossier: &Path, nom: &str, octets: &[u8]) -> std::io::Result<()> {
+    if !crate::socle::ecriture_sure(dossier) {
+        return Err(dossier_d_un_autre());
+    }
+    let deja = deja_scelle(dossier);
     let _verrou = verrou(dossier);
     let mut sceaux = match registre(dossier) {
         Ok(Some(r)) => rattraper(dossier, r),
-        Ok(None) => adopter(dossier),
+        Ok(None) => adopter(dossier, deja),
+        // Les autres fichiers ne peuvent plus être crus : présents, ils sont falsifiés (sans sceau) ; absents,
+        // inconnus.
         Err(()) => Registre {
             depuis: chrono::Local::now().format("%Y-%m-%d").to_string(),
             vus: TARDIFS.iter().map(|n| (*n).to_string()).collect(),
+            refaits: true,
+            inconnus: proteges().map(str::to_string).collect(),
             ..Registre::default()
         },
     };
+    sceaux.inconnus.remove(nom);
     crate::socle::ecrire_atomique(&dossier.join(nom), octets)?;
     sceaux.fichiers.insert(nom.to_string(), empreinte(nom, octets));
     sceaux.adoptes.remove(nom);
@@ -254,14 +360,20 @@ pub(crate) fn ecrire_dans(dossier: &Path, nom: &str, octets: &[u8]) -> std::io::
 }
 
 /// Retire un fichier d'état et son sceau (Vanguard l'oublie lui-même).
-fn effacer_dans(dossier: &Path, nom: &str) -> std::io::Result<()> {
+pub(crate) fn effacer_dans(dossier: &Path, nom: &str) -> std::io::Result<()> {
+    if !crate::socle::ecriture_sure(dossier) {
+        return Err(dossier_d_un_autre());
+    }
     let _verrou = verrou(dossier);
     match std::fs::remove_file(dossier.join(nom)) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
     if let Ok(Some(mut r)) = registre(dossier)
-        && (r.fichiers.remove(nom).is_some() | r.adoptes.remove(nom) | r.versions.remove(nom).is_some())
+        && (r.fichiers.remove(nom).is_some()
+            | r.adoptes.remove(nom)
+            | r.versions.remove(nom).is_some()
+            | r.inconnus.remove(nom))
     {
         enregistrer_registre(dossier, &r)?;
     }
@@ -295,6 +407,8 @@ struct Releve {
     adoptes: Vec<&'static str>,
     /// Le jour de ce premier usage.
     depuis: String,
+    /// Ce premier usage a refait des sceaux effacés ou illisibles, alors que Vanguard avait déjà servi ici.
+    refaits: bool,
 }
 
 fn falsifies_dans(dossier: &Path) -> Releve {
@@ -309,10 +423,49 @@ fn falsifies_dans(dossier: &Path) -> Releve {
             _ => {}
         }
     }
-    if !r.adoptes.is_empty() {
-        r.depuis = registre(dossier).ok().flatten().map(|s| s.depuis).unwrap_or_default();
+    if let Ok(Some(s)) = registre(dossier)
+        && (!r.adoptes.is_empty() || s.refaits)
+    {
+        r.refaits = s.refaits;
+        r.depuis = s.depuis;
     }
     r
+}
+
+/// Des sceaux refaits se disent tant qu'un fichier adopté n'a pas été réécrit, et au moins un mois.
+const REFAITS_JOURS: i64 = 30;
+
+/// Les sceaux refaits alors que Vanguard avait déjà servi ici : effacés (ou abîmés) par un autre programme, le plus
+/// souvent avec un fichier d'état qu'il voulait faire oublier. Dit plus haut que de simples fichiers adoptés, et daté
+/// autrement, pour que la surveillance le notifie.
+fn juger_refaits(adoptes: &[&str], depuis: &str, aujourd_hui: chrono::NaiveDate) -> Option<Constat> {
+    let jours = chrono::NaiveDate::parse_from_str(depuis, "%Y-%m-%d")
+        .map_or(0, |d| aujourd_hui.signed_duration_since(d).num_days());
+    if adoptes.is_empty() && jours > REFAITS_JOURS {
+        return None;
+    }
+    let liste = if adoptes.is_empty() {
+        tr!("aucun", "none").to_string()
+    } else {
+        adoptes.join(", ")
+    };
+    Some(
+        crate::machine::alerte(
+            CAT,
+            Niveau::Eleve,
+            trf!(
+                "Les sceaux de l'état de Vanguard (sceaux.json) ont été refaits le {depuis}, alors que Vanguard avait déjà servi sur cet ordinateur : ils ont été effacés ou abîmés hors de Vanguard. Fichiers acceptés tels quels : {liste} ; ceux qui manquaient sont traités comme vides (rien n'est tu).",
+                "The seals of Vanguard's state (sceaux.json) were remade on {depuis}, although Vanguard had already run on this computer: they were deleted or damaged outside Vanguard. Files accepted as they were: {liste}; the missing ones are treated as empty (nothing is silenced)."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Regarde ce qui tourne sous ton compte (Protection › Qui parle à Internet ?) ; « vanguard integrite --accepter » refait la référence",
+                "Look at what runs under your account (Protection › Who talks to the Internet?); “vanguard integrity --accept” remakes the reference"
+            ),
+            &[],
+        ),
+    )
 }
 
 /// La catégorie du constat.
@@ -384,7 +537,13 @@ fn juger_adoptes(adoptes: &[&str], depuis: &str) -> Option<Constat> {
 /// Au bilan : rien tant que l'état de Vanguard est tel qu'il l'a écrit.
 pub(crate) fn constat() -> Vec<Constat> {
     let r = falsifies_dans(&dossier());
-    let mut constats: Vec<Constat> = juger_adoptes(&r.adoptes, &r.depuis).into_iter().collect();
+    let mut constats: Vec<Constat> = if r.refaits {
+        juger_refaits(&r.adoptes, &r.depuis, chrono::Local::now().date_naive())
+            .into_iter()
+            .collect()
+    } else {
+        juger_adoptes(&r.adoptes, &r.depuis).into_iter().collect()
+    };
     if !r.falsifies.is_empty() {
         constats.extend(juger_constat(
             &r.falsifies,
@@ -518,6 +677,102 @@ mod tests {
         effacer_dans(&d, BOTNETS).unwrap();
         assert_eq!(falsifies_dans(&d).adoptes, vec![APPRIS]);
         assert!(juger_adoptes(&[], "").is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un programme du compte efface les sceaux ET l'état de la machine (et la référence) : ce n'est pas un premier
+    /// passage. Les fichiers absents se lisent « inconnus » (un état vide, tout est redit), jusqu'à ce que Vanguard
+    /// les réécrive ; et le bilan dit que les sceaux ont été refaits, plus haut que de simples adoptés.
+    #[test]
+    fn sceaux_et_etat_effaces_ne_font_pas_un_premier_passage() {
+        let d = jetable("disparus");
+        // Une installation toute neuve : rien n'a jamais été écrit, c'est bien un premier passage.
+        assert_eq!(lire_dans(&d, MACHINE), Lecture::Absent);
+        assert!(!falsifies_dans(&d).refaits);
+        std::fs::remove_file(d.join(REGISTRE)).unwrap();
+        // Vanguard sert ici depuis un moment ; l'historique est effacé aussi (le verrou des sceaux, lui, reste).
+        ecrire_dans(&d, MACHINE, br#"{"alertes":[]}"#).unwrap();
+        ecrire_dans(&d, INTEGRITE, b"{}").unwrap();
+        ecrire_dans(&d, APPRIS, b"{}").unwrap();
+        for f in [REGISTRE, MACHINE, INTEGRITE] {
+            std::fs::remove_file(d.join(f)).unwrap();
+        }
+        assert_eq!(lire_dans(&d, MACHINE), Lecture::Inconnu);
+        assert_eq!(lire_dans(&d, INTEGRITE), Lecture::Inconnu);
+        assert_eq!(lire_dans(&d, APPRIS), Lecture::Adopte(b"{}".to_vec()));
+        let r = falsifies_dans(&d);
+        assert!(r.refaits);
+        let jour = chrono::NaiveDate::parse_from_str(&r.depuis, "%Y-%m-%d").unwrap();
+        let c = juger_refaits(&r.adoptes, &r.depuis, jour).unwrap();
+        assert_eq!(c.probleme, Some(Niveau::Eleve));
+        assert!(
+            c.message.contains(&r.depuis) && c.message.contains(APPRIS),
+            "{}",
+            c.message
+        );
+        // Plus rien d'adopté et plus d'un mois : on ne le redit plus.
+        assert!(juger_refaits(&[], &r.depuis, jour + chrono::Days::new(31)).is_none());
+        assert!(juger_refaits(&[APPRIS], &r.depuis, jour + chrono::Days::new(31)).is_some());
+        // Réécrit par Vanguard : de nouveau connu.
+        ecrire_dans(&d, MACHINE, b"{}").unwrap();
+        assert_eq!(lire_dans(&d, MACHINE), Lecture::Intact(b"{}".to_vec()));
+        effacer_dans(&d, INTEGRITE).unwrap();
+        assert_eq!(lire_dans(&d, INTEGRITE), Lecture::Absent);
+        // Des sceaux illisibles à côté d'un fichier supprimé : inconnu, pas absent.
+        std::fs::write(d.join(REGISTRE), b"x").unwrap();
+        std::fs::remove_file(d.join(MACHINE)).unwrap();
+        assert_eq!(lire_dans(&d, MACHINE), Lecture::Inconnu);
+        // Réécrits depuis cet état : les autres fichiers absents restent inconnus.
+        ecrire_dans(&d, APPRIS, b"{}").unwrap();
+        assert_eq!(lire_dans(&d, MACHINE), Lecture::Inconnu);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Une 0.85 (avant les sceaux) mise à jour : son historique est là, sans sceaux ni leur verrou. Ce n'est pas des
+    /// sceaux effacés : rien n'est « refait », la plus haute version vue est absente (pas inconnue, l'annonce des
+    /// versions ne se tait pas) et le bilan ne dit rien de refait.
+    #[test]
+    fn une_version_d_avant_les_sceaux_n_est_pas_des_sceaux_refaits() {
+        let d = jetable("v085");
+        std::fs::write(d.join("historique.json"), b"[]").unwrap();
+        std::fs::write(d.join("surveillance-passe.txt"), b"1792540000").unwrap();
+        assert_eq!(lire_dans(&d, VERSIONS), Lecture::Absent);
+        assert_eq!(lire_dans(&d, INTEGRITE), Lecture::Absent);
+        let r = falsifies_dans(&d);
+        assert!(!r.refaits);
+        assert!(registre(&d).unwrap().unwrap().inconnus.is_empty());
+        // Ensuite, le verrou est là : effacer les sceaux (même avec l'historique) les fait refaire.
+        std::fs::remove_file(d.join(REGISTRE)).unwrap();
+        std::fs::remove_file(d.join("historique.json")).unwrap();
+        assert_eq!(lire_dans(&d, VERSIONS), Lecture::Inconnu);
+        assert!(falsifies_dans(&d).refaits);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un tube nommé ou un fichier énorme à la place d'un fichier d'état ou des sceaux : illisible tout de suite,
+    /// jamais une lecture qui ne finit pas.
+    #[cfg(unix)]
+    #[test]
+    fn un_tube_a_la_place_d_un_fichier_d_etat_ne_fige_rien() {
+        let d = jetable("tube");
+        ecrire_dans(&d, APPRIS, b"{}").unwrap();
+        let tube = |chemin: &Path| {
+            let _ = std::fs::remove_file(chemin);
+            let c = std::ffi::CString::new(chemin.as_os_str().as_encoded_bytes()).unwrap();
+            // SAFETY : mkfifo reçoit un chemin terminé par zéro, qui vit le temps de l'appel.
+            assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        };
+        let debut = Instant::now();
+        tube(&d.join(APPRIS));
+        assert!(matches!(lire_dans(&d, APPRIS), Lecture::Illisible(_)));
+        std::fs::remove_file(d.join(APPRIS)).unwrap();
+        std::fs::File::create(d.join(APPRIS)).unwrap().set_len(8 << 30).unwrap();
+        assert!(matches!(lire_dans(&d, APPRIS), Lecture::Illisible(_)));
+        tube(&d.join(VERROU));
+        tube(&d.join(REGISTRE));
+        assert!(matches!(lire_dans(&d, APPRIS), Lecture::Illisible(_)));
+        assert_eq!(lire_dans(&d, MACHINE), Lecture::Inconnu);
+        assert!(debut.elapsed() < Duration::from_secs(10), "{:?}", debut.elapsed());
         let _ = std::fs::remove_dir_all(&d);
     }
 

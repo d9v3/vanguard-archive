@@ -113,9 +113,12 @@ outils/failles-programmes.sh "$DOSSIER/vanguard-linux-x86_64" "$DOSSIER/vanguard
 
 # Une compilation macOS qui a vraiment produit le programme de ce code : celle de ce commit, ou celle d'un commit
 # d'avant dont le programme est le même (seuls des captures, la documentation ou les outils ont changé depuis :
-# .github/hors-code.txt, la liste que lisent aussi les workflows). Le passage de la branche sur le Mac de GitHub,
-# juste avant la fusion, sert ainsi à la page : une seule compilation de Mac par publication. Une exécution de
-# nuit sautée (code inchangé) réussit aussi, sans rien produire : son artefact manque, elle est passée.
+# .github/hors-code.txt, la liste que lisent aussi les workflows). Une exécution de nuit sautée (code inchangé)
+# réussit aussi, sans rien produire : son artefact manque, elle est passée.
+# Seulement une exécution de master (headBranch relu), lancée par la nuit ou à la main : celle d'une autre branche
+# tourne avec le macos.yml de cette branche et le cache qu'elle a pu préparer, et un compte GitHub pris ferait ainsi
+# signer par la clé de l'auteur un programme compilé ailleurs. master compile sans cache (macos.yml). Le passage
+# de la branche sur le Mac, avant la fusion, reste un essai : il ne sert plus à la page.
 HORS_CODE=$(grep -v '^#' .github/hors-code.txt | head -n 1)
 avec_programme() {
   local id sha
@@ -132,8 +135,10 @@ avec_programme() {
       echo "$id"
       return
     fi
-  done < <(gh run list --workflow macos.yml --status success --limit 20 --json databaseId,headSha \
-    -q '.[] | "\(.databaseId) \(.headSha)"')
+  done < <(gh run list --workflow macos.yml --branch master --status success --limit 20 \
+    --json databaseId,headSha,headBranch,event \
+    -q '.[] | select(.headBranch == "master" and (.event == "schedule" or .event == "workflow_dispatch"))
+      | "\(.databaseId) \(.headSha)"')
 }
 RUN=$(avec_programme)
 if [[ -z $RUN ]]; then
@@ -142,7 +147,8 @@ if [[ -z $RUN ]]; then
   AVANT=$(gh run list --workflow macos.yml --commit "$COMMIT" --limit 20 --json databaseId -q '.[].databaseId')
   gh workflow run macos.yml --ref master
   for _ in {1..30}; do
-    RUN=$(gh run list --workflow macos.yml --commit "$COMMIT" --event workflow_dispatch --limit 1 --json databaseId \
+    RUN=$(gh run list --workflow macos.yml --branch master --commit "$COMMIT" --event workflow_dispatch --limit 1 \
+      --json databaseId \
       -q '.[0].databaseId // ""')
     [[ -n $RUN ]] && ! grep -qx -- "$RUN" <<<"$AVANT" && break
     RUN=""
@@ -159,6 +165,12 @@ cp "$DOSSIER/mac/vanguard" "$DOSSIER/vanguard-macos"
 # ensuite sa forme (Mach-O universel, Apple Silicon et Intel) et sa version gravée, celle des deux autres programmes.
 # Ni l'un ni l'autre ne prouve que le runner n'a pas été piégé : seul un Mac de l'auteur le pourrait.
 SHA_RUN=$(gh run view "$RUN" --json headSha -q .headSha)
+# Relu sur l'exécution même qu'on va signer, quelle que soit la façon dont elle a été trouvée.
+BRANCHE_RUN=$(gh run view "$RUN" --json headBranch,event -q '"\(.headBranch) \(.event)"')
+if [[ $BRANCHE_RUN != "master schedule" && $BRANCHE_RUN != "master workflow_dispatch" ]]; then
+  echo "Version macOS : compilée sur « $BRANCHE_RUN », pas sur master par la nuit ou à la main : rien de publié."
+  exit 1
+fi
 if [[ $(tr -d '[:space:]' <"$DOSSIER/mac/commit.txt") != "$SHA_RUN" ]]; then
   echo "Version macOS : commit.txt n'est pas le commit de sa compilation ($SHA_RUN) : rien de publié."
   exit 1

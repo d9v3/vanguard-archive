@@ -13,9 +13,11 @@ pub(crate) mod processus;
 pub(crate) mod systeme;
 
 pub use fichiers::dossier_local;
+#[cfg(all(unix, test))]
+pub(crate) use fichiers::ecriture_sure_pour;
 #[cfg(unix)]
 pub use fichiers::proteger_dossier_local;
-pub(crate) use fichiers::{Verrou, ecrire_atomique};
+pub(crate) use fichiers::{Verrou, ecrire_atomique, ecriture_sure, lire_ordinaire};
 #[cfg(unix)]
 pub use personnel::volume;
 pub use personnel::{maison, taille_lisible};

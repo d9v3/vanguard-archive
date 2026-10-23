@@ -422,6 +422,24 @@ fn fichier_de_vanguard(nom: &str) -> bool {
         .any(|f| crate::passage::les_deux(f).iter().any(|n| n == nom))
 }
 
+/// Le contenu d'avant noté dans jeux.json (dossier du compte, non scellé) n'est réécrit en root que s'il ne contient
+/// que ce que Vanguard y met : sinon un programme du compte choisirait ce que root écrit dans /etc
+/// (kernel.core_pattern, qui lance un programme à chaque plantage ; modules chargés au démarrage).
+fn contenu_admis(nom: &str, contenu: &str) -> bool {
+    let sysctl = crate::passage::les_deux(SYSCTL_JEUX).iter().any(|n| n == nom);
+    contenu.lines().map(str::trim).all(|l| {
+        l.is_empty()
+            || l.starts_with('#')
+            || if sysctl {
+                l.strip_prefix("vm.max_map_count")
+                    .map(|r| r.trim_start().trim_start_matches('=').trim())
+                    .is_some_and(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()))
+            } else {
+                l == "ntsync"
+            }
+    })
+}
+
 /// Les commandes qui remettent les valeurs notées : les fichiers de Vanguard d'abord (retirés, ou rendus à leur
 /// contenu d'avant), puis la valeur du noyau, puis le module s'il n'était pas chargé (refusé tant qu'un jeu
 /// l'utilise : la note reste alors pour réessayer).
@@ -431,7 +449,8 @@ pub(super) fn remettre_commandes(_id: &str, avant: &[Valeur]) -> Vec<String> {
     for (nom, v) in avant {
         match (nom.as_str(), v) {
             (n, None) if fichier_de_vanguard(n) => fichiers.push(format!("sudo rm -f {nom}")),
-            (n, Some(contenu)) if fichier_de_vanguard(n) => {
+            // Un contenu qui n'est pas de Vanguard : aucune commande, la note reste (la relecture diffère).
+            (n, Some(contenu)) if fichier_de_vanguard(n) && contenu_admis(n, contenu) => {
                 fichiers.push(format!(
                     "printf '%s' {} | sudo tee {nom} >/dev/null",
                     sh_chaine(contenu)
@@ -640,6 +659,26 @@ mod tests {
         assert!(Command::new("bash").args(["-c", &jouee]).status().unwrap().success());
         assert_eq!(std::fs::read_to_string(&copie).unwrap(), contenu);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// jeux.json est dans le dossier du compte : un contenu d'avant qui n'est pas celui que Vanguard écrit (une
+    /// commande lancée à chaque plantage, un module choisi) n'est jamais réécrit en root dans /etc.
+    #[test]
+    fn contenu_d_avant_etranger_jamais_reecrit() {
+        let avant = [(
+            SYSCTL_JEUX.to_string(),
+            Some("kernel.core_pattern=|/home/bob/x\n".to_string()),
+        )];
+        assert_eq!(remettre_commandes("max_map_count", &avant), Vec::<String>::new());
+        let avant = [(
+            SYSCTL_JEUX.to_string(),
+            Some("vm.max_map_count = 262144\nkernel.core_pattern=|/home/bob/x\n".to_string()),
+        )];
+        assert_eq!(remettre_commandes("max_map_count", &avant), Vec::<String>::new());
+        let avant = [(NTSYNC_CONF.to_string(), Some("evil\n".to_string()))];
+        assert_eq!(remettre_commandes("ntsync", &avant), Vec::<String>::new());
+        let avant = [(NTSYNC_CONF.to_string(), Some("# à la main\nntsync\n".to_string()))];
+        assert_eq!(remettre_commandes("ntsync", &avant).len(), 1);
     }
 
     #[test]

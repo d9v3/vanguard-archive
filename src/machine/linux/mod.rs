@@ -873,10 +873,13 @@ fn journal_sshd() -> Option<Result<String, Constat>> {
         return Some(Ok(comme_journalctl_cat(&messages)));
     }
     let r = crate::commande::lancer(
+        // Les lignes écrites par root seulement (`journal_systemd::messages_de` dit pourquoi).
         Command::new("journalctl").args([
             "_COMM=sshd",
+            "_UID=0",
             "+",
             "_COMM=sshd-session",
+            "_UID=0",
             "--since",
             "-24h",
             "-o",

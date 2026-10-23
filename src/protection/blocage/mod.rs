@@ -15,7 +15,7 @@ mod gardes;
 mod gestes;
 mod menaces;
 mod parametres;
-mod pare_feu;
+pub(crate) mod pare_feu;
 
 use std::collections::BTreeSet;
 use std::io::IsTerminal;
@@ -602,8 +602,15 @@ fn alerter_blocage(m: &Menace, titre: &str, texte: &str) {
     }
 }
 
-fn fichier_signalees() -> std::path::PathBuf {
-    crate::socle::dossier_local().join("blocage-non-bloquees.txt")
+/// Les menaces déjà signalées comme non bloquées, d'après les sceaux : intactes ou adoptées, leurs clés ; changées
+/// hors de Vanguard, inconnues ou illisibles, aucune, pour que tout soit redit (une clé ajoutée par un programme du
+/// compte taisait l'échec de son propre blocage).
+fn signalees_lues(lu: crate::sceau::Lecture) -> BTreeSet<String> {
+    use crate::sceau::Lecture;
+    match lu {
+        Lecture::Intact(o) | Lecture::Adopte(o) => String::from_utf8_lossy(&o).lines().map(str::to_string).collect(),
+        _ => BTreeSet::new(),
+    }
 }
 
 /// Dans la surveillance horaire : le certain des catégories automatiques seulement, sans jamais rien demander ; chaque
@@ -627,11 +634,7 @@ pub(crate) fn en_surveillance() {
         .collect();
     let t = menaces::chercher(&categories, p.effectif(Categorie::Programmes) == Mode::Automatique);
     let ctx = Contexte::lire(t.intouchables.clone(), false);
-    let avant: BTreeSet<String> = std::fs::read_to_string(fichier_signalees())
-        .unwrap_or_default()
-        .lines()
-        .map(str::to_string)
-        .collect();
+    let avant = signalees_lues(crate::sceau::lire(crate::sceau::BLOCAGE_SIGNALEES));
     let mut maintenant = BTreeSet::new();
     for m in t
         .menaces
@@ -640,14 +643,14 @@ pub(crate) fn en_surveillance() {
     {
         bloquer_tout_seul(m, &ctx, Some((&avant, &mut maintenant)));
     }
-    let _ = crate::socle::ecrire_atomique(
-        &fichier_signalees(),
+    let _ = crate::sceau::ecrire(
+        crate::sceau::BLOCAGE_SIGNALEES,
         maintenant.into_iter().collect::<Vec<_>>().join("\n"),
     );
 }
 
 /// Une commande telle qu'elle est montrée : la phrase d'une correction native de Windows, la commande sinon.
-fn commande_montree(c: &str) -> String {
+pub(super) fn commande_montree(c: &str) -> String {
     #[cfg(windows)]
     {
         crate::machine::windows::corrections::affichable(c)
@@ -803,20 +806,33 @@ fn proposer(menaces: Vec<Menace>, ctx: &Contexte) {
 /// Ce que l'annulation va faire, en une phrase.
 fn decrire_annulation(a: &Annulation) -> String {
     match a {
-        Annulation::Commandes { commandes, .. } => trf!(
-            "Lancer : {}",
-            "Run: {}",
-            commandes
-                .iter()
-                .map(|c| commande_montree(c))
-                .collect::<Vec<_>>()
-                .join(" ; ")
-        ),
+        // Ce qui sera vraiment lancé : refait depuis la note, pas les chaînes relues (`gestes::commandes_d_annulation`).
+        Annulation::Commandes {
+            commandes,
+            port,
+            inverse,
+        } => match gestes::commandes_d_annulation(commandes, port.as_deref(), *inverse) {
+            Some((commandes, _)) => trf!(
+                "Lancer : {}",
+                "Run: {}",
+                commandes
+                    .iter()
+                    .map(|c| commande_montree(c))
+                    .collect::<Vec<_>>()
+                    .join(" ; ")
+            ),
+            None => gestes::refus_d_annulation(commandes),
+        },
         Annulation::Quarantaine { .. } => tr!(
             "Remettre le fichier exactement où il était, depuis la quarantaine (le programme ne se relance pas tout seul)",
             "Put the file back exactly where it was, from the quarantine (the program does not restart by itself)"
         )
         .to_string(),
+        Annulation::Copie { fichier, copie, .. }
+            if !gestes::copie_admise(std::path::Path::new(fichier), std::path::Path::new(copie)) =>
+        {
+            gestes::refus_de_copie(std::path::Path::new(fichier), std::path::Path::new(copie))
+        }
         Annulation::Copie { fichier, .. } => trf!(
             "Remettre la copie d'avant de {}, seulement s'il n'a pas changé depuis",
             "Put back the previous copy of {}, only if it has not changed since",
@@ -889,6 +905,24 @@ pub fn annuler() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une clé de menace ajoutée hors de Vanguard aux menaces déjà signalées ne tait plus l'échec de son blocage :
+    /// le fichier changé sans sceau se lit vide, et la menace est redite.
+    #[test]
+    fn cle_ajoutee_hors_de_vanguard_ne_tait_plus_l_echec() {
+        let d = std::env::temp_dir().join(format!("vanguard-blocage-signalees-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let lu = || signalees_lues(crate::sceau::lire_dans(&d, crate::sceau::BLOCAGE_SIGNALEES));
+        crate::sceau::ecrire_dans(&d, crate::sceau::BLOCAGE_SIGNALEES, b"fichier:/home/alice/a").unwrap();
+        assert!(lu().contains("fichier:/home/alice/a"));
+        std::fs::write(
+            d.join(crate::sceau::BLOCAGE_SIGNALEES),
+            "fichier:/home/alice/a\nfichier:/home/alice/.local/bin/x",
+        )
+        .unwrap();
+        assert!(lu().is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     /// En administrateur, l'accord et les « automatique » de blocage.json (que tout processus du compte peut écrire)
     /// ne font rien bloquer tout seul : le certain se propose d'un clic. Hors administrateur, ils comptent.

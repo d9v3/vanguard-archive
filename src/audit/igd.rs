@@ -76,6 +76,10 @@ pub struct Lecture {
     pub lues: bool,
     /// La liste s'est arrêtée avant la fin (borne, refus en cours de route) : la box en a peut-être d'autres.
     pub tronquees: bool,
+    /// D'autres appareils du réseau ont répondu comme une box IGD, ailleurs qu'à la passerelle : écartés, et
+    /// suspects (un appareil qui se fait passer pour la box masquerait ses redirections, ou en inventerait).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ailleurs: Vec<Ipv4Addr>,
 }
 
 /// Le résultat d'une recherche de box.
@@ -86,6 +90,9 @@ pub enum Decouverte {
     /// Aucune box IGD n'a répondu : UPnP coupé ou absent.
     Aucune,
     Trouvee(Box<Lecture>),
+    /// La passerelle n'a pas répondu, mais d'autres appareils du réseau se disent box IGD (leurs adresses) : rien
+    /// n'est cru d'eux.
+    Ailleurs(Vec<Ipv4Addr>),
 }
 
 /// Une réponse SSDP à la recherche d'une box : où lire sa description, et ce qu'elle dit de son logiciel.
@@ -93,6 +100,8 @@ pub enum Decouverte {
 pub(crate) struct ReponseSsdp {
     pub emplacement: String,
     pub serveur: Option<String>,
+    /// L'adresse d'où la réponse est venue : celle de la description, sinon la réponse est écartée.
+    pub source: Ipv4Addr,
 }
 
 /// Le service WAN de la box et l'adresse de son point de contrôle.
@@ -109,17 +118,38 @@ pub fn decouvrir() -> Decouverte {
     let Some(reponses) = chercher() else {
         return Decouverte::NonVerifie;
     };
-    // Plusieurs box annoncées (deux routeurs, le routeur virtuel d'une machine virtuelle…) : la première dont les
-    // redirections se lisent ; sinon la première, non vérifiée.
+    let (de_la_box, ailleurs) = trier(reponses, crate::reseau::scan::passerelle());
+    // Plusieurs réponses de la passerelle (deux versions de l'IGD) : la première dont les redirections se lisent ;
+    // sinon la première, non vérifiée.
     let mut premiere = None;
-    for r in reponses.iter().take(MAX_BOX) {
-        let lecture = lire_box(r, fin);
+    for r in de_la_box.iter().take(MAX_BOX) {
+        let mut lecture = lire_box(r, fin);
+        lecture.ailleurs.clone_from(&ailleurs);
         if lecture.lues {
             return Decouverte::Trouvee(Box::new(lecture));
         }
         premiere.get_or_insert(lecture);
     }
-    premiere.map_or(Decouverte::Aucune, |l| Decouverte::Trouvee(Box::new(l)))
+    match premiere {
+        Some(l) => Decouverte::Trouvee(Box::new(l)),
+        None if !ailleurs.is_empty() => Decouverte::Ailleurs(ailleurs),
+        None => Decouverte::Aucune,
+    }
+}
+
+/// Les réponses de la passerelle par défaut, et les adresses des autres appareils qui se disent box. N'importe quel
+/// appareil du réseau entend la question et peut répondre avant la box (elle attend jusqu'à une seconde) : le
+/// premier qui répondait était cru, et ses « 0 redirection » passaient pour une lecture vérifiée de la box. Sans
+/// passerelle connue (route illisible), toutes sont gardées, comme avant : rien de mieux à quoi les comparer.
+fn trier(reponses: Vec<ReponseSsdp>, passerelle: Option<Ipv4Addr>) -> (Vec<ReponseSsdp>, Vec<Ipv4Addr>) {
+    let Some(passerelle) = passerelle else {
+        return (reponses, Vec::new());
+    };
+    let (de_la_box, autres): (Vec<_>, Vec<_>) = reponses.into_iter().partition(|r| r.source == passerelle);
+    let mut ailleurs: Vec<Ipv4Addr> = autres.into_iter().map(|r| r.source).collect();
+    ailleurs.sort_unstable();
+    ailleurs.dedup();
+    (de_la_box, ailleurs)
 }
 
 /// La recherche SSDP : un M-SEARCH par version de l'IGD, les réponses lues jusqu'à la fin du délai, sans doublon.
@@ -146,8 +176,9 @@ fn chercher() -> Option<Vec<ReponseSsdp>> {
             break;
         }
         let fin = Instant::now() + ATTENTE_SSDP;
-        crate::reseau::nat::recevoir(&socket, fin, &mut tampon, |reponse, _| {
-            if let Some(r) = lire_reponse_ssdp(&String::from_utf8_lossy(reponse))
+        crate::reseau::nat::recevoir(&socket, fin, &mut tampon, |reponse, de| {
+            if let std::net::IpAddr::V4(source) = de.ip()
+                && let Some(r) = lire_reponse_ssdp(&String::from_utf8_lossy(reponse), source)
                 && !reponses.iter().any(|v| v.emplacement == r.emplacement)
                 && reponses.len() < 16
             {
@@ -164,10 +195,10 @@ fn m_search(st: &str) -> String {
     format!("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: {st}\r\n\r\n")
 }
 
-/// Une réponse SSDP (« HTTP/1.1 200 OK » et ses en-têtes) d'une box IGD : son LOCATION, qui doit être une adresse du
-/// réseau local, et son SERVER. Les réponses d'autres appareils (une télé, une imprimante répondent parfois à tout)
-/// sont écartées à leur ST.
-pub(crate) fn lire_reponse_ssdp(texte: &str) -> Option<ReponseSsdp> {
+/// Une réponse SSDP (« HTTP/1.1 200 OK » et ses en-têtes) d'une box IGD venue de `source` : son LOCATION, qui doit
+/// être une adresse du réseau local sur l'appareil même qui a répondu (jamais un autre, ni cette machine), et son
+/// SERVER. Les réponses d'autres appareils (une télé, une imprimante répondent parfois à tout) sont écartées à leur ST.
+pub(crate) fn lire_reponse_ssdp(texte: &str, source: Ipv4Addr) -> Option<ReponseSsdp> {
     let mut lignes = texte.lines();
     if !lignes.next()?.trim().to_ascii_uppercase().starts_with("HTTP/1.1 200") {
         return None;
@@ -192,7 +223,11 @@ pub(crate) fn lire_reponse_ssdp(texte: &str) -> Option<ReponseSsdp> {
         }
     }
     let emplacement = emplacement?;
-    (igd && Adresse::lire(&emplacement).is_some()).then_some(ReponseSsdp { emplacement, serveur })
+    (igd && Adresse::lire(&emplacement).is_some_and(|a| a.ip == source)).then_some(ReponseSsdp {
+        emplacement,
+        serveur,
+        source,
+    })
 }
 
 /// Un texte écrit par la box ou un appareil, prêt à montrer : inoffensif et court.
@@ -214,6 +249,7 @@ fn lire_box(ssdp: &ReponseSsdp, fin: Instant) -> Lecture {
         redirections: Vec::new(),
         lues: false,
         tronquees: false,
+        ailleurs: Vec::new(),
     };
     let Some(base) = Adresse::lire(&ssdp.emplacement) else {
         return lecture;
@@ -358,8 +394,11 @@ pub(crate) fn lire_description(xml: &str, base: &Adresse) -> (Description, Optio
         version: champ("modelNumber"),
         serveur: None,
     };
+    // URLBase et points de contrôle : chez l'appareil même de la description, jamais un autre (un tiers du réseau,
+    // que Vanguard aurait sinon interrogé pour le compte de qui a répondu).
     let url_base = valeur_parmi(&noeuds, "URLBase")
         .and_then(|u| Adresse::lire(&u))
+        .filter(|u| u.ip == base.ip)
         .unwrap_or_else(|| base.clone());
     // Les services, dans l'ordre : le type et le point de contrôle de chaque <service>.
     let mut services: Vec<(String, String)> = Vec::new();
@@ -389,7 +428,11 @@ pub(crate) fn lire_description(xml: &str, base: &Adresse) -> (Description, Optio
     let propre = |g: &str| g.chars().all(|c| c.is_ascii_alphanumeric() || ":-._".contains(c));
     let service = ["WANIPConnection", "WANPPPConnection"]
         .iter()
-        .find_map(|voulu| services.iter().find(|(g, _)| g.contains(voulu) && propre(g)))
+        .find_map(|voulu| {
+            services
+                .iter()
+                .find(|(g, c)| g.contains(voulu) && propre(g) && url_base.meme_hote(c))
+        })
         .map(|(genre, controle)| Service {
             genre: genre.clone(),
             controle: url_base.resoudre(controle),
@@ -653,6 +696,7 @@ mod tests {
         let ssdp = ReponseSsdp {
             emplacement: format!("http://127.0.0.1:{port}/desc.xml"),
             serveur: Some("Linux/5.4 UPnP/1.1 MiniUPnPd/2.2".into()),
+            source: Ipv4Addr::LOCALHOST,
         };
         let lecture = lire_box(&ssdp, Instant::now() + Duration::from_secs(10));
         assert_eq!(
@@ -732,6 +776,7 @@ mod tests {
             let ssdp = ReponseSsdp {
                 emplacement: format!("http://127.0.0.1:{port}/desc.xml"),
                 serveur: None,
+                source: Ipv4Addr::LOCALHOST,
             };
             let lecture = lire_box(&ssdp, Instant::now() + Duration::from_secs(10));
             assert!(!lecture.lues && lecture.redirections.is_empty());
@@ -745,6 +790,7 @@ mod tests {
         let ssdp = ReponseSsdp {
             emplacement: format!("http://127.0.0.1:{port}/desc.xml"),
             serveur: None,
+            source: Ipv4Addr::LOCALHOST,
         };
         let debut = Instant::now();
         assert!(!lire_box(&ssdp, Instant::now() + Duration::from_secs(10)).lues);
@@ -793,12 +839,57 @@ mod tests {
         assert_eq!(lire_description("", &base).1, None);
     }
 
+    const BOX: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
+
+    /// Un appareil du réseau répond à la recherche avant la box : seule la passerelle est crue, les autres sont
+    /// écartés et dits ; sans passerelle connue, rien de mieux qu'avant.
+    #[test]
+    fn seule_la_passerelle_est_la_box() {
+        let reponse = |ip: [u8; 4]| ReponseSsdp {
+            emplacement: format!("http://{}:5000/d.xml", Ipv4Addr::from(ip)),
+            serveur: None,
+            source: Ipv4Addr::from(ip),
+        };
+        let reponses = vec![reponse([10, 0, 0, 66]), reponse([10, 0, 0, 1]), reponse([10, 0, 0, 66])];
+        let (box_, ailleurs) = trier(reponses.clone(), Some(BOX));
+        assert_eq!(box_, vec![reponse([10, 0, 0, 1])]);
+        assert_eq!(ailleurs, vec![Ipv4Addr::new(10, 0, 0, 66)]);
+        let (box_, ailleurs) = trier(vec![reponse([10, 0, 0, 66])], Some(BOX));
+        assert!(box_.is_empty() && ailleurs == [Ipv4Addr::new(10, 0, 0, 66)]);
+        let (box_, ailleurs) = trier(reponses, None);
+        assert_eq!((box_.len(), ailleurs.len()), (3, 0));
+        // Un URLBase ou un point de contrôle chez un autre appareil du réseau : pas suivi.
+        let base = Adresse::lire("http://10.0.0.1:5000/rootDesc.xml").unwrap();
+        let service = |controle: &str| {
+            format!(
+                "<root><device><serviceList><service><serviceType>urn:schemas-upnp-org:service:WANIPConnection:1\
+                 </serviceType><controlURL>{controle}</controlURL></service></serviceList></device></root>"
+            )
+        };
+        assert!(lire_description(&service("http://10.0.0.20/ctl"), &base).1.is_none());
+        assert!(
+            lire_description(&service("http://127.0.0.1:8080/ctl"), &base)
+                .1
+                .is_none()
+        );
+        assert_eq!(
+            lire_description(&service("/ctl"), &base).1.map(|s| s.controle),
+            Some("http://10.0.0.1:5000/ctl".to_string())
+        );
+        let ailleurs = format!("<root><URLBase>http://10.0.0.20/</URLBase>{}", &service("ctl")[6..]);
+        assert_eq!(
+            lire_description(&ailleurs, &base).1.map(|s| s.controle),
+            Some("http://10.0.0.1:5000/ctl".to_string())
+        );
+    }
+
     #[test]
     fn reponses_ssdp() {
         let r = lire_reponse_ssdp(
             "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=120\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\
              USN: uuid:1234::urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\nEXT:\r\n\
              SERVER: Linux/3.14 UPnP/1.0 MiniUPnPd/2.1\x1b[2K\r\nLocation: http://10.0.0.1:5000/rootDesc.xml\r\n\r\n",
+            BOX,
         )
         .unwrap();
         assert_eq!(r.emplacement, "http://10.0.0.1:5000/rootDesc.xml");
@@ -810,8 +901,17 @@ mod tests {
             "M-SEARCH * HTTP/1.1\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n",
             "",
         ] {
-            assert_eq!(lire_reponse_ssdp(texte), None, "{texte}");
+            assert_eq!(lire_reponse_ssdp(texte, BOX), None, "{texte}");
         }
+        // Un appareil du réseau qui envoie vers un autre (la box, ou cette machine) : écarté.
+        let vers = |l: &str| {
+            format!(
+                "HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\nLOCATION: {l}\r\n\r\n"
+            )
+        };
+        let piege = Ipv4Addr::new(10, 0, 0, 66);
+        assert!(lire_reponse_ssdp(&vers("http://10.0.0.1:5000/rootDesc.xml"), piege).is_none());
+        assert!(lire_reponse_ssdp(&vers("http://10.0.0.66:5000/d.xml"), piege).is_some());
         assert!(
             m_search("urn:schemas-upnp-org:device:InternetGatewayDevice:2")
                 .ends_with("\r\nMX: 1\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:2\r\n\r\n")
@@ -1083,8 +1183,8 @@ mod entrees_hostiles {
 
         #[test]
         fn reponses_ssdp(t in ssdp()) {
-            if let Some(r) = lire_reponse_ssdp(&t) {
-                prop_assert!(Adresse::lire(&r.emplacement).is_some());
+            if let Some(r) = lire_reponse_ssdp(&t, Ipv4Addr::new(10, 0, 0, 1)) {
+                prop_assert!(Adresse::lire(&r.emplacement).is_some_and(|a| a.ip == r.source));
                 prop_assert!(r.serveur.as_deref().is_none_or(montrable));
             }
         }

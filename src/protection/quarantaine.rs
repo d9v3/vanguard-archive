@@ -155,6 +155,15 @@ pub(crate) fn supprimer_apres_analyse(chemin: &Path, detection: &str) -> std::io
 }
 
 fn isoler_dans(chemin: &Path, detection: &str, dossier: &Path, sha256: Option<String>) -> std::io::Result<PathBuf> {
+    // Lancé par sudo -E, root écrirait dans le dossier d'un compte, où un programme de ce compte a pu changer
+    // journal.txt en lien vers /etc/ld.so.preload : la ligne ajoutée (une origine choisie par lui) y serait lue. Le
+    // fichier reste en place, et `isoler` note l'échec.
+    if !crate::socle::ecriture_sure(dossier) {
+        return Err(std::io::Error::other(tr!(
+            "root n'écrit pas dans le dossier d'un compte (sudo -E) : relance sans sudo",
+            "root does not write into an account's folder (sudo -E): start again without sudo"
+        )));
+    }
     std::fs::create_dir_all(dossier)?;
     let meta = std::fs::symlink_metadata(chemin)?;
     if !meta.is_file() {
@@ -217,9 +226,12 @@ fn noter_journal(dossier: &Path, e: &Entree) {
         affichable(&e.origine),
         affichable(&e.nom)
     );
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
+    let mut o = std::fs::OpenOptions::new();
+    o.create(true).append(true);
+    // Jamais au travers d'un lien : un journal.txt changé en lien ferait ajouter la ligne au fichier visé.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut o, libc::O_NOFOLLOW);
+    let _ = o
         .open(dossier.join("journal.txt"))
         .and_then(|mut j| j.write_all(ligne.as_bytes()));
 }
@@ -495,6 +507,29 @@ mod tests {
 
     /// Le journal de la quarantaine se lit avec cat : un nom piégé n'y pilote pas le terminal, et ses tabulations ou
     /// sauts de ligne ne cassent pas les quatre colonnes.
+    /// journal.txt changé en lien par un autre programme : la ligne n'est pas ajoutée au fichier visé. Et en root, le
+    /// dossier de quarantaine d'un compte (le nôtre ici) est refusé par la règle que `isoler_dans` applique.
+    #[cfg(unix)]
+    #[test]
+    fn journal_en_lien_jamais_suivi() {
+        let d = jetable("lien");
+        let q = d.join("quarantaine");
+        std::fs::create_dir_all(&q).unwrap();
+        let cible = d.join("ld.so.preload");
+        std::fs::write(&cible, b"").unwrap();
+        std::os::unix::fs::symlink(&cible, q.join("journal.txt")).unwrap();
+        let f = d.join("x.so");
+        std::fs::write(&f, b"x").unwrap();
+        isoler_dans(&f, "Test.Fichier", &q, None).unwrap();
+        assert_eq!(std::fs::read(&cible).unwrap(), b"");
+        // SAFETY : getuid lit le compte du processus, sans argument.
+        if unsafe { libc::getuid() } == 0 {
+            return crate::essais::saute("lancé en root : un dossier à soi est à root");
+        }
+        assert!(!crate::socle::ecriture_sure_pour(0, &q));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn journal_de_quarantaine_sans_piege() {
         let d = jetable("journal");

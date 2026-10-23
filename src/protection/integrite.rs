@@ -182,6 +182,15 @@ fn reference_lue(lu: crate::sceau::Lecture) -> Reference {
             .into(),
         ),
         Lecture::Illisible(e) => Reference::Douteuse(e),
+        // Les sceaux ont été refaits sans elle : peut-être supprimée pour que la prochaine soit prise sur des
+        // fichiers déjà changés. Jamais « pas encore de référence ».
+        Lecture::Inconnu => Reference::Douteuse(
+            tr!(
+                "elle manque alors que les sceaux de Vanguard ont été refaits : peut-être supprimée hors de Vanguard",
+                "it is missing while Vanguard's seals were remade: perhaps deleted outside Vanguard"
+            )
+            .into(),
+        ),
     }
 }
 
@@ -308,13 +317,50 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
     }
 }
 
-/// Les changements déjà notifiés. Une liste changée hors de Vanguard (un programme qui y écrit d'avance le fichier
-/// qu'il vient de changer), adoptée sans sceau d'avant, abîmée ou illisible ne vaut rien : tout est redit.
-fn deja_signales(lu: crate::sceau::Lecture) -> Vec<String> {
-    match lu {
-        crate::sceau::Lecture::Intact(o) => serde_json::from_slice(&o).unwrap_or_default(),
-        _ => Vec::new(),
+/// Les changements déjà notifiés : chaque fichier avec l'état où il a été signalé (son empreinte, ou « - » s'il
+/// manquait). Retenir le seul chemin laissait un fichier déjà signalé une fois se faire rechanger (un ~/.bashrc
+/// réécrit après un premier changement légitime) sans plus rien notifier. Une liste changée hors de Vanguard (un
+/// programme qui y écrit d'avance le fichier qu'il vient de changer), adoptée sans sceau d'avant, abîmée ou
+/// illisible ne vaut rien : tout est redit. La forme d'avant (une liste de chemins, sans état) est lue une fois sans
+/// état connu : réécrite à la passe même, avec les états.
+fn deja_signales(lu: crate::sceau::Lecture) -> BTreeMap<String, Option<String>> {
+    let crate::sceau::Lecture::Intact(o) = lu else {
+        return BTreeMap::new();
+    };
+    if let Ok(etats) = serde_json::from_slice::<BTreeMap<String, String>>(&o) {
+        return etats.into_iter().map(|(f, h)| (f, Some(h))).collect();
     }
+    serde_json::from_slice::<Vec<String>>(&o)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| (f, None))
+        .collect()
+}
+
+/// L'état d'un fichier changé, tel que la surveillance le retient : son empreinte actuelle, ou « - » s'il manque.
+fn etat_signale(actuel: &Etat, f: &str) -> String {
+    actuel.get(f).cloned().unwrap_or_else(|| "-".to_string())
+}
+
+/// Les changements à notifier : ceux pas encore signalés, ou signalés dans un autre état (rechangés depuis).
+fn a_notifier(e: &Ecarts, actuel: &Etat, signales: &BTreeMap<String, Option<String>>) -> (Vec<String>, Etat) {
+    let tous: Etat = e
+        .modifies
+        .iter()
+        .chain(&e.ajoutes)
+        .chain(&e.supprimes)
+        .map(|f| (f.clone(), etat_signale(actuel, f)))
+        .collect();
+    let nouveaux = tous
+        .iter()
+        .filter(|(f, h)| match signales.get(*f) {
+            None => true,
+            Some(None) => false,
+            Some(Some(avant)) => avant != *h,
+        })
+        .map(|(f, _)| f.clone())
+        .collect();
+    (nouveaux, tous)
 }
 
 /// Changements pas encore signalés par la surveillance horaire (pour ne prévenir qu'une fois par changement).
@@ -324,23 +370,14 @@ pub fn changements_a_signaler() -> Option<String> {
     let Reference::Valable(reference) = reference() else {
         return None;
     };
-    let e = comparer(&reference, &etat_actuel());
+    let actuel = etat_actuel();
+    let e = comparer(&reference, &actuel);
     let signales = deja_signales(crate::sceau::lire(crate::sceau::INTEGRITE_SIGNALE));
-    let tous: Vec<String> = e
-        .modifies
-        .iter()
-        .chain(&e.ajoutes)
-        .chain(&e.supprimes)
-        .cloned()
-        .collect();
-    let nouveaux: Vec<String> = tous
-        .iter()
-        .filter(|f| !signales.contains(f))
-        .map(|f| affichable(f))
-        .collect();
+    let (nouveaux, tous) = a_notifier(&e, &actuel, &signales);
     if let Ok(t) = serde_json::to_string(&tous) {
         let _ = crate::sceau::ecrire(crate::sceau::INTEGRITE_SIGNALE, t);
     }
+    let nouveaux: Vec<String> = nouveaux.iter().map(|f| affichable(f)).collect();
     (!nouveaux.is_empty()).then(|| resume(&nouveaux, 3, ", "))
 }
 
@@ -562,6 +599,11 @@ mod tests {
         // Acceptée telle quelle, les sceaux effacés : douteuse, jamais valable.
         let lu = crate::sceau::Lecture::Adopte(b"{}".to_vec());
         assert!(matches!(reference_lue(lu), Reference::Douteuse(_)));
+        // Manquante alors que les sceaux ont été refaits : douteuse, jamais « pas encore de référence ».
+        assert!(matches!(
+            reference_lue(crate::sceau::Lecture::Inconnu),
+            Reference::Douteuse(_)
+        ));
     }
 
     /// Un programme qui change ~/.bashrc et l'écrit d'avance dans la liste des changements déjà signalés : la liste,
@@ -569,17 +611,39 @@ mod tests {
     #[test]
     fn changements_signales_poses_a_cote_ne_taisent_rien() {
         use crate::sceau::Lecture;
-        let liste = br#"["/home/alice/.bashrc"]"#.to_vec();
-        assert_eq!(
-            deja_signales(Lecture::Intact(liste.clone())),
-            vec!["/home/alice/.bashrc"]
-        );
-        assert_eq!(
-            deja_signales(Lecture::Falsifie(Some(liste.clone()))),
-            Vec::<String>::new()
-        );
-        assert_eq!(deja_signales(Lecture::Adopte(liste)), Vec::<String>::new());
-        assert_eq!(deja_signales(Lecture::Absent), Vec::<String>::new());
+        let liste = br#"{"/home/alice/.bashrc":"b3:aa"}"#.to_vec();
+        let attendu: BTreeMap<String, Option<String>> =
+            [("/home/alice/.bashrc".to_string(), Some("b3:aa".to_string()))].into();
+        assert_eq!(deja_signales(Lecture::Intact(liste.clone())), attendu);
+        assert!(deja_signales(Lecture::Falsifie(Some(liste.clone()))).is_empty());
+        assert!(deja_signales(Lecture::Adopte(liste)).is_empty());
+        assert!(deja_signales(Lecture::Absent).is_empty());
+        assert!(deja_signales(Lecture::Inconnu).is_empty());
+        // La forme d'avant : des chemins sans état.
+        let ancienne = deja_signales(Lecture::Intact(br#"["/home/alice/.bashrc"]"#.to_vec()));
+        assert_eq!(ancienne.get("/home/alice/.bashrc"), Some(&None));
+    }
+
+    /// Un ~/.bashrc déjà signalé une fois, puis rechangé par un autre programme : redit. Le même état : pas redit.
+    #[test]
+    fn un_fichier_rechange_se_renotifie() {
+        let bashrc = "/home/alice/.bashrc".to_string();
+        let reference: Etat = [(bashrc.clone(), "b3:00".to_string())].into();
+        let premier: Etat = [(bashrc.clone(), "b3:aa".to_string())].into();
+        let e = comparer(&reference, &premier);
+        let (nouveaux, retenus) = a_notifier(&e, &premier, &BTreeMap::new());
+        assert_eq!(nouveaux, vec![bashrc.clone()]);
+        let signales: BTreeMap<String, Option<String>> = retenus.into_iter().map(|(f, h)| (f, Some(h))).collect();
+        assert_eq!(a_notifier(&e, &premier, &signales).0, Vec::<String>::new());
+        let second: Etat = [(bashrc.clone(), "b3:bb".to_string())].into();
+        let e = comparer(&reference, &second);
+        assert_eq!(a_notifier(&e, &second, &signales).0, vec![bashrc.clone()]);
+        // Supprimé ensuite : un autre état, redit aussi.
+        let e = comparer(&reference, &Etat::new());
+        assert_eq!(a_notifier(&e, &Etat::new(), &signales).0, vec![bashrc.clone()]);
+        // La forme d'avant (sans état) ne renotifie pas à la mise à jour ; la passe la réécrit avec les états.
+        let ancienne: BTreeMap<String, Option<String>> = [(bashrc, None)].into();
+        assert_eq!(a_notifier(&e, &Etat::new(), &ancienne).0, Vec::<String>::new());
     }
 
     #[test]
