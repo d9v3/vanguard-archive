@@ -262,23 +262,10 @@ elif [[ -z $GARDE ]]; then
     noter_quota_si_atteint "$DOSSIER/relecture.json"
   fi
 
-  # ── La VM, seulement pour une proposition verte et acceptée par la relecture : le programme Windows compilé dans le
-  # bac à sable, déposé par le vm-tester.sh de l'arbre de veille (la base, jamais celui de la branche), borné. ──
-  VERDICT=$(jq -r '(.structured_output // (.result | fromjson? // {})) | .verdict // empty' "$DOSSIER/relecture.json" 2>/dev/null)
-  EXE=$CIBLE_IA/x86_64-pc-windows-gnu/release/vanguard.exe
-  if [[ $(jq -r .verifier "$ETAT_IA") != vert || $VERDICT != accepte ]]; then
-    etat_ia vm "non lancée : verifier.sh pas vert ou relecture pas favorable"
-  elif [[ ! -x $ARBRE/outils/vm-tester.sh ]]; then
-    etat_ia vm "sautée : vm-tester.sh absent de l'arbre de veille"
-  elif ! bac_a_sable "$TRAV" "$TRAV" "$CIBLE_IA" "$CARGO_IA" -- timeout --kill-after=60 30m \
-    cargo build -q --release --offline --target x86_64-pc-windows-gnu >"$DOSSIER/vm.log" 2>&1 || [[ ! -f $EXE ]]; then
-    etat_ia vm "rouge : programme Windows pas compilé (voir $DOSSIER/vm.log)"
-  elif timeout --kill-after=60 40m "$ARBRE/outils/vm-tester.sh" --exe "$EXE" --delai 30 >>"$DOSSIER/vm.log" 2>&1; then
-    etat_ia vm "vert"
-  else
-    etat_ia vm "rouge : voir $DOSSIER/vm.log (Windows non vérifié)"
-    journal "vm-tester.sh : échec (voir $DOSSIER/vm.log)"
-  fi
+  # ── La VM : jamais d'office pour une branche écrite par l'IA. Ce qui est déposé dans la file s'exécute en
+  # administrateur dans la VM, sans clic (surveillant-essais.ps1), et la VM partage un dossier en écriture avec ce
+  # compte : un programme que personne n'a relu n'y va pas. L'auteur le lance après sa relecture. ──
+  etat_ia vm "non lancée : programme écrit par l'IA, à essayer après relecture (outils/vm-tester.sh --branche $BRANCHE)"
 fi
 
 trap - TERM INT

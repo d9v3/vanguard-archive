@@ -75,6 +75,10 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     scelle(sceau::TELECHARGEMENTS, "protection::telechargement"),
     scelle(sceau::BLOCAGE_SIGNALEES, "protection::blocage"),
     scelle(sceau::LOGICIELS, "machine::logiciels_vus"),
+    // Le dernier résultat de chaque outil : un « rien trouvé » forgé ne s'affiche plus en vert dans le rapport.
+    scelle(crate::modele::resultat::FICHIERS[0], "modele::resultat"),
+    scelle(crate::modele::resultat::FICHIERS[1], "modele::resultat"),
+    scelle(crate::modele::resultat::FICHIERS[2], "modele::resultat"),
     // La tête du journal des événements : retirer la fin du journal sans elle se voit.
     scelle(crate::modele::journal::TETE, "modele::journal"),
     local("sceaux.json", "sceau"),

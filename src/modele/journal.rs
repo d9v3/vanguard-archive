@@ -38,6 +38,24 @@ const OCTETS_GARDES: u64 = 20 << 20;
 /// Un segment plus gros n'est pas lu (un fichier mis à sa place pour faire durer la lecture).
 const SEGMENT_MAX: u64 = 2 * OCTETS_GARDES;
 
+/// Ce que la lecture prend en tout, au plus. L'élagage (`garder`) ne tourne qu'à l'écriture : sans borne, un dépôt de
+/// centaines de segments faisait tout charger au lecteur, jusqu'à le faire tomber faute de mémoire au moment même
+/// où il fallait montrer l'incident. Un vrai journal tient en 13 mois et 20 Mo ; au-delà, les plus récents sont lus
+/// et ce qui est écarté est dit (`Lecture::Incomplet`).
+#[derive(Clone, Copy, Debug)]
+struct Bornes {
+    mois: usize,
+    octets: u64,
+    evenements: usize,
+}
+
+const BORNES: Bornes = Bornes {
+    // Le mois en cours en plus : une horloge sautée en avant peut en laisser un de plus.
+    mois: MOIS_GARDES as usize + 1,
+    octets: SEGMENT_MAX,
+    evenements: 200_000,
+};
+
 /// Ce que la tête retient d'un mois clos.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 struct Clos {
@@ -165,6 +183,102 @@ fn segments(rep: &Path) -> Vec<(String, PathBuf)> {
     s
 }
 
+/// Les segments lus, les mois écartés, les mois posés après le plafond.
+type Partage = (Vec<(String, PathBuf)>, Vec<String>, Vec<String>);
+
+/// Les segments à lire sous `bornes`, du plus ancien au plus récent, les mois écartés et ceux posés après
+/// `plafond` : on part du mois du journal (l'incident en cours est là), et dès qu'un mois dépasse le nombre ou les
+/// octets permis, lui et tous les plus anciens sont écartés, pour que ce qui est lu reste d'un seul tenant. Le plus
+/// récent est toujours lu (sa propre limite, `SEGMENT_MAX`, tient à la lecture). La taille vient du lien lui-même,
+/// jamais de sa cible. Les mois après `plafond` ne comptent pas dans les bornes : sinon, des fichiers posés aux
+/// noms de 2099 les remplissaient, et le vrai mois en cours n'était plus lu.
+fn segments_bornes(presents: Vec<(String, PathBuf)>, bornes: Bornes, plafond: &str) -> Partage {
+    let mut lus = Vec::new();
+    let mut ecartes = Vec::new();
+    let mut posterieurs = Vec::new();
+    let mut total: u64 = 0;
+    for (mois, chemin) in presents.into_iter().rev() {
+        if mois.as_str() > plafond {
+            posterieurs.push(mois);
+            continue;
+        }
+        let taille = std::fs::symlink_metadata(&chemin).map_or(0, |m| m.len());
+        let dedans = lus.is_empty() || (lus.len() < bornes.mois && total.saturating_add(taille) <= bornes.octets);
+        if dedans && ecartes.is_empty() {
+            total = total.saturating_add(taille);
+            lus.push((mois, chemin));
+        } else {
+            ecartes.push(mois);
+        }
+    }
+    lus.reverse();
+    ecartes.reverse();
+    posterieurs.reverse();
+    (lus, ecartes, posterieurs)
+}
+
+/// Ce que dit une lecture des mois posés après le mois du journal, non lus.
+fn dire_posterieurs(posterieurs: &[String]) -> Option<String> {
+    let (a, b) = (posterieurs.first()?, posterieurs.last()?);
+    let n = posterieurs.len();
+    Some(format!(
+        "{n} mois posés après le mois du journal, non lus, de {a} à {b} / {n} month(s) placed after the log's \
+         month, not read, {a} to {b}"
+    ))
+}
+
+/// Le mois de l'horloge (UTC, comme les segments).
+fn mois_de(t: chrono::DateTime<chrono::Utc>) -> String {
+    t.format("%Y-%m").to_string()
+}
+
+/// Le plafond des lectures qui ne jugent pas la tête (traces en administrateur) : le mois de l'horloge, ou celui de
+/// la tête lue telle quelle s'il est plus tard (une horloge sautée en avant a pu y écrire). Non jugée, la tête peut
+/// mentir ; mais qui la change peut aussi bien retirer les segments, et ces lectures ne disent rien d'intact.
+fn plafond_brut(dossier: &Path) -> String {
+    let tete = crate::socle::lire_ordinaire(&dossier.join(TETE), 1 << 20)
+        .ok()
+        .and_then(|o| serde_json::from_slice::<Tete>(&o).ok())
+        .map(|t| t.segment)
+        .filter(|m| nom_de_segment(&format!("{m}.jsonl")).is_some());
+    let horloge = mois_de(chrono::Utc::now());
+    tete.map_or_else(|| horloge.clone(), |t| t.max(horloge.clone()))
+}
+
+/// Ce que dit une lecture bornée : les mois écartés (le plus ancien et le plus récent) et les événements laissés.
+fn dire_ecartes(ecartes: &[String], laisses: usize) -> Option<String> {
+    let mut morceaux = Vec::new();
+    if let (Some(a), Some(b)) = (ecartes.first(), ecartes.last()) {
+        morceaux.push(format!(
+            "{} mois non lus, de {a} à {b} (lecture bornée) / {} month(s) not read, {a} to {b} (bounded read)",
+            ecartes.len(),
+            ecartes.len()
+        ));
+    }
+    if laisses > 0 {
+        morceaux.push(format!(
+            "{laisses} événement(s) les plus anciens laissés (lecture bornée) / {laisses} oldest event(s) left out \
+             (bounded read)"
+        ));
+    }
+    (!morceaux.is_empty()).then(|| morceaux.join(" ; "))
+}
+
+/// Ajoute un événement aux plus récents gardés : au-delà de la borne, le plus ancien part, ce qui garde la mémoire
+/// bornée sans perdre les derniers.
+fn garder_recent(
+    evenements: &mut std::collections::VecDeque<Evenement>,
+    e: Evenement,
+    max: usize,
+    laisses: &mut usize,
+) {
+    if evenements.len() >= max {
+        evenements.pop_front();
+        *laisses += 1;
+    }
+    evenements.push_back(e);
+}
+
 /// Le mois le plus ancien gardé, `MOIS_GARDES` avant `mois` compris (« 2026-10 » → « 2025-10 »).
 fn plus_ancien_garde(mois: &str) -> String {
     let annee: i32 = mois.get(..4).and_then(|a| a.parse().ok()).unwrap_or(0);
@@ -258,7 +372,14 @@ fn ecrire_dans(
     let _verrou = crate::socle::Verrou::prendre_nomme(dossier, VERROU);
     let rep = dossier.join(DOSSIER);
     std::fs::create_dir_all(&rep)?;
-    let presents = segments(&rep);
+    let lue = tete_lue(dossier);
+    // Les mois après celui de l'horloge (ou de la tête, si une horloge sautée en avant y a écrit) ne sont pas
+    // suivis : un fichier posé au nom de 2099 ferait écrire là, et partir les vrais mois de la lecture bornée.
+    let plafond = match &lue {
+        TeteLue::Lue(t, _) => t.segment.clone().max(mois_de(maintenant)),
+        _ => mois_de(maintenant),
+    };
+    let presents: Vec<(String, PathBuf)> = segments(&rep).into_iter().filter(|(m, _)| *m <= plafond).collect();
     let (dernier, octets) = match presents.last() {
         Some((m, chemin)) => (Some(m.clone()), crate::socle::lire_ordinaire(chemin, SEGMENT_MAX)?),
         None => (None, Vec::new()),
@@ -272,7 +393,7 @@ fn ecrire_dans(
     let fin_reelle = reelles.last().map(|l| empreinte_ligne(l));
 
     let mut rupture = None;
-    let mut tete = match tete_lue(dossier) {
+    let mut tete = match lue {
         TeteLue::Lue(t, _) => {
             let n = usize::try_from(t.lignes).unwrap_or(usize::MAX);
             let d_accord = dernier.as_deref() == Some(t.segment.as_str())
@@ -404,8 +525,11 @@ fn ecrire_dans(
 /// Retire les mois de plus de 13 mois, puis les plus vieux tant que le tout dépasse 20 Mo (jamais le mois en cours),
 /// et retient l'ancre du plus ancien gardé. `courant` : le mois de l'horloge, jamais après `mois`.
 fn garder(rep: &Path, mois: &str, courant: &str, tete: &mut Tete) {
+    // Les mois posés après celui qu'on écrit ne sont ni comptés ni retirés : un faux de 40 Mo au nom de 2099 ferait
+    // sinon partir tous les vrais mois d'avant, pour la limite de taille.
     let mut presents: Vec<(String, PathBuf, u64)> = segments(rep)
         .into_iter()
+        .filter(|(m, _)| m.as_str() <= mois)
         .map(|(m, c)| {
             let t = std::fs::metadata(&c).map_or(0, |x| x.len());
             (m, c, t)
@@ -448,6 +572,10 @@ fn garder(rep: &Path, mois: &str, courant: &str, tete: &mut Tete) {
 
 /// Relit le journal de `dossier` et juge sa chaîne, sa tête et ses mois clos.
 pub(crate) fn lire_dans(dossier: &Path) -> Lu {
+    lire_borne(dossier, BORNES)
+}
+
+fn lire_borne(dossier: &Path, bornes: Bornes) -> Lu {
     let presents = segments(&dossier.join(DOSSIER));
     let (mut lecture, tete) = match tete_lue(dossier) {
         TeteLue::Absente if presents.is_empty() => {
@@ -463,8 +591,24 @@ pub(crate) fn lire_dans(dossier: &Path) -> Lu {
         TeteLue::Lue(t, true) => (Lecture::Adopte, Some(t)),
         TeteLue::Lue(t, false) => (Lecture::Intact, Some(t)),
     };
-    let (evenements, illisibles, chaine) = relire(&presents, tete.as_ref());
+    // Avec une tête crue, rien ne s'écrit après son mois : ce qui y est posé n'est pas de Vanguard.
+    let plafond = match &tete {
+        Some(t) if !t.segment.is_empty() => t.segment.clone(),
+        _ => mois_de(chrono::Utc::now()),
+    };
+    let (presents, ecartes, posterieurs) = segments_bornes(presents, bornes, &plafond);
+    let (evenements, illisibles, chaine, laisses) = relire(&presents, &ecartes, tete.as_ref(), bornes.evenements);
     lecture = lecture.pire(chaine);
+    if let Some(r) = dire_posterieurs(&posterieurs) {
+        lecture = lecture.pire(if tete.is_some() {
+            Lecture::Falsifie(r)
+        } else {
+            Lecture::Incomplet(r)
+        });
+    }
+    if let Some(r) = dire_ecartes(&ecartes, laisses) {
+        lecture = lecture.pire(Lecture::Incomplet(r));
+    }
     if illisibles > 0 {
         lecture = lecture.pire(Lecture::Incomplet(format!(
             "{illisibles} ligne(s) illisible(s) / unreadable line(s)"
@@ -483,17 +627,24 @@ pub(crate) fn lire_dans(dossier: &Path) -> Lu {
     }
 }
 
-/// Les événements des segments et le jugement de leur chaîne d'après la tête (`None` : sans tête, seule la chaîne
-/// entre les lignes se juge).
-fn relire(presents: &[(String, PathBuf)], tete: Option<&Tete>) -> (Vec<Evenement>, usize, Lecture) {
+/// Les événements des segments (les `max` plus récents), le jugement de leur chaîne d'après la tête (`None` : sans
+/// tête, seule la chaîne entre les lignes se juge) et le nombre d'événements laissés. `ecartes` : les mois présents
+/// mais non lus (`segments_bornes`), qui ne sont pas « retirés », et devant lesquels l'ancre ne se juge pas.
+fn relire(
+    presents: &[(String, PathBuf)],
+    ecartes: &[String],
+    tete: Option<&Tete>,
+    max: usize,
+) -> (Vec<Evenement>, usize, Lecture, usize) {
     let mut lecture = Lecture::Intact;
-    let mut evenements = Vec::new();
+    let mut evenements = std::collections::VecDeque::new();
+    let mut laisses = 0;
     let mut illisibles = 0;
-    let mut precedente: Option<String> = tete.map(|t| t.ancre.clone());
+    let mut precedente: Option<String> = tete.filter(|_| ecartes.is_empty()).map(|t| t.ancre.clone());
     let dernier = presents.len().saturating_sub(1);
     if let Some(t) = tete {
         for m in t.clos.keys() {
-            if !presents.iter().any(|(p, _)| p == m) {
+            if !presents.iter().any(|(p, _)| p == m) && !ecartes.contains(m) {
                 lecture = lecture.pire(Lecture::Falsifie(format!("{m} : mois retiré / month removed")));
             }
         }
@@ -524,7 +675,7 @@ fn relire(presents: &[(String, PathBuf)], tete: Option<&Tete>) -> (Vec<Evenement
                 _ => {}
             }
             match serde_json::from_slice::<Evenement>(l) {
-                Ok(e) => evenements.push(e),
+                Ok(e) => garder_recent(&mut evenements, e, max, &mut laisses),
                 Err(_) => illisibles += 1,
             }
             precedente = Some(empreinte_ligne(l));
@@ -563,32 +714,45 @@ fn relire(presents: &[(String, PathBuf)], tete: Option<&Tete>) -> (Vec<Evenement
             }
         }
     }
-    (evenements, illisibles, lecture)
+    (evenements.into(), illisibles, lecture, laisses)
 }
 
 /// Les événements de `dossier` sans juger la tête : ce que lisent les traces en administrateur dans le dossier d'un
 /// compte, où juger écrirait les sceaux (`sceau::lire_dans` peut les adopter). Chaque segment est lu borné, sans
-/// suivre de lien ; un segment illisible est dit dans `manques`.
+/// suivre de lien, et le tout aussi (`BORNES`) ; un segment illisible ou une lecture bornée est dit dans `manques`.
 pub(crate) fn lire_sans_juger(dossier: &Path) -> (Vec<Evenement>, Vec<String>) {
-    let mut evenements = Vec::new();
+    lire_sans_juger_borne(dossier, BORNES)
+}
+
+fn lire_sans_juger_borne(dossier: &Path, bornes: Bornes) -> (Vec<Evenement>, Vec<String>) {
+    let mut evenements = std::collections::VecDeque::new();
+    let mut laisses = 0;
     let mut manques = Vec::new();
-    for (mois, chemin) in segments(&dossier.join(DOSSIER)) {
+    let (lus, ecartes, posterieurs) = segments_bornes(segments(&dossier.join(DOSSIER)), bornes, &plafond_brut(dossier));
+    for (mois, chemin) in lus {
         match crate::socle::lire_ordinaire(&chemin, SEGMENT_MAX) {
-            Ok(o) => evenements.extend(
-                lignes(&o)
+            Ok(o) => {
+                for e in lignes(&o)
                     .into_iter()
-                    .filter_map(|l| serde_json::from_slice::<Evenement>(l).ok()),
-            ),
+                    .filter_map(|l| serde_json::from_slice::<Evenement>(l).ok())
+                {
+                    garder_recent(&mut evenements, e, bornes.evenements, &mut laisses);
+                }
+            }
             Err(e) => manques.push(format!("{DOSSIER}/{mois}.jsonl : {e}")),
         }
     }
-    (evenements, manques)
+    manques.extend(dire_ecartes(&ecartes, laisses));
+    manques.extend(dire_posterieurs(&posterieurs));
+    (evenements.into(), manques)
 }
 
 /// Les fichiers du journal sous le dossier de données (« evenements/2026-10.jsonl », la tête), pour les recopier
 /// tels quels.
 pub(crate) fn fichiers(dossier: &Path) -> Vec<String> {
-    let mut f: Vec<String> = segments(&dossier.join(DOSSIER))
+    // Bornés comme la lecture : les traces n'en recopient pas plus qu'elles n'en liraient.
+    let mut f: Vec<String> = segments_bornes(segments(&dossier.join(DOSSIER)), BORNES, &plafond_brut(dossier))
+        .0
         .into_iter()
         .map(|(mois, _)| format!("{DOSSIER}/{mois}.jsonl"))
         .collect();
@@ -915,6 +1079,106 @@ mod tests {
         assert_eq!(lu.lecture, Lecture::Intact, "{:?}", lu.lecture);
         assert_eq!(alertes(&lu.evenements).count(), 1);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Des centaines de segments déposés à côté du journal : la lecture ne charge que les mois les plus récents
+    /// permis, garde le mois en cours, et dit ce qu'elle n'a pas lu, au lieu de tout charger jusqu'à tomber.
+    #[test]
+    fn lecture_bornee_en_tout() {
+        let d = dossier("borne");
+        remplir(&d, 1, "2026-10-23T10:00:00Z");
+        let ligne = serde_json::to_string(&alerte(7, "2000-01-01T00:00:00Z")).unwrap() + "\n";
+        for i in 0..300 {
+            let mois = format!("{:04}-{:02}", 2000 + i / 12, i % 12 + 1);
+            std::fs::write(segment(&d, &mois), &ligne).unwrap();
+        }
+        let lu = lire_dans(&d);
+        assert!(lu.evenements.len() <= 2 * BORNES.mois, "{}", lu.evenements.len());
+        assert!(alertes(&lu.evenements).any(|(_, _, t, _)| t == "alerte 0"));
+        assert_ne!(lu.lecture, Lecture::Intact);
+        let (evenements, manques) = lire_sans_juger(&d);
+        assert!(evenements.len() <= 2 * BORNES.mois, "{}", evenements.len());
+        assert!(manques.iter().any(|m| m.contains("non lus")), "{manques:?}");
+        assert!(fichiers(&d).len() <= BORNES.mois + 1);
+        // Le nombre d'événements et les octets aussi : les plus récents restent, l'écart est dit.
+        let d2 = dossier("borne-evenements");
+        remplir(&d2, 2, "2026-09-23T10:00:00Z");
+        remplir(&d2, 5, "2026-10-23T10:00:00Z");
+        let peu = Bornes {
+            evenements: 3,
+            ..BORNES
+        };
+        let lu = lire_borne(&d2, peu);
+        assert_eq!(lu.evenements.len(), 3);
+        assert!(alertes(&lu.evenements).any(|(_, _, t, _)| t == "alerte 4"));
+        assert!(
+            matches!(&lu.lecture, Lecture::Incomplet(r) if r.contains("laissés")),
+            "{:?}",
+            lu.lecture
+        );
+        let octets = std::fs::metadata(segment(&d2, "2026-10")).unwrap().len();
+        let lu = lire_borne(&d2, Bornes { octets, ..BORNES });
+        assert!(
+            matches!(&lu.lecture, Lecture::Incomplet(r) if r.contains("2026-09")),
+            "{:?}",
+            lu.lecture
+        );
+        assert_eq!(alertes(&lu.evenements).count(), 5);
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&d2);
+    }
+
+    /// Des mois « futurs » déposés à côté du journal (petits et nombreux, ou un seul presque à la taille permise) :
+    /// sans plafond, ils remplissaient les bornes de la lecture et le vrai mois en cours, celui de l'incident,
+    /// n'était plus lu ni recopié dans les traces.
+    #[test]
+    fn mois_futurs_deposes_ne_cachent_pas_le_mois_en_cours() {
+        let futurs: Vec<String> = (0..14)
+            .map(|i| format!("{:04}-{:02}", 2099 + i / 12, i % 12 + 1))
+            .collect();
+        for (nom, gros) in [("futurs-nombreux", false), ("futur-gros", true)] {
+            let d = dossier(nom);
+            remplir(&d, 1, "2026-09-23T10:00:00Z");
+            remplir(&d, 3, "2026-10-23T10:00:00Z");
+            if gros {
+                // Creux : la taille seule compte pour les bornes, rien n'est écrit sur le disque.
+                std::fs::File::create(segment(&d, "2099-01"))
+                    .unwrap()
+                    .set_len(SEGMENT_MAX - 64)
+                    .unwrap();
+            } else {
+                for m in &futurs {
+                    std::fs::write(segment(&d, m), b"").unwrap();
+                }
+            }
+            let verifier = |d: &Path| {
+                let lu = lire_dans(d);
+                assert_eq!(alertes(&lu.evenements).count(), 4, "{nom} : {lu:?}");
+                assert!(
+                    matches!(&lu.lecture, Lecture::Falsifie(r) if r.contains("2099-01")),
+                    "{nom} : {:?}",
+                    lu.lecture
+                );
+                let (evenements, manques) = lire_sans_juger(d);
+                assert_eq!(alertes(&evenements).count(), 4, "{nom}");
+                assert!(manques.iter().any(|m| m.contains("2099-01")), "{nom} : {manques:?}");
+                let f = fichiers(d);
+                assert!(f.contains(&format!("{DOSSIER}/2026-10.jsonl")), "{nom} : {f:?}");
+                assert!(!f.iter().any(|x| x.contains("2099-")), "{nom} : {f:?}");
+            };
+            verifier(&d);
+            // Une écriture après le dépôt ne suit pas les faux mois : elle reste dans le mois en cours, et
+            // l'élagage ne compte pas leur taille (un faux de 40 Mo aurait fait partir les vrais mois).
+            remplir(&d, 1, "2026-10-23T11:00:00Z");
+            assert!(segment(&d, "2026-09").exists(), "{nom}");
+            let lu = lire_dans(&d);
+            assert_eq!(alertes(&lu.evenements).count(), 5, "{nom} : {lu:?}");
+            assert!(
+                matches!(&lu.lecture, Lecture::Falsifie(r) if r.contains("2099-01")),
+                "{nom}"
+            );
+            let _ = std::fs::remove_dir_all(&d);
+        }
     }
 
     /// Une ligne retirée au milieu sans toucher la tête : la tête scellée reste intacte, seul le journal relu le

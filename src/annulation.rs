@@ -118,6 +118,46 @@ pub fn tout_remettre() {
     remettre(&elements);
 }
 
+/// Les commandes refaites d'un blocage et le port retenu à oublier, ou le refus.
+type Prepare = Result<(Vec<String>, Option<String>), crate::modele::Echec>;
+
+/// Ce que défait un blocage par commandes, refait depuis ses champs typés. changements.jsonl n'est pas scellé :
+/// n'importe quel programme du compte peut y écrire un blocage « en place » dont l'annulation est sa propre commande
+/// sudo ; rejouée telle quelle dans la demande administrateur, elle lui donnerait root. Le même chemin que
+/// `gestes::defaire`, donc, jamais le texte relu ; `None` pour un blocage qui ne se défait pas par commandes.
+fn preparer(b: &Blocage) -> Option<Prepare> {
+    use crate::protection::blocage::gestes;
+    match &b.annulation {
+        Some(Annulation::Commandes {
+            commandes,
+            port,
+            inverse,
+        }) => Some(
+            gestes::commandes_d_annulation(commandes, port.as_deref(), *inverse).ok_or_else(|| {
+                crate::modele::Echec::refuse("annulation/remettre", gestes::refus_d_annulation(commandes))
+            }),
+        ),
+        _ => None,
+    }
+}
+
+/// Les blocages par commandes préparés (`preparer`), dans l'ordre des éléments, et les groupes à lancer dans la
+/// demande administrateur : seulement les commandes refaites, une par blocage admis, dans le même ordre.
+fn blocages_prepares(elements: &[Element]) -> (Vec<(&Blocage, Prepare)>, Vec<Vec<String>>) {
+    let prepares: Vec<(&Blocage, Prepare)> = elements
+        .iter()
+        .filter_map(|e| match e {
+            Element::Blocage(_, b) => preparer(b).map(|p| (&**b, p)),
+            Element::Note(_) => None,
+        })
+        .collect();
+    let groupes = prepares
+        .iter()
+        .filter_map(|(_, p)| p.as_ref().ok().map(|(c, _)| c.clone()))
+        .collect();
+    (prepares, groupes)
+}
+
 /// Défait les éléments, dans leur ordre : les réglages et les blocages par commandes en une seule demande
 /// administrateur, puis ce qui se défait sans elle (fichier remis de la quarantaine, copie d'avant).
 fn remettre(elements: &[Element]) {
@@ -128,19 +168,11 @@ fn remettre(elements: &[Element]) {
             Element::Blocage(..) => None,
         })
         .collect();
-    let par_commandes: Vec<&Blocage> = elements
+    let (prepares, groupes) = blocages_prepares(elements);
+    // Le rang de chaque blocage admis dans `groupes`, donc dans les réussites rendues.
+    let admis: Vec<(&str, Option<&String>)> = prepares
         .iter()
-        .filter_map(|e| match e {
-            Element::Blocage(_, b) if matches!(b.annulation, Some(Annulation::Commandes { .. })) => Some(&**b),
-            _ => None,
-        })
-        .collect();
-    let groupes: Vec<Vec<String>> = par_commandes
-        .iter()
-        .filter_map(|b| match &b.annulation {
-            Some(Annulation::Commandes { commandes, .. }) => Some(commandes.clone()),
-            _ => None,
-        })
+        .filter_map(|(b, p)| p.as_ref().ok().map(|(_, port)| (b.id.as_str(), port.as_ref())))
         .collect();
     let (issues, plus) = annulables::defaire(&ids, &groupes);
     println!();
@@ -157,20 +189,25 @@ fn remettre(elements: &[Element]) {
                 }
             }
             Element::Blocage(_, b) => {
-                let resultat = match par_commandes.iter().position(|x| x.id == b.id) {
-                    Some(i) if plus.get(i) == Some(&true) => {
-                        if let Some(Annulation::Commandes { port: Some(p), .. }) = &b.annulation {
+                let prepare = prepares.iter().find(|(x, _)| x.id == b.id).map(|(_, p)| p);
+                let rang = admis.iter().position(|(id, _)| *id == b.id);
+                let resultat = match (prepare, rang) {
+                    // Refusé : rien n'a été lancé pour lui, sa note reste.
+                    (Some(Err(refus)), _) => Err(String::from(refus.clone())),
+                    (Some(Ok(_)), Some(i)) if plus.get(i) == Some(&true) => {
+                        // Le port refait depuis les champs typés, pas celui relu du relevé.
+                        if let Some(p) = admis[i].1 {
                             crate::machine::oublier_port(p);
                         }
                         crate::changements::marquer_annule(&b.id);
                         Ok(())
                     }
-                    Some(_) => Err(tr!(
+                    (Some(Ok(_)), _) => Err(tr!(
                         "la commande inverse a échoué (voir le message ci-dessus)",
                         "the reverse command failed (see the message above)"
                     )
                     .to_string()),
-                    None => crate::protection::blocage::gestes::defaire(b)
+                    (None, _) => crate::protection::blocage::gestes::defaire(b)
                         .map(|_| ())
                         .map_err(String::from),
                 };
@@ -258,6 +295,46 @@ mod tests {
             })
             .collect();
         assert_eq!(ordre, ["bilan:b", "x", "jeux:hags", "dns_rapide"]);
+    }
+
+    /// Un programme du compte écrit dans changements.jsonl un blocage « en place » dont l'annulation est sa propre
+    /// commande sudo : « Tout remettre comme avant » ne la met jamais dans la demande administrateur. Seules les
+    /// commandes refaites depuis les champs typés y vont ; le blocage forgé est refusé comme par `gestes::defaire`.
+    #[test]
+    fn blocage_forge_jamais_rejoue() {
+        use crate::changements::Inverse;
+        use crate::protection::blocage::pare_feu::PareFeu;
+        let forgee = "sudo sh -c 'id > /tmp/vanguard-preuve-root'".to_string();
+        let forge = Annulation::Commandes {
+            commandes: vec![forgee.clone()],
+            port: None,
+            inverse: None,
+        };
+        // Des champs typés justes, mais des commandes relues changées : les champs l'emportent.
+        let champs = Annulation::Commandes {
+            commandes: vec![forgee.clone()],
+            port: Some("22/tcp".into()),
+            inverse: Some(Inverse::Sortante {
+                pare_feu: PareFeu::Ufw,
+                adresse: "203.0.113.7".parse().unwrap(),
+            }),
+        };
+        let elements = a_defaire(
+            Vec::new(),
+            vec![
+                ("2026-10-23 07:00".to_string(), blocage("forge", forge)),
+                ("2026-10-22 07:00".to_string(), blocage("type", champs)),
+            ],
+        );
+        let (prepares, groupes) = blocages_prepares(&elements);
+        assert_eq!(groupes, [vec!["sudo ufw delete deny out to '203.0.113.7'".to_string()]]);
+        assert!(groupes.iter().flatten().all(|c| !c.contains("sh -c")), "{groupes:?}");
+        let refus = prepares.iter().find(|(b, _)| b.id == "forge").map(|(_, p)| p.clone());
+        let refus = refus.and_then(Result::err).map(String::from).unwrap_or_default();
+        assert!(refus.contains("à la main") || refus.contains("by hand"), "{refus}");
+        // Le port à oublier vient des champs typés (une règle sortante n'en retient pas), pas du relevé.
+        let typee = prepares.iter().find(|(b, _)| b.id == "type").map(|(_, p)| p.clone());
+        assert!(matches!(typee, Some(Ok((_, None)))), "{typee:?}");
     }
 
     /// Les textes de « Tout remettre comme avant » tiennent dans `LARGEUR` colonnes, dans les deux langues.

@@ -6,7 +6,7 @@
 use chrono::NaiveDate;
 use serde::Deserialize;
 
-use super::Souple;
+use super::{Choisis, Choix, Souple};
 
 /// Les produits gardés : Java des quatre distributions comparées, puis la longue traîne (plus tard). Azul Zulu n'y est pas : sa version n'est pas une version de Java.
 pub(crate) const PRODUITS: [&str; 7] = [
@@ -25,7 +25,8 @@ const TOTAL_MIN: u32 = 100;
 #[derive(Deserialize)]
 struct Tout {
     total: u32,
-    result: Vec<ProduitBrut>,
+    /// En flux et plafonné (`Choisis`) : seuls les produits de la liste fermée sont gardés.
+    result: Choisis<ProduitBrut>,
 }
 
 #[derive(Deserialize)]
@@ -56,6 +57,12 @@ struct Derniere {
     name: Option<Souple<String>>,
     #[serde(default)]
     date: Option<Souple<String>>,
+}
+
+impl Choix for ProduitBrut {
+    fn garder(&self) -> bool {
+        PRODUITS.contains(&self.name.as_str())
+    }
 }
 
 // Lues en flux par `Souple` : tous leurs champs sont facultatifs, une branche sans nom est écartée plus bas.
@@ -91,6 +98,7 @@ pub(crate) fn lire(octets: &[u8]) -> Option<Vec<ProduitEol>> {
     };
     Some(
         tout.result
+            .0
             .into_iter()
             .filter(|p| PRODUITS.contains(&p.name.as_str()))
             .map(|p| ProduitEol {
@@ -219,6 +227,26 @@ mod tests {
             oracle.branches.iter().find(|b| b.nom == "8").unwrap().finie,
             Some(false)
         );
+    }
+
+    /// Beaucoup de petites entrées, en produits ou en branches : lues en flux et plafonnées, jamais toutes en mémoire.
+    #[test]
+    fn beaucoup_de_petites_entrees() {
+        let n = super::super::ENTREES_MAX + 1;
+        let produits = format!(
+            r#"{{"total": 485, "result": [{}]}}"#,
+            vec![r#"{"name":"x"}"#; n].join(",")
+        );
+        let (lus, alloue) = super::super::tests::allocations(|| lire(produits.as_bytes()));
+        assert_eq!(lus, None);
+        assert!(alloue < 1 << 20, "{alloue} octets alloués");
+        let branches = format!(
+            r#"{{"total": 485, "result": [{{"name": "python", "releases": [{}]}}]}}"#,
+            vec![r#"{"name":"3"}"#; n].join(",")
+        );
+        let (lus, alloue) = super::super::tests::allocations(|| lire(branches.as_bytes()));
+        assert_eq!(lus.unwrap()[0].branches, []);
+        assert!(alloue < 2 << 20, "{alloue} octets alloués");
     }
 
     proptest::proptest! {

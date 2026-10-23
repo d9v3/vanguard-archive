@@ -67,12 +67,47 @@ struct Vus {
     logiciels: BTreeMap<String, Vu>,
 }
 
-/// Les logiciels installés : (nom, version, vide si inconnue) ; `None` : la liste ne se lit pas.
+/// Au-delà de tant de clés sans nom affiché dans le panneau, la liste n'est pas normale (une vraie en a quelques
+/// dizaines) : elle est dite non vérifiée plutôt que crue entière.
 #[cfg(windows)]
-fn lire() -> Option<Vec<(String, String)>> {
+const SANS_NOM_MAX: usize = 1000;
+
+/// Ce qui a été lu : (nom, version, vide si inconnue), et pourquoi la liste n'est pas entière quand une borne de
+/// lecture a été atteinte (sous-clés, entrées d'un dossier). Une liste coupée n'est jamais jugée : ce qui manque
+/// serait oublié, puis redit « nouveau », et un programme caché derrière la borne ne serait jamais vu.
+struct Lu {
+    logiciels: Vec<(String, String)>,
+    coupe: Option<String>,
+}
+
+/// Les logiciels installés ; `None` : la liste ne se lit pas.
+#[cfg(windows)]
+fn lire() -> Option<Lu> {
     // Le panneau de la machine qui ne s'ouvre pas : aucune lecture ne vaut (`installes::noms` le dit de même).
     super::windows::installes::noms()?;
-    Some(stables(super::windows::installes::programmes()))
+    let (programmes, laisses) = super::windows::installes::programmes_et_laisses();
+    Some(Lu {
+        logiciels: stables(programmes),
+        coupe: coupe_stable(&laisses),
+    })
+}
+
+/// Pourquoi la lecture de la machine et de ce compte n'est pas entière (les autres sessions ne comptent pas, comme
+/// dans `stables`) : une clé coupée à sa borne, ou trop de clés sans nom affiché.
+#[cfg(windows)]
+fn coupe_stable(laisses: &super::windows::installes::Laisses) -> Option<String> {
+    use super::windows::installes::Portee;
+    let stable = |p: &Portee| !matches!(p, Portee::Compte(_));
+    if let Some((_, cle)) = laisses.coupees.iter().find(|(p, _)| stable(p)) {
+        return Some(trf!("trop de sous-clés dans {cle}", "too many subkeys in {cle}"));
+    }
+    let sans_nom: usize = laisses.sans_nom.iter().filter(|(p, _)| stable(p)).map(|(_, n)| n).sum();
+    (sans_nom > SANS_NOM_MAX).then(|| {
+        trf!(
+            "{sans_nom} clés sans nom affiché",
+            "{sans_nom} keys without a display name"
+        )
+    })
 }
 
 /// Ceux de la machine et de ce compte : les ruches des autres sessions ne sont lues que pendant qu'elles sont
@@ -88,7 +123,7 @@ fn stables(programmes: Vec<super::windows::installes::Programme>) -> Vec<(String
 }
 
 #[cfg(target_os = "linux")]
-fn lire() -> Option<Vec<(String, String)>> {
+fn lire() -> Option<Lu> {
     use super::linux::natif;
     let rpm = || {
         let r = crate::commande::lancer(
@@ -104,11 +139,12 @@ fn lire() -> Option<Vec<(String, String)>> {
         })
     };
     let l = natif::paquets_pacman().or_else(natif::paquets_dpkg).or_else(rpm)?;
-    avec_flatpak(
+    let logiciels = avec_flatpak(
         l,
         super::linux::paquets::applications_flatpak(),
         natif::present("flatpak"),
-    )
+    )?;
+    Some(Lu { logiciels, coupe: None })
 }
 
 /// Les paquets et les applications Flatpak. Flatpak installé mais muet (`flatpak list` en échec, trop lent) : rien
@@ -127,8 +163,12 @@ fn avec_flatpak(
     Some(l)
 }
 
+/// Entrées lues au plus par dossier d'applications.
 #[cfg(target_os = "macos")]
-fn lire() -> Option<Vec<(String, String)>> {
+const ENTREES_MAX: usize = 5_000;
+
+#[cfg(target_os = "macos")]
+fn lire() -> Option<Lu> {
     use std::path::PathBuf;
     let version = |app: &std::path::Path| match crate::plist::lire_fichier(&app.join("Contents/Info.plist")) {
         Ok(crate::plist::Lu::Plist(v)) => v
@@ -147,13 +187,26 @@ fn lire() -> Option<Vec<(String, String)>> {
     // seraient oubliées, puis redites « nouvelles ».
     std::fs::read_dir(&dossiers[0]).ok()?;
     let mut l = Vec::new();
+    let mut coupe = None;
     for d in &dossiers {
         let entrees = match std::fs::read_dir(d) {
             Ok(e) => e,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(_) => return None,
         };
-        for e in entrees.flatten().take(5_000) {
+        // Une entrée de plus que la borne est demandée pour savoir qu'elle est atteinte : la liste est alors dite
+        // coupée, jamais prise pour entière.
+        let mut n = 0;
+        for e in entrees.flatten() {
+            n += 1;
+            if n > ENTREES_MAX {
+                coupe = Some(trf!(
+                    "plus de {ENTREES_MAX} entrées dans {}",
+                    "more than {ENTREES_MAX} entries in {}",
+                    affichable(&d.to_string_lossy())
+                ));
+                break;
+            }
             let p = e.path();
             if p.extension().is_some_and(|x| x == "app") {
                 let nom = p
@@ -164,7 +217,7 @@ fn lire() -> Option<Vec<(String, String)>> {
             }
         }
     }
-    Some(l)
+    Some(Lu { logiciels: l, coupe })
 }
 
 fn juger(lus: &[(String, String)], avant: Option<&Vus>, aujourd_hui: NaiveDate) -> (Constat, Vus) {
@@ -284,7 +337,15 @@ fn depart(lecture: crate::sceau::Lecture) -> (Option<Vus>, bool) {
 
 /// COM-LOG-001.
 pub fn constat() -> Constat {
-    let Some(mut lus) = lire() else {
+    constat_de(lire())
+}
+
+fn constat_de(lu: Option<Lu>) -> Constat {
+    let Some(Lu {
+        logiciels: mut lus,
+        coupe,
+    }) = lu
+    else {
         return impossible_par(
             CAT,
             Raison::Illisible(tr!("liste des logiciels installés", "list of installed software").into()),
@@ -296,7 +357,26 @@ pub fn constat() -> Constat {
     };
     lus.sort();
     lus.dedup_by(|a, b| a.0 == b.0);
-    lus.truncate(LOGICIELS_MAX);
+    // Une borne atteinte : non vérifié, et l'inventaire gardé n'est pas touché. Tronquée en silence, la liste
+    // oubliait ce qui dépassait (redit « nouveau » ensuite), et un programme caché derrière la borne n'était jamais vu.
+    let coupe = coupe.or_else(|| {
+        (lus.len() > LOGICIELS_MAX).then(|| {
+            trf!(
+                "plus de {LOGICIELS_MAX} logiciels",
+                "more than {LOGICIELS_MAX} programs"
+            )
+        })
+    });
+    if let Some(raison) = coupe {
+        return impossible_par(
+            CAT,
+            Raison::Illisible(trf!("liste tronquée : {raison}", "list truncated: {raison}")),
+            trf!(
+                "Impossible de dire quels logiciels sont arrivés : la liste des logiciels installés n'a pas pu être lue en entier ({raison}).",
+                "Could not tell which software arrived: the list of installed software could not be read in full ({raison})."
+            ),
+        );
+    }
     let (avant, falsifie) = depart(crate::sceau::lire(crate::sceau::LOGICIELS));
     let (c, apres) = juger(&lus, avant.as_ref(), chrono::Local::now().date_naive());
     if avant.as_ref() != Some(&apres)
@@ -471,6 +551,48 @@ mod tests {
             p("Chez bob", Portee::Compte("S-1-5-21-1-2-3-1002".into())),
         ]);
         assert_eq!(lus, l(&[("Outil", ""), ("Perso", "")]));
+    }
+
+    /// Une liste coupée à sa borne n'est jamais jugée ni gardée : non vérifié, jamais tronquée en silence (ce qui
+    /// dépassait serait oublié, et un programme caché derrière la borne jamais vu).
+    #[test]
+    fn borne_atteinte_non_verifie() {
+        let trop: Vec<(String, String)> = (0..=LOGICIELS_MAX)
+            .map(|i| (format!("paquet-{i}"), String::new()))
+            .collect();
+        let c = constat_de(Some(Lu {
+            logiciels: trop,
+            coupe: None,
+        }));
+        assert!(matches!(c.etat(), Etat::NonVerifie(_)), "{:?}", c.etat());
+        assert!(c.message.contains(&LOGICIELS_MAX.to_string()), "{}", c.message);
+        let c = constat_de(Some(Lu {
+            logiciels: l(&[("Firefox", "")]),
+            coupe: Some("plus de 5000 entrées dans /Applications".into()),
+        }));
+        assert!(matches!(c.etat(), Etat::NonVerifie(_)), "{:?}", c.etat());
+    }
+
+    /// Sous Windows : une clé de la machine ou de ce compte coupée à sa borne, ou trop de clés sans nom affiché,
+    /// rend la liste coupée ; celles d'une autre session ne comptent pas (comme `stables`).
+    #[cfg(windows)]
+    #[test]
+    fn cles_coupees_ou_sans_nom() {
+        use super::super::windows::installes::{Laisses, Portee};
+        let mut laisses = Laisses::default();
+        assert_eq!(coupe_stable(&laisses), None);
+        laisses
+            .coupees
+            .push((Portee::Compte("S-1-5-21-1-2-3-1002".into()), "HKU".into()));
+        laisses.sans_nom.push((Portee::Machine, 12));
+        assert_eq!(coupe_stable(&laisses), None);
+        laisses.coupees.push((Portee::CompteCourant, r"HKCU\Uninstall".into()));
+        assert!(coupe_stable(&laisses).is_some());
+        let beaucoup = Laisses {
+            coupees: Vec::new(),
+            sans_nom: vec![(Portee::Machine, SANS_NOM_MAX), (Portee::CompteCourant, 1)],
+        };
+        assert!(coupe_stable(&beaucoup).is_some());
     }
 
     #[test]

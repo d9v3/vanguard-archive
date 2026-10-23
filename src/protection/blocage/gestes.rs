@@ -803,7 +803,7 @@ pub(crate) fn defaire(b: &Blocage) -> Result<String, Echec> {
 /// les chaînes relues du relevé, que n'importe quel programme du compte peut écrire. Une note d'avant les champs
 /// typés n'est rejouée que si elle est exactement ce que Vanguard aurait écrit pour une adresse, un port ou une valeur
 /// (`inverse_reconnue`) ; sinon, `None` : refusée (`refus_d_annulation` dit ce qu'elle contient, à faire à la main).
-pub(super) fn commandes_d_annulation(
+pub(crate) fn commandes_d_annulation(
     commandes: &[String],
     port: Option<&str>,
     inverse: Option<Inverse>,
@@ -828,7 +828,7 @@ pub(super) fn commandes_d_annulation(
 }
 
 /// Le refus d'une annulation qui ne se refait pas (`commandes_d_annulation`), avec ses commandes montrées.
-pub(super) fn refus_d_annulation(commandes: &[String]) -> String {
+pub(crate) fn refus_d_annulation(commandes: &[String]) -> String {
     trf!(
         "annulation notée sous une forme que Vanguard ne rejoue pas (elle a pu être écrite par un autre programme) : rien n'est lancé. Si ce blocage est bien le tien, défais-le à la main : {}",
         "undo noted in a form Vanguard does not replay (another program may have written it): nothing is run. If this block really is yours, undo it by hand: {}",

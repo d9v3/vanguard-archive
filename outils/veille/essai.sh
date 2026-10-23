@@ -265,10 +265,10 @@ attendu '[[ ! -e $VANGUARD_VEILLE_ARBRES_IA/fuzz-tar.cible && ! -e $VANGUARD_VEI
   "compilation et cargo de l'IA retirés"
 attendu 'grep -qx "Edit(./outils/confidentialite.py)" "$A" && grep -qx "Edit(./outils/verifier.sh)" "$A"' \
   "outils lancés hors bac à sable protégés"
-attendu 'jq -e ".ia.resume | any(test(\"^VM : vert\"))" "$R/2026-10-21.json" >/dev/null && grep -q "VM (vm-tester.sh) : vert" "$R"/ia/2026-10-21-fuzz-tar/resultat.md' \
-  "VM dite dans le rapport"
-attendu 'grep -q "/arbre-veille/outils/vm-tester.sh --exe $VANGUARD_VEILLE_ARBRES_IA/fuzz-tar.cible/x86_64-pc-windows-gnu/release/vanguard.exe" "$BANC/vm-tester.log" && ! grep -q "arbres-ia/fuzz-tar/outils" "$BANC/vm-tester.log"' \
-  "vm-tester.sh de la base, sur le programme compilé dans le bac à sable"
+attendu 'jq -e ".ia.resume | any(test(\"^VM : non lancée : programme écrit par l.IA\"))" "$R/2026-10-21.json" >/dev/null && grep -q "vm-tester.sh --branche veille/2026-10-21-fuzz-tar" "$R"/ia/2026-10-21-fuzz-tar/resultat.md' \
+  "VM non lancée pour la branche de l'IA, et dit comment la lancer après relecture"
+attendu '! grep -q "arbres-ia" "$BANC/vm-tester.log" 2>/dev/null' \
+  "programme de l'IA jamais déposé dans la VM"
 
 echo "Nuit 4 (une proposition attend : rien de lancé)"
 : >"$BANC/notifications.log"
@@ -353,9 +353,11 @@ ESSAI_VM=rouge ESSAI_EVIDENT=true VANGUARD_VEILLE_JOUR=2026-11-06 bash "$ICI/heb
 attendu '(($(appels) == n + 3))' "hebdo, correction et relecture"
 attendu 'git -C "$VANGUARD_VEILLE_DEPOT" show-ref -q refs/heads/veille/2026-11-06-hebdo-fuzz-echap' \
   "branche veille/2026-11-06-hebdo-fuzz-echap"
-attendu 'jq -e ".genre == \"hebdo\" and .sujet == \"fuzz-echap\" and .fichier == \"src/main.rs\"" "$R"/ia/2026-11-06-hebdo-fuzz-echap/alerte.json >/dev/null' \
+attendu 'jq -e ".genre == \"hebdo\" and .sujet == \"fuzz-echap\" and .fichier == \"src/main.rs\" and .ligne == 1" "$R"/ia/2026-11-06-hebdo-fuzz-echap/alerte.json >/dev/null' \
   "alerte.json de la proposition évidente : champs bornés"
-attendu 'grep -q "VM (vm-tester.sh) : rouge" "$R"/ia/2026-11-06-hebdo-fuzz-echap/resultat.md' "VM rouge dite"
+attendu '! grep -q "corpus sans cible" "$R"/ia/2026-11-06-hebdo-fuzz-echap/alerte.json "$R"/ia/2026-11-06-hebdo/evidente.json && jq -e "has(\"pourquoi\") | not" "$R"/ia/2026-11-06-hebdo-fuzz-echap/alerte.json >/dev/null' \
+  "le texte libre de la relecture (pourquoi) jamais transmis à l'IA qui écrit"
+attendu 'grep -q "VM (vm-tester.sh) : non lancée" "$R"/ia/2026-11-06-hebdo-fuzz-echap/resultat.md' "VM non lancée dite"
 
 echo "Rappel du matin"
 : >"$BANC/notifications.log"

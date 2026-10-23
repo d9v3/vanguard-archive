@@ -22,6 +22,23 @@ pub(crate) const EXAMENS: &str = "examens";
 /// `outils_sans_resultat` tient le compte de ceux qui restent.
 pub(crate) const AVEC_RESULTAT: &[&str] = &["PRO-ESP-001", "PRO-PER-001", "PRO-COU-001"];
 
+/// Le fichier de chaque outil de `AVEC_RESULTAT`, scellé (`sceau`) : un « rien trouvé » réécrit par un programme du
+/// compte s'affichait en vert dans le rapport. Inventoriés (`modele::inventaire`) ; un outil qui s'ajoute à
+/// `AVEC_RESULTAT` s'ajoute ici aussi (`fichiers_scelles`).
+pub(crate) const FICHIERS: [&str; 3] = [
+    "examens/PRO-ESP-001.json",
+    "examens/PRO-PER-001.json",
+    "examens/PRO-COU-001.json",
+];
+
+/// Le fichier scellé d'un outil, s'il en a un.
+fn fichier(outil: &str) -> Option<&'static str> {
+    FICHIERS
+        .iter()
+        .find(|f| f.strip_prefix(EXAMENS).and_then(|r| r.strip_prefix('/')) == Some(&format!("{outil}.json")))
+        .copied()
+}
+
 /// Un constat tel qu'il s'écrit et se relit.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ConstatEcrit {
@@ -44,6 +61,34 @@ pub(crate) struct ConstatEcrit {
     pub corrigeable: bool,
 }
 
+/// Un texte venu de l'extérieur (nom de pièce jointe, de réseau, de programme), prêt à écrire dans un résultat :
+/// chaque caractère piégé (`ui::piege` : contrôles, sens d'écriture, invisibles) devient « � », comme à l'écran.
+/// `lignes` : le saut de ligne et la tabulation restent (mise en forme d'un message de Vanguard).
+pub(crate) fn sans_piege(texte: &str, lignes: bool) -> String {
+    texte
+        .chars()
+        .map(|x| {
+            if (lignes && (x == '\n' || x == '\t')) || !crate::ui::piege(x) {
+                x
+            } else {
+                '\u{fffd}'
+            }
+        })
+        .collect()
+}
+
+/// Un nom venu de l'extérieur, sans piège et sur une ligne, coupé à `n` caractères (« … » compris).
+pub(crate) fn nom_sans_piege(nom: &str, n: usize) -> String {
+    let sur = sans_piege(nom, false);
+    if sur.chars().count() <= n {
+        return sur;
+    }
+    sur.chars()
+        .take(n.saturating_sub(1))
+        .chain(std::iter::once('…'))
+        .collect()
+}
+
 impl From<&Constat> for ConstatEcrit {
     fn from(c: &Constat) -> ConstatEcrit {
         use super::Etat;
@@ -60,7 +105,10 @@ impl From<&Constat> for ConstatEcrit {
             etat: etat.code().to_string(),
             niveau,
             raison,
-            message: c.message.clone(),
+            // Défense en profondeur : un message reprend souvent un nom venu de l'extérieur (pièce jointe, réseau,
+            // programme), et ce qui est écrit ici va au rapport et à `--json`. Le saut de ligne et la tabulation
+            // restent (mise en forme de Vanguard) ; les autres caractères piégés deviennent « � ».
+            message: sans_piege(&c.message, true),
             corrigeable: c.correctif.is_some(),
         }
     }
@@ -157,10 +205,12 @@ pub(crate) fn verser(r: &Resultat) {
 }
 
 fn verser_dans(dossier: &std::path::Path, r: &Resultat) {
-    let chemin = dossier.join(EXAMENS).join(format!("{}.json", r.outil));
     let ecrit = serde_json::to_vec_pretty(r)
         .map_err(std::io::Error::other)
-        .and_then(|o| crate::socle::ecrire_atomique(&chemin, o));
+        .and_then(|o| match fichier(&r.outil) {
+            Some(nom) => crate::sceau::ecrire_dans(dossier, nom, &o),
+            None => Err(std::io::Error::other(format!("{} : pas de fichier scellé", r.outil))),
+        });
     if let Err(e) = ecrit {
         super::Echec::io("examens/ecrire", &e).journaliser();
     }
@@ -168,19 +218,53 @@ fn verser_dans(dossier: &std::path::Path, r: &Resultat) {
 }
 
 /// Les derniers résultats versés, pour le rapport : ceux qui se relisent, du plus ancien au plus récent. Un
-/// fichier illisible (abîmé, d'une version plus récente) est laissé de côté.
+/// fichier illisible (abîmé, d'une version plus récente) est laissé de côté. Relus par leur sceau : un fichier changé
+/// hors de Vanguard n'est jamais cru (son contenu peut être un « rien trouvé » forgé) et se montre non vérifié ; un
+/// fichier accepté tel quel au premier sceau garde ce qu'il dit, mais n'est pas vert.
 pub(crate) fn derniers() -> Vec<Resultat> {
     derniers_dans(&crate::socle::dossier_local())
 }
 
 fn derniers_dans(dossier: &std::path::Path) -> Vec<Resultat> {
+    use crate::sceau::Lecture;
+    let relu = |o: &[u8], id: &str| {
+        serde_json::from_slice::<Resultat>(o)
+            .ok()
+            .filter(|r| r.schema <= SCHEMA && r.outil == id)
+    };
     let mut tous: Vec<Resultat> = AVEC_RESULTAT
         .iter()
-        .filter_map(|id| {
-            let o = crate::socle::lire_ordinaire(&dossier.join(EXAMENS).join(format!("{id}.json")), 4 << 20).ok()?;
-            serde_json::from_slice::<Resultat>(&o)
-                .ok()
-                .filter(|r| r.schema <= SCHEMA && r.outil == *id)
+        .filter_map(|id| match crate::sceau::lire_dans(dossier, fichier(id)?) {
+            Lecture::Intact(o) => relu(&o, id),
+            Lecture::Adopte(o) => relu(&o, id).map(|mut r| {
+                r.couverture.non_verifies.push(
+                    crate::tr!(
+                        "résultat accepté tel quel au premier sceau : rien ne prouve qu'il n'a pas été changé",
+                        "result accepted as is at the first seal: nothing proves it was not changed"
+                    )
+                    .to_string(),
+                );
+                r
+            }),
+            // Rien de ce qu'il dit n'est repris : seulement la date, s'il en a une, et le non vérifié.
+            Lecture::Falsifie(o) => Some(Resultat {
+                outil: (*id).to_string(),
+                schema: SCHEMA,
+                debut: o.and_then(|o| relu(&o, id)).map(|r| r.debut).unwrap_or_default(),
+                duree_ms: 0,
+                couverture: Couverture {
+                    verifies: 0,
+                    non_verifies: vec![
+                        crate::tr!(
+                            "non vérifié : résultat changé hors de Vanguard",
+                            "not verified: result changed outside Vanguard"
+                        )
+                        .to_string(),
+                    ],
+                },
+                constats: Vec::new(),
+            }),
+            Lecture::Absent | Lecture::Inconnu | Lecture::Illisible(_) => None,
         })
         .collect();
     tous.sort_by(|a, b| a.debut.cmp(&b.debut));
@@ -205,6 +289,23 @@ mod tests {
                 .with_timezone(&chrono::Utc),
             std::time::Instant::now(),
         )
+    }
+
+    /// Un message qui reprend un nom piégé ne passe jamais tel quel dans ce qui est écrit (rapport, `--json`).
+    #[test]
+    fn message_ecrit_sans_piege() {
+        let c = alerte(
+            "Logiciels espions",
+            Niveau::Eleve,
+            "facture\u{202e}fdp.exe\u{1b}]52;c;x\u{7}\nsuite",
+        );
+        let e = ConstatEcrit::from(&c);
+        assert!(
+            !crate::ui::contient_un_piege(&e.message.replace('\n', "")),
+            "{:?}",
+            e.message
+        );
+        assert!(e.message.ends_with("\nsuite"), "{:?}", e.message);
     }
 
     /// Jamais « sain » avec un manque, ni sans rien de vérifié ; le pire problème décide.
@@ -277,14 +378,66 @@ mod tests {
         );
         verser_dans(&d, &r);
         assert_eq!(derniers_dans(&d), vec![r.clone()]);
-        std::fs::write(d.join(EXAMENS).join("PRO-ESP-001.json"), b"{abime").unwrap();
+        // Écrit par Vanguard mais abîmé, ou d'un autre outil : laissé de côté.
+        crate::sceau::ecrire_dans(&d, fichier("PRO-ESP-001").unwrap(), b"{abime").unwrap();
         let autre = Resultat {
             outil: "PRO-ESP-001".into(),
             ..r.clone()
         };
-        std::fs::write(d.join(EXAMENS).join("PRO-COU-001.json"), json(&autre)).unwrap();
+        crate::sceau::ecrire_dans(&d, fichier("PRO-COU-001").unwrap(), json(&autre).as_bytes()).unwrap();
         assert_eq!(derniers_dans(&d), vec![r]);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un programme du compte réécrit le résultat d'un outil en « rien trouvé » : le sceau ne le reconnaît pas, le
+    /// rapport le montre non vérifié, jamais vert, et rien de ce qu'il dit n'est repris.
+    #[test]
+    fn resultat_forge_jamais_vert() {
+        let d = crate::socle::dossier_local().join("essai-examens-forge");
+        let _ = std::fs::remove_dir_all(&d);
+        let grave = Resultat::nouveau(
+            "PRO-ESP-001",
+            debut(),
+            &[alerte("Logiciels espions", Niveau::Eleve, "programme espion trouvé")],
+            Couverture {
+                verifies: 3,
+                non_verifies: Vec::new(),
+            },
+        );
+        verser_dans(&d, &grave);
+        let forge = Resultat::nouveau(
+            "PRO-ESP-001",
+            debut(),
+            &[ok("Logiciels espions", "Aucun signe.")],
+            Couverture {
+                verifies: 3,
+                non_verifies: Vec::new(),
+            },
+        );
+        assert_eq!(forge.verdict(), "sain");
+        std::fs::write(d.join(EXAMENS).join("PRO-ESP-001.json"), json(&forge)).unwrap();
+        let lus = derniers_dans(&d);
+        assert_eq!(lus.len(), 1);
+        assert_eq!(lus[0].verdict(), "non-verifie");
+        assert_eq!(lus[0].constats, Vec::<ConstatEcrit>::new());
+        assert_eq!(lus[0].debut, forge.debut);
+        // Effacé hors de Vanguard : non vérifié aussi.
+        std::fs::remove_file(d.join(EXAMENS).join("PRO-ESP-001.json")).unwrap();
+        assert_eq!(derniers_dans(&d)[0].verdict(), "non-verifie");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Chaque outil qui rend un résultat a son fichier scellé et inventorié.
+    #[test]
+    fn chaque_resultat_scelle() {
+        assert_eq!(AVEC_RESULTAT.len(), FICHIERS.len());
+        for id in AVEC_RESULTAT {
+            let f = fichier(id).unwrap_or_else(|| panic!("{id} sans fichier scellé"));
+            assert!(
+                super::super::inventaire::scelles().any(|n| n == f),
+                "{f} hors de l'inventaire"
+            );
+        }
     }
 
     /// Le compte des outils sans résultat ne fait que baisser : un outil migré s'ajoute à `AVEC_RESULTAT`, et

@@ -103,8 +103,9 @@ struct SortieEdge {
 }
 
 /// CVE gardées au plus pour une version d'Edge (354 le 23 oct. 2026, une version de Chromium entière) : au-delà, la
-/// liste n'est pas celle attendue et ne sert pas.
-const CVES_PAR_VERSION_MAX: usize = 5000;
+/// liste n'est pas celle attendue et ne sert pas. La lecture refuse déjà un tableau plus long que
+/// `SOUS_ENTREES_MAX` : une borne plus haute ici ne serait jamais atteinte et ferait croire à une autre limite.
+const CVES_PAR_VERSION_MAX: usize = super::SOUS_ENTREES_MAX;
 /// Versions Stable gardées au plus par plateforme et architecture (une ou deux le 23 oct. 2026).
 const CORRECTIFS_MAX: usize = 64;
 
@@ -602,6 +603,9 @@ mod tests {
             .map(|i| format!("\"CVE-2026-{i:05}\""))
             .collect();
         assert_eq!(avec(&format!("[{}]", trop.join(","))), None);
+        // Pile à la borne : la liste est gardée en entier.
+        let juste = trop[..CVES_PAR_VERSION_MAX].join(",");
+        assert_eq!(avec(&format!("[{juste}]")).map(|c| c.len()), Some(CVES_PAR_VERSION_MAX));
         // Trop de versions pour une même plateforme : pas la liste attendue.
         let sorties: Vec<String> = (0..=CORRECTIFS_MAX)
             .map(|i| format!(r#"{{"Platform": "Windows", "Architecture": "x64", "ProductVersion": "156.0.1.{i}"}}"#))
