@@ -1178,7 +1178,7 @@ fn nouvelles_alertes<'a>(avant: &str, actuelles: &'a BTreeSet<String>) -> Vec<&'
 /// Les connexions vers un serveur de commande vues à la dernière passe de la surveillance, une par ligne : le
 /// tableau de bord les montre comme encore en cours.
 pub(crate) fn fichier_botnets() -> PathBuf {
-    crate::reseau::dossier_local().join("surveillance-botnets.txt")
+    crate::reseau::dossier_local().join(crate::sceau::BOTNETS)
 }
 
 /// Ce que cet ordinateur envoie en ce moment vers un serveur de commande connu, en lecture seule (rien d'écrit) :
@@ -1258,8 +1258,7 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
         return Vec::new();
     };
     let actuelles = en_cours.connexions;
-    let fichier = fichier_botnets();
-    let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
+    let avant = deja_signalees();
     let alertes = nouvelles_alertes(&avant, &actuelles)
         .into_iter()
         .map(|a| {
@@ -1276,9 +1275,20 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
             )
         })
         .collect();
-    let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
-    let _ = std::fs::write(&fichier, actuelles.into_iter().collect::<Vec<_>>().join("\n"));
+    let _ = crate::sceau::ecrire(
+        crate::sceau::BOTNETS,
+        actuelles.into_iter().collect::<Vec<_>>().join("\n"),
+    );
     alertes
+}
+
+/// Les connexions déjà notifiées à la passe d'avant. Une liste changée hors de Vanguard (un programme qui y plante son
+/// serveur de commande pour ne plus être signalé), abîmée ou illisible ne vaut rien : tout est redit.
+fn deja_signalees() -> String {
+    match crate::sceau::lire(crate::sceau::BOTNETS) {
+        crate::sceau::Lecture::Intact(o) => String::from_utf8_lossy(&o).into_owned(),
+        _ => String::new(),
+    }
 }
 
 /// Les noms demandés par l'ordinateur qui sont des hôtes d'URLhaus, prêts à montrer. Le nom exact seulement : un
@@ -2321,6 +2331,21 @@ mod tests {
             nouvelles_alertes("y → 198.51.100.1 (Feodo Tracker)", &actuelles).len(),
             1
         );
+    }
+
+    /// Un programme qui plante sa propre connexion dans la liste des déjà signalées ne se fait pas oublier : la
+    /// liste changée hors de Vanguard ne vaut rien, la connexion est redite.
+    #[test]
+    fn liste_des_signalees_changee_a_cote_ignoree() {
+        let vue = "x → 192.0.2.25:6662 (Cobalt Strike, ThreatFox)";
+        crate::sceau::ecrire(crate::sceau::BOTNETS, vue).unwrap();
+        assert_eq!(deja_signalees(), vue);
+        let planquee = "y → 198.51.100.1 (Feodo Tracker)";
+        std::fs::write(fichier_botnets(), format!("{vue}\n{planquee}")).unwrap();
+        assert_eq!(deja_signalees(), "");
+        let actuelles = BTreeSet::from([planquee.to_string()]);
+        assert_eq!(nouvelles_alertes(&deja_signalees(), &actuelles).len(), 1);
+        crate::sceau::effacer(crate::sceau::BOTNETS).unwrap();
     }
 
     #[test]

@@ -178,6 +178,7 @@ fn categorie_en(nom: &str) -> Option<&'static str> {
         "Heure" => "Time",
         "Historique" => "History",
         "Intégrité" => "Integrity",
+        "État de Vanguard" => "Vanguard's state",
         "Journaux" => "Logs",
         "Navigateur" => "Browser",
         "Mises à jour" => "Updates",

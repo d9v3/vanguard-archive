@@ -29,6 +29,25 @@ delivered just before it. Only the latest version has its download page; every v
   source (Edge Extended Stable, Acrobat 2020 and 2024, App Store) is said not checked; a browser that cannot be compared
   keeps the 60-days-without-update check, which leaves end of support. On Linux, the command points to the package
   manager.
+- **Update chain of trust.** A backup key, kept offline, also signs releases (if the main key is lost or stolen,
+  updates go on); the main key can be encrypted, its passphrase asked once per release (`outils/signer-versions.sh`,
+  `--secours`). Vanguard remembers the highest signed version already seen and refuses an older manifest; a latest
+  signed version older than 45 days is no longer called “up to date”, but not verified. The macOS program is checked
+  before it is signed (commit, checksum from its build log, universal Mach-O, version). The monitoring's local copy
+  goes through the update path (never to an older version), and a new copy is tried before it replaces the old one
+  (Linux and macOS).
+- **Vanguard's state sealed.** `appris.json`, `integrite.json`, `surveillance-botnets.txt` and the versions already
+  seen carry a BLAKE3 checksum: changed outside Vanguard (by a program trying to silence its alert), they no longer
+  count and the check says so (COM-ETA-001); damaged, they never silence an alert.
+- **Chain of trust, second review.** A copy here newer than the latest version signed on GitHub (installed from
+  the key) no longer shows “nothing newer” but “not verified”: an old manifest may have been put back. A clock
+  running behind no longer makes an old manifest look fresh: “not verified”. Deleting `sceaux.json` no longer makes
+  the state files silently accepted as they are: they stay “adopted”, reported by the check (COM-ETA-001), and the
+  integrity reference and the versions already seen are then not trusted. The machine state from the last
+  monitoring pass and the list of changes already reported by integrity monitoring are sealed too.
+  `signer-versions.sh --secours` refuses an unencrypted backup key.
+- **CI.** `/dev/root` read by its device number like findmnt, enable links of vanished systemd units left out like
+  systemctl, local HTTP client time bound adjusted for Windows; `claude-journal.yml` analysis only.
 
 ## October 22, 2026, evening: version 0.85
 

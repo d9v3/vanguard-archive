@@ -49,6 +49,7 @@ mod reparer;
 mod reseau;
 mod risk;
 mod sauvegarde;
+mod sceau;
 mod selection;
 mod sqlite;
 mod traces;

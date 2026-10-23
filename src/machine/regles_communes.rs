@@ -194,6 +194,15 @@ regle!(
 );
 
 regle!(
+    "COM-ETA-001",
+    Os::Tous,
+    695,
+    ("état de Vanguard scellé", "Vanguard's sealed state"),
+    &[],
+    || crate::sceau::constat().into_iter().collect()
+);
+
+regle!(
     "COM-SUR-001",
     Os::Tous,
     700,

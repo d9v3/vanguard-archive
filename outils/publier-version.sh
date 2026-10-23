@@ -153,6 +153,22 @@ if [[ -z $RUN ]]; then
 fi
 gh run download "$RUN" -n vanguard-macos -D "$DOSSIER/mac" >/dev/null
 cp "$DOSSIER/mac/vanguard" "$DOSSIER/vanguard-macos"
+# Le programme Mac sort d'un runner de GitHub et la clé de l'auteur va le signer : contrôlé ici d'abord, par ce qui
+# ne vient pas de l'artefact lui-même. Il doit être la compilation du commit de ce passage (commit.txt), et porter
+# l'empreinte que ce passage a écrite dans son journal (.github/workflows/macos.yml) ; signer-versions.sh vérifie
+# ensuite sa forme (Mach-O universel, Apple Silicon et Intel) et sa version gravée, celle des deux autres programmes.
+# Ni l'un ni l'autre ne prouve que le runner n'a pas été piégé : seul un Mac de l'auteur le pourrait.
+SHA_RUN=$(gh run view "$RUN" --json headSha -q .headSha)
+if [[ $(tr -d '[:space:]' <"$DOSSIER/mac/commit.txt") != "$SHA_RUN" ]]; then
+  echo "Version macOS : commit.txt n'est pas le commit de sa compilation ($SHA_RUN) : rien de publié."
+  exit 1
+fi
+ANNONCEE=$(gh run view "$RUN" --log 2>/dev/null | grep -oE 'EMPREINTE-VANGUARD-MACOS [0-9a-f]{64}' | tail -1 |
+  cut -d' ' -f2 || true)
+if [[ -z $ANNONCEE || $ANNONCEE != "$(sha256sum "$DOSSIER/vanguard-macos" | cut -d' ' -f1)" ]]; then
+  echo "Version macOS : son empreinte n'est pas celle du journal de sa compilation (${ANNONCEE:-absente}) : rien de publié."
+  exit 1
+fi
 outils/failles-programmes.sh "$DOSSIER/vanguard-macos" || { echo "Version macOS : rien de publié."; exit 1; }
 (cd "$DOSSIER" && sha256sum vanguard-windows-x86_64.exe vanguard-linux-x86_64 vanguard-macos >SHA256SUMS.txt)
 

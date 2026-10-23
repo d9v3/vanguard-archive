@@ -810,22 +810,50 @@ fn proprietes_udev(texte: &str) -> HashMap<String, String> {
 /// La source et le type du système de fichiers monté sur / (`findmnt -no SOURCE,FSTYPE /`, sans le
 /// « [/sous-volume] » que findmnt ajoute pour Btrfs).
 pub(crate) fn racine() -> Option<(String, String)> {
-    racine_selon(&std::fs::read_to_string("/proc/self/mountinfo").ok()?)
+    racine_selon(
+        &std::fs::read_to_string("/proc/self/mountinfo").ok()?,
+        Path::new(RACINE),
+    )
 }
 
 /// D'après le texte de mountinfo : « id parent maj:min racine point options… - type source options ». Le dernier
 /// montage sur / recouvre les précédents ; les chemins y sont écrits en octal (« \040 » pour l'espace).
-pub(crate) fn racine_selon(mountinfo: &str) -> Option<(String, String)> {
+///
+/// Monté sans initramfs (root= donné au noyau, comme sur les machines virtuelles d'Ubuntu), la source est le nom
+/// fictif « /dev/root », qui n'existe pas dans /dev : le chiffrement ne s'y lirait pas. Comme findmnt, on retrouve
+/// alors le vrai périphérique par son numéro (maj:min) dans sysfs.
+pub(crate) fn racine_selon(mountinfo: &str, racine: &Path) -> Option<(String, String)> {
     mountinfo.lines().rev().find_map(|l| {
         let (avant, apres) = l.split_once(" - ")?;
-        if avant.split(' ').nth(4)? != "/" {
+        let champs: Vec<&str> = avant.split(' ').collect();
+        if *champs.get(4)? != "/" {
             return None;
         }
         let mut c = apres.split(' ');
         let genre = sans_echappements(c.next()?);
         let source = sans_echappements(c.next()?);
+        let source = if source == "/dev/root" {
+            peripherique_de(racine, champs.get(2)?).unwrap_or(source)
+        } else {
+            source
+        };
         Some((source, genre))
     })
+}
+
+/// Le périphérique d'un numéro « maj:min », d'après le DEVNAME de son uevent dans sysfs (« /dev/sda1 »).
+fn peripherique_de(racine: &Path, numero: &str) -> Option<String> {
+    // Un numéro inattendu ne doit jamais faire lire ailleurs que sous /sys/dev/block.
+    let (maj, min) = numero.split_once(':')?;
+    if ![maj, min]
+        .iter()
+        .all(|n| !n.is_empty() && n.bytes().all(|o| o.is_ascii_digit()))
+    {
+        return None;
+    }
+    let uevent = lire_borne(&sous(racine, &format!("/sys/dev/block/{numero}/uevent")), 64 << 10)?;
+    let nom = uevent.lines().find_map(|l| l.strip_prefix("DEVNAME="))?.trim();
+    (!nom.is_empty() && !nom.contains("..")).then(|| format!("/dev/{nom}"))
 }
 
 /// Le périphérique `dev` (« /dev/mapper/root », « /dev/nvme0n1p2 ») est-il chiffré, lui ou un de ceux sur
@@ -1491,13 +1519,42 @@ mod tests {
             25 1 259:3 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw\n\
             26 25 0:30 / /mnt/Mes\\040disques rw - vfat /dev/sdb1 rw\n\
             31 1 253:0 /@ / rw,noatime shared:1 - btrfs /dev/mapper/racine\\040chiffr\\303\\251e rw,subvol=/@\n";
+        let rien = Path::new("/nulle-part");
         assert_eq!(
-            racine_selon(mountinfo),
+            racine_selon(mountinfo, rien),
             Some(("/dev/mapper/racine chiffrée".to_string(), "btrfs".to_string())),
             "le dernier montage sur / l'emporte, échappements décodés"
         );
-        assert_eq!(racine_selon("22 1 0:21 / /proc rw - proc proc rw\n"), None);
-        assert_eq!(racine_selon(""), None);
+        assert_eq!(racine_selon("22 1 0:21 / /proc rw - proc proc rw\n", rien), None);
+        assert_eq!(racine_selon("", rien), None);
+    }
+
+    /// « /dev/root » (noyau monté sans initramfs) : le vrai périphérique, retrouvé par son numéro, comme findmnt
+    /// le montre ; sans sysfs qui le connaisse, le nom reste tel quel plutôt qu'inventé.
+    #[test]
+    fn racine_dev_root_par_son_numero() {
+        let d = jetable("dev-root");
+        ecrire(
+            &d,
+            "/sys/dev/block/8:1/uevent",
+            "MAJOR=8\nMINOR=1\nDEVNAME=sda1\nDEVTYPE=partition\n",
+        );
+        let mountinfo = "25 1 8:1 / / rw,relatime shared:1 - ext4 /dev/root rw\n";
+        assert_eq!(
+            racine_selon(mountinfo, &d),
+            Some(("/dev/sda1".to_string(), "ext4".to_string()))
+        );
+        let inconnu = "25 1 8:9 / / rw,relatime shared:1 - ext4 /dev/root rw\n";
+        assert_eq!(
+            racine_selon(inconnu, &d),
+            Some(("/dev/root".to_string(), "ext4".to_string()))
+        );
+        let piege = "25 1 ../../x / / rw - ext4 /dev/root rw\n";
+        assert_eq!(
+            racine_selon(piege, &d),
+            Some(("/dev/root".to_string(), "ext4".to_string()))
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -100,6 +100,9 @@ jobs:
           lipo -info vanguard
           ./vanguard --version
           echo "${{ github.sha }}" > commit.txt
+          # L'empreinte dite dans le journal de ce passage, à part de l'artefact : outils/publier-version.sh la compare
+          # au programme téléchargé avant de le signer (un artefact remplacé après coup ne la porte pas).
+          echo "EMPREINTE-VANGUARD-MACOS $(shasum -a 256 vanguard | cut -d' ' -f1)"
       - name: Essai du programme sur ce Mac
         run: |
           ./vanguard machine --json > audit.json || true

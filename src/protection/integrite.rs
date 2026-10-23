@@ -148,17 +148,66 @@ fn etat_actuel() -> Etat {
         .collect()
 }
 
-fn fichier_reference() -> PathBuf {
-    crate::reseau::dossier_local().join("integrite.json")
+/// La référence des empreintes, telle que Vanguard la retrouve.
+enum Reference {
+    Absente,
+    Valable(Etat),
+    /// Là, mais elle ne peut pas servir : abîmée, ou changée hors de Vanguard (`sceau`). Un programme qui réécrit la
+    /// référence rend son propre changement « de référence » : elle n'est alors ni crue, ni refaite sans accord.
+    Douteuse(String),
 }
 
-fn reference() -> Option<Etat> {
-    serde_json::from_str(&std::fs::read_to_string(fichier_reference()).ok()?).ok()
+fn reference() -> Reference {
+    reference_lue(crate::sceau::lire(crate::sceau::INTEGRITE))
+}
+
+fn reference_lue(lu: crate::sceau::Lecture) -> Reference {
+    use crate::sceau::Lecture;
+    match lu {
+        Lecture::Absent => Reference::Absente,
+        Lecture::Intact(o) => serde_json::from_slice(&o).map_or_else(
+            |_| Reference::Douteuse(tr!("elle ne se lit plus", "it can no longer be read").into()),
+            Reference::Valable,
+        ),
+        // Scellée telle quelle au premier usage : rien ne dit qu'elle n'a pas été réécrite juste avant que
+        // `sceaux.json` soit effacé.
+        Lecture::Adopte(_) => Reference::Douteuse(
+            tr!(
+                "elle a été acceptée telle quelle, sans sceau d'avant",
+                "it was accepted as it was, without an earlier seal"
+            )
+            .into(),
+        ),
+        Lecture::Falsifie(_) => Reference::Douteuse(
+            tr!(
+                "elle a été changée ou supprimée hors de Vanguard",
+                "it was changed or deleted outside Vanguard"
+            )
+            .into(),
+        ),
+        Lecture::Illisible(e) => Reference::Douteuse(e),
+    }
 }
 
 fn enregistrer(etat: &Etat) -> bool {
-    let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
-    serde_json::to_string_pretty(etat).is_ok_and(|t| std::fs::write(fichier_reference(), t).is_ok())
+    serde_json::to_string_pretty(etat).is_ok_and(|t| crate::sceau::ecrire(crate::sceau::INTEGRITE, t).is_ok())
+}
+
+/// Le constat d'une référence qui ne peut pas servir : rien n'est comparé, et c'est dit, jamais « pas encore de
+/// référence » (qui ne compte pas comme un problème).
+fn douteuse(pourquoi: &str) -> Constat {
+    Constat {
+        verifie: false,
+        ..crate::machine::alerte(
+            CAT,
+            Niveau::Moyen,
+            trf!(
+                "La référence des fichiers critiques ne peut pas servir ({}) : leur intégrité n'est pas vérifiée. Après examen, « vanguard integrite --accepter » la refait.",
+                "The critical file reference cannot be used ({}): their integrity is not checked. After a look, “vanguard integrity --accept” remakes it.",
+                pourquoi
+            ),
+        )
+    }
 }
 
 /// Différences avec la référence : (modifiés, ajoutés, supprimés).
@@ -194,19 +243,23 @@ fn comparer(reference: &Etat, actuel: &Etat) -> Ecarts {
 
 /// Constat pour le bilan de la machine.
 pub fn constat() -> Constat {
-    let Some(reference) = reference() else {
-        return Constat {
-            categorie: CAT,
-            probleme: Some(Niveau::Info),
-            message: tr!(
-                "Pas encore de référence pour les fichiers critiques : « vanguard integrite » la crée.",
-                "No reference yet for critical files: “vanguard integrity” creates it."
-            )
-            .into(),
-            correctif: None,
-            verifie: true,
-            regle: "",
-        };
+    let reference = match reference() {
+        Reference::Valable(r) => r,
+        Reference::Douteuse(pourquoi) => return douteuse(&pourquoi),
+        Reference::Absente => {
+            return Constat {
+                categorie: CAT,
+                probleme: Some(Niveau::Info),
+                message: tr!(
+                    "Pas encore de référence pour les fichiers critiques : « vanguard integrite » la crée.",
+                    "No reference yet for critical files: “vanguard integrity” creates it."
+                )
+                .into(),
+                correctif: None,
+                verifie: true,
+                regle: "",
+            };
+        }
     };
     juger(reference.len(), &comparer(&reference, &etat_actuel()))
 }
@@ -253,15 +306,24 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
     }
 }
 
+/// Les changements déjà notifiés. Une liste changée hors de Vanguard (un programme qui y écrit d'avance le fichier
+/// qu'il vient de changer), adoptée sans sceau d'avant, abîmée ou illisible ne vaut rien : tout est redit.
+fn deja_signales(lu: crate::sceau::Lecture) -> Vec<String> {
+    match lu {
+        crate::sceau::Lecture::Intact(o) => serde_json::from_slice(&o).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 /// Changements pas encore signalés par la surveillance horaire (pour ne prévenir qu'une fois par changement).
 pub fn changements_a_signaler() -> Option<String> {
-    let reference = reference()?;
+    // Une référence douteuse ne sert pas à juger : le bilan la signale (COM-INT-001), et les sceaux qui la disent
+    // changée hors de Vanguard, la surveillance (COM-ETA-001).
+    let Reference::Valable(reference) = reference() else {
+        return None;
+    };
     let e = comparer(&reference, &etat_actuel());
-    let deja = crate::reseau::dossier_local().join("integrite-signale.json");
-    let signales: Vec<String> = std::fs::read_to_string(&deja)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default();
+    let signales = deja_signales(crate::sceau::lire(crate::sceau::INTEGRITE_SIGNALE));
     let tous: Vec<String> = e
         .modifies
         .iter()
@@ -275,7 +337,7 @@ pub fn changements_a_signaler() -> Option<String> {
         .map(|f| affichable(f))
         .collect();
     if let Ok(t) = serde_json::to_string(&tous) {
-        let _ = std::fs::write(&deja, t);
+        let _ = crate::sceau::ecrire(crate::sceau::INTEGRITE_SIGNALE, t);
     }
     (!nouveaux.is_empty()).then(|| resume(&nouveaux, 3, ", "))
 }
@@ -297,7 +359,12 @@ pub fn verifier(accepter: bool) {
     titre(tr!("Intégrité des fichiers critiques", "Critical file integrity"));
     let actuel = etat_actuel();
     match reference() {
-        Some(r) if !accepter => {
+        Reference::Douteuse(pourquoi) if !accepter => trp!(
+            "  ✖ La référence ne peut pas servir : rien n'est comparé ni remplacé.\n    {GRIS}{}{RESET}\n  {DISCRET}Après examen, « vanguard integrite --accepter » prend l'état\n  actuel comme référence.{RESET}",
+            "  ✖ The reference cannot be used: nothing is compared or replaced.\n    {GRIS}{}{RESET}\n  {DISCRET}After a look, “vanguard integrity --accept” takes the current\n  state as the reference.{RESET}",
+            affichable(&pourquoi)
+        ),
+        Reference::Valable(r) if !accepter => {
             let e = comparer(&r, &actuel);
             if e.vide() {
                 trp!(
@@ -341,12 +408,23 @@ pub fn verifier(accepter: bool) {
 pub fn temps_reel() {
     use notify::{RecursiveMode, Watcher};
     titre(tr!("Intégrité en temps réel", "Real-time integrity"));
-    let Some(reference) = reference() else {
-        trp!(
-            "  Pas encore de référence : lance d'abord « vanguard integrite ».",
-            "  No reference yet: run “vanguard integrity” first."
-        );
-        return;
+    let reference = match reference() {
+        Reference::Valable(r) => r,
+        Reference::Absente => {
+            trp!(
+                "  Pas encore de référence : lance d'abord « vanguard integrite ».",
+                "  No reference yet: run “vanguard integrity” first."
+            );
+            return;
+        }
+        Reference::Douteuse(pourquoi) => {
+            trp!(
+                "  ✖ La référence ne peut pas servir : « vanguard integrite »\n    le détaille. {GRIS}({}){RESET}",
+                "  ✖ The reference cannot be used: “vanguard integrity” details\n    it. {GRIS}({}){RESET}",
+                affichable(&pourquoi)
+            );
+            return;
+        }
     };
     let (envoi, reception) = std::sync::mpsc::channel();
     let Ok(mut veilleur) = notify::recommended_watcher(envoi) else {
@@ -455,6 +533,51 @@ mod tests {
         assert_eq!(c.probleme, Some(Niveau::Moyen));
         assert!(!crate::ui::contient_un_piege(&c.message), "{}", c.message);
         assert_eq!(juger(3, &Ecarts::default()).probleme, None);
+    }
+
+    /// Une référence réécrite à côté de Vanguard (pour rendre un changement « de référence »), abîmée ou supprimée ne
+    /// passe jamais pour saine ni pour « pas encore de référence » : non vérifié, et c'est dit.
+    #[test]
+    fn reference_douteuse_jamais_saine() {
+        let c = douteuse("elle a été changée ou supprimée hors de Vanguard");
+        assert_eq!((c.probleme, c.verifie), (Some(Niveau::Moyen), false));
+        assert!(
+            c.message.contains("--accepter") || c.message.contains("--accept"),
+            "{}",
+            c.message
+        );
+        let etat: Etat = [("/etc/hosts".to_string(), "b3:aa".to_string())].into_iter().collect();
+        assert!(enregistrer(&etat));
+        assert!(matches!(reference(), Reference::Valable(r) if r == etat));
+        std::fs::write(crate::reseau::dossier_local().join(crate::sceau::INTEGRITE), "{}").unwrap();
+        assert!(matches!(reference(), Reference::Douteuse(_)));
+        assert!(!constat().verifie);
+        assert_eq!(changements_a_signaler(), None);
+        std::fs::remove_file(crate::reseau::dossier_local().join(crate::sceau::INTEGRITE)).unwrap();
+        assert!(matches!(reference(), Reference::Douteuse(_)));
+        crate::sceau::effacer(crate::sceau::INTEGRITE).unwrap();
+        assert!(matches!(reference(), Reference::Absente));
+        // Acceptée telle quelle, les sceaux effacés : douteuse, jamais valable.
+        let lu = crate::sceau::Lecture::Adopte(b"{}".to_vec());
+        assert!(matches!(reference_lue(lu), Reference::Douteuse(_)));
+    }
+
+    /// Un programme qui change ~/.bashrc et l'écrit d'avance dans la liste des changements déjà signalés : la liste,
+    /// posée hors de Vanguard, ne tait rien.
+    #[test]
+    fn changements_signales_poses_a_cote_ne_taisent_rien() {
+        use crate::sceau::Lecture;
+        let liste = br#"["/home/alice/.bashrc"]"#.to_vec();
+        assert_eq!(
+            deja_signales(Lecture::Intact(liste.clone())),
+            vec!["/home/alice/.bashrc"]
+        );
+        assert_eq!(
+            deja_signales(Lecture::Falsifie(Some(liste.clone()))),
+            Vec::<String>::new()
+        );
+        assert_eq!(deja_signales(Lecture::Adopte(liste)), Vec::<String>::new());
+        assert_eq!(deja_signales(Lecture::Absent), Vec::<String>::new());
     }
 
     #[test]

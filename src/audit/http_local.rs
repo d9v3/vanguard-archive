@@ -318,17 +318,21 @@ mod tests {
         );
         assert!(demande.contains("\r\nSOAPAction: \"x#y\"\r\n") && demande.contains("\r\nContent-Length: 4\r\n"));
         assert!(demande.contains("\r\nConnection: close\r\n") && demande.ends_with("\r\n\r\n<q/>"));
-        // Personne n'écoute : pas de réponse, tout de suite.
+        // Personne n'écoute : pas de réponse, sans attendre l'instant limite (30 s ici). Linux répond au refus tout de
+        // suite ; Windows, lui, renvoie sa demande de connexion deux fois après le refus, une demi-seconde puis une
+        // seconde plus tard, avant de conclure (environ 2 s, vu sur le Windows de la CI) : la borne en tient compte,
+        // et reste loin de l'instant limite, ce que le test doit prouver.
         let libre = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = libre.local_addr().unwrap().port();
         drop(libre);
         let debut = Instant::now();
         let url = format!("http://127.0.0.1:{port}/");
         assert_eq!(
-            demander("GET", &url, &[], None, Instant::now() + Duration::from_secs(5)),
+            demander("GET", &url, &[], None, Instant::now() + Duration::from_secs(30)),
             None
         );
-        assert!(debut.elapsed() < Duration::from_secs(2));
+        let borne = Duration::from_secs(if cfg!(windows) { 6 } else { 2 });
+        assert!(debut.elapsed() < borne, "{:?}", debut.elapsed());
         // Un instant limite déjà passé : rien n'est envoyé.
         assert_eq!(demander("GET", &url, &[], None, Instant::now()), None);
     }

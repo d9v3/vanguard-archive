@@ -262,7 +262,11 @@ pub(crate) fn reprendre(exe: &str) -> bool {
 
 pub fn activer(oui: bool) {
     let retrait = if oui { Ok(()) } else { desinstaller() };
-    let reussi = if oui { installer(&executable()) } else { retrait.is_ok() };
+    let reussi = if oui {
+        executable().is_some_and(|exe| installer(&exe))
+    } else {
+        retrait.is_ok()
+    };
     ETAT.store(0, Ordering::Relaxed);
     match (oui, reussi) {
         (true, true) => trp!(
