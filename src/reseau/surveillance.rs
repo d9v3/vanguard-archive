@@ -40,8 +40,11 @@ pub(crate) fn minuterie_activee(timer: &str) -> bool {
 }
 
 /// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
-/// sinon la surveillance (et l'entretien du mois) s'arrêterait dès que la clé est débranchée.
-pub(crate) fn executable() -> String {
+/// sinon la surveillance (et l'entretien du mois) s'arrêterait dès que la clé est débranchée. La copie passe par
+/// `mise_a_jour::poser_copie` (version revérifiée, essayée, mise en place d'un coup, jamais par-dessus une plus
+/// récente). `None` : elle n'a pas pu se faire, et c'est dit ; le chemin de la clé n'est jamais rendu à sa place,
+/// une minuterie qui le lancerait s'arrêterait sans bruit une fois la clé débranchée.
+pub(crate) fn executable() -> Option<String> {
     // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé), effacée
     // à la fin.
     #[cfg(unix)]
@@ -49,28 +52,29 @@ pub(crate) fn executable() -> String {
     #[cfg(windows)]
     let exe = std::env::current_exe().ok();
     let Some(exe) = exe else {
-        return "vanguard".into();
+        return Some("vanguard".into());
     };
-    if reseau::cle_usb().is_some_and(|cle| sous(&exe, &cle)) {
-        let dest = reseau::dossier_local()
-            .join("bin")
-            .join(exe.file_name().unwrap_or_default());
-        let copie = std::fs::create_dir_all(dest.parent().unwrap_or(&dest)).and_then(|()| std::fs::copy(&exe, &dest));
-        if copie.is_ok() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
-            }
+    if !reseau::cle_usb().is_some_and(|cle| sous(&exe, &cle)) {
+        return Some(exe.display().to_string());
+    }
+    match crate::mise_a_jour::poser_copie(&exe) {
+        Ok(dest) => {
             trp!(
                 "  {GRIS}Copie locale pour la surveillance : {}{RESET}",
                 "  {GRIS}Local copy for monitoring: {}{RESET}",
                 dest.display()
             );
-            return dest.display().to_string();
+            Some(dest.display().to_string())
+        }
+        Err(e) => {
+            trp!(
+                "  ✖ Copie locale de Vanguard impossible : rien n'est posé.\n    {}\n    {GRIS}Lancé depuis la clé, il s'arrêterait une fois la clé débranchée.{RESET}",
+                "  ✖ Local copy of Vanguard not possible: nothing is set up.\n    {}\n    {GRIS}Started from the key, it would stop once the key is unplugged.{RESET}",
+                affichable(&e)
+            );
+            None
         }
     }
-    exe.display().to_string()
 }
 
 /// Un chemin sans le préfixe « \\?\ » que `canonicalize` met sous Windows (sauf « \\?\UNC\ », qui n'a pas de forme
@@ -157,6 +161,8 @@ const CATEGORIES_SURVEILLEES: &[&str] = &[
     "Bluetooth",
     "Fin de support",
     "Durcissement",
+    // Un fichier d'état réécrit hors de Vanguard : ce qu'un programme du compte ferait pour faire taire son alerte.
+    "État de Vanguard",
 ];
 
 /// Les failles connues changent presque chaque jour, comme les mises à jour : seules les critiques sont notifiées,
@@ -171,8 +177,16 @@ struct EtatMachine {
     alertes: Vec<String>,
 }
 
-fn fichier_etat() -> std::path::PathBuf {
-    reseau::dossier_local().join("surveillance-machine.json")
+/// L'état du passage d'avant, d'après ses sceaux. Changé hors de Vanguard (une alerte écrite d'avance), adopté
+/// sans sceau d'avant ou illisible, il ne vaut rien : tout ce qui est là maintenant est nouveau, jamais un silence.
+/// Seul un état absent (premier passage) ne fait que mémoriser.
+fn etat_d_avant(lu: crate::sceau::Lecture) -> Option<EtatMachine> {
+    use crate::sceau::Lecture;
+    match lu {
+        Lecture::Absent => None,
+        Lecture::Intact(o) => Some(serde_json::from_slice(&o).unwrap_or_default()),
+        Lecture::Adopte(_) | Lecture::Falsifie(_) | Lecture::Illisible(_) => Some(EtatMachine::default()),
+    }
 }
 
 /// Un constat que la surveillance notifie quand il apparaît.
@@ -260,9 +274,7 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
 fn veiller_machine() -> crate::machine::Audit {
     let audit = crate::machine::auditer(false);
     let mut apres = etat_machine(&audit);
-    let avant: Option<EtatMachine> = std::fs::read_to_string(fichier_etat())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok());
+    let avant = etat_d_avant(crate::sceau::lire(crate::sceau::MACHINE));
     // Failles pas vérifiées cette fois (hors ligne) : celles d'avant restent, sinon leur retour serait renotifié.
     if let Some(avant) = &avant
         && audit
@@ -284,8 +296,7 @@ fn veiller_machine() -> crate::machine::Audit {
         }
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
-        let _ = std::fs::create_dir_all(reseau::dossier_local());
-        let _ = std::fs::write(fichier_etat(), texte);
+        let _ = crate::sceau::ecrire(crate::sceau::MACHINE, texte);
     }
     audit
 }
@@ -1093,7 +1104,7 @@ pub fn activer(oui: bool) {
     }
     let retrait = if oui { Ok(()) } else { desinstaller() };
     let reussi = if oui {
-        installer(&executable(), Reglages::Aujourdhui)
+        executable().is_some_and(|exe| installer(&exe, Reglages::Aujourdhui))
     } else {
         retrait.is_ok()
     };
@@ -2217,6 +2228,31 @@ mod tests {
             Niveau::Moyen,
             "coupé".to_string()
         )));
+    }
+
+    /// Une alerte écrite d'avance dans l'état du passage d'avant, ou cet état effacé : rien n'est cru, l'alerte de
+    /// l'état de Vanguard sort quand même.
+    #[test]
+    fn etat_d_avant_pose_a_cote_ne_tait_rien() {
+        use crate::sceau::Lecture;
+        let alerte = "État de Vanguard : appris.json a été changé hors de Vanguard.";
+        let apres = etat(80, &[alerte]);
+        let pose = serde_json::to_vec(&apres).unwrap();
+        // Tel que Vanguard l'a écrit : déjà connue, pas renotifiée.
+        let avant = etat_d_avant(Lecture::Intact(pose.clone())).unwrap();
+        assert_eq!(nouveautes_machine(&avant, &apres), Vec::<(String, String)>::new());
+        for lu in [
+            Lecture::Falsifie(Some(pose.clone())),
+            Lecture::Falsifie(None),
+            Lecture::Adopte(pose),
+            Lecture::Illisible("refusé".into()),
+        ] {
+            let avant = etat_d_avant(lu).unwrap();
+            let notes = nouveautes_machine(&avant, &apres);
+            assert!(notes.iter().any(|(_, t)| t.contains("appris.json")), "{notes:?}");
+        }
+        // Premier passage : mémoriser seulement.
+        assert!(etat_d_avant(Lecture::Absent).is_none());
     }
 
     #[test]

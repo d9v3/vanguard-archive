@@ -61,6 +61,7 @@ A security flaw? No public issue or pull request: report it privately, see [SECU
 | `src/audit/dns_tls.rs`, `dns_client.rs`, `bail.rs` | DNS and TLS domain: DNS handed out by the router compared with the computer's, encrypted DNS (DoT, DoH, DDR), resolver compared with two public resolvers, certificate exceptions and roots pushed into Firefox; home-made UDP DNS client (A, AAAA, TXT, SVCB, HTTPS, EDNS0, DO bit), bounded; DHCP lease and effective DNS configuration read from files and the registry |
 | `src/audit/appareils.rs`, `postes.rs` | Devices (IoT devices recognised from the scan, nothing probed beyond the camera search) and Computers (this computer as seen from the network: the report's network findings; the other computers from the scan) domains |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
+| `src/sceau.rs` | seals of Vanguard's state (accepted alerts, integrity reference, reported botnets, versions seen): changed outside Vanguard, it no longer counts and the check says so |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
 | `src/optimiser/` | privacy, performance and comfort settings, with exact undo; startup programs (`demarrage.rs`); Windows Defender blocking: ASR rules, network protection, PUA, controlled folder access (`defender.rs`) |
 | `src/nettoyer/` | cleanup: items per system, space measured before and after |

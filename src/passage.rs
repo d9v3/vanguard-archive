@@ -102,19 +102,26 @@ pub(crate) fn au_lancement() {
         ancien("vanguard"),
         std::env::consts::EXE_SUFFIX
     )));
+    // Sans copie locale (elle a échoué et l'a dit), rien de ce qui la lancerait n'est repris.
     let exe = crate::reseau::surveillance::executable();
     let mut repris = Vec::new();
-    if surveillance && crate::reseau::surveillance::reprendre(&exe) {
+    if let Some(exe) = &exe
+        && surveillance
+        && crate::reseau::surveillance::reprendre(exe)
+    {
         repris.push(crate::tr!("surveillance horaire", "hourly monitoring"));
     }
-    if entretien && crate::entretien::reprendre(&exe) {
+    if let Some(exe) = &exe
+        && entretien
+        && crate::entretien::reprendre(exe)
+    {
         repris.push(crate::tr!("entretien du mois", "monthly check-up"));
     }
     if sauvegarde {
         repris.push(crate::tr!("sauvegarde automatique", "automatic backup"));
     }
-    if let Some(ou) = raccourci
-        && crate::raccourci::reprendre(&exe, &ou)
+    if let (Some(exe), Some(ou)) = (&exe, raccourci)
+        && crate::raccourci::reprendre(exe, &ou)
     {
         repris.push(crate::tr!("raccourci", "shortcut"));
     }

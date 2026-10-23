@@ -1556,10 +1556,7 @@ pub(crate) fn notre_unite(texte: &str) -> bool {
 fn exe_prevu() -> Option<String> {
     let exe = crate::protection::cle::exe_d_origine()?;
     if crate::reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {
-        let dest = crate::reseau::dossier_local()
-            .join("bin")
-            .join(exe.file_name().unwrap_or_default());
-        return Some(dest.display().to_string());
+        return Some(crate::mise_a_jour::copie_de_cet_ordinateur().display().to_string());
     }
     Some(exe.display().to_string())
 }
@@ -1647,7 +1644,7 @@ fn allumer() {
     // La copie locale (Vanguard lancé depuis la clé) se fait maintenant, après l'accord ; un autre chemin que celui
     // montré, et rien n'est posé.
     let reel = crate::reseau::surveillance::executable();
-    if reel != exe {
+    if reel.as_deref() != Some(exe.as_str()) {
         trp!(
             "  ✖ La copie locale de Vanguard n'a pas pu se faire ({}) : rien n'est posé.",
             "  ✖ The local copy of Vanguard could not be made ({}): nothing is set up.",

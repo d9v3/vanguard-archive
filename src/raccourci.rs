@@ -284,7 +284,9 @@ pub fn commande(voulu: Option<bool>) {
             );
             return;
         }
-        let exe = crate::reseau::surveillance::executable();
+        let Some(exe) = crate::reseau::surveillance::executable() else {
+            return;
+        };
         match poser(&exe, &ou) {
             Ok(()) => trp!(
                 "  {VERT}✔{RESET} Raccourci posé : {montre}",

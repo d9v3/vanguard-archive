@@ -210,7 +210,7 @@ fn etat_de(exe: &Path, cle_du_programme: Option<&Path>, copie: &Path, courante: 
 }
 
 /// La copie de cet ordinateur (celle de `reseau::surveillance::executable`).
-fn copie_de_cet_ordinateur() -> PathBuf {
+pub(crate) fn copie_de_cet_ordinateur() -> PathBuf {
     crate::reseau::dossier_local().join("bin").join(NOM)
 }
 
@@ -343,12 +343,16 @@ fn plus_ancien(chemin: &Path, publiee: Version) -> bool {
 /// Copie `source` à la place de `cible` : à côté d'abord, sa version revérifiée (ce qui a été montré est ce qui
 /// s'installe : la clé a pu changer depuis l'affichage), relue et comparée, puis renommée d'un coup ; une copie
 /// interrompue ou abîmée ne remplace jamais celle qui marche, et ne reste pas sur le disque.
-fn remplacer(source: &Path, cible: &Path, attendue: Version, max: u64) -> Result<(), String> {
-    installer(&lire_octets(source, max)?, cible, attendue)
+fn remplacer(source: &Path, cible: &Path, attendue: Version, max: u64, essai: Essai) -> Result<(), String> {
+    installer(&lire_octets(source, max)?, cible, attendue, essai)
 }
 
-/// Les octets d'un programme à la place de `cible`, s'ils portent la version `attendue`.
-fn installer(octets: &[u8], cible: &Path, attendue: Version) -> Result<(), String> {
+/// L'essai d'un programme posé à côté, avant qu'il remplace l'ancien (`essayer`, ou celui d'un test).
+type Essai = fn(&Path, Version) -> Result<(), String>;
+
+/// Les octets d'un programme à la place de `cible`, s'ils portent la version `attendue` et que l'essai les a vus
+/// démarrer.
+fn installer(octets: &[u8], cible: &Path, attendue: Version, essai: Essai) -> Result<(), String> {
     if version_gravee(octets) != Some(attendue) {
         return Err(tr!(
             "le programme de la clé a changé depuis l'affichage, rien n'est remplacé",
@@ -380,12 +384,83 @@ fn installer(octets: &[u8], cible: &Path, attendue: Version) -> Result<(), Strin
         if std::fs::read(&provisoire).ok().as_deref() != Some(octets) {
             return Err(tr!("la copie relue ne correspond pas", "the copy read back does not match").into());
         }
+        essai(&provisoire, attendue)?;
         mettre_en_place(&provisoire, cible).map_err(|e| e.to_string())
     })();
     if ecrite.is_err() {
         let _ = std::fs::remove_file(&provisoire);
     }
     ecrite
+}
+
+/// Lance la nouvelle copie, encore à côté, avec « --version » : la surveillance, l'entretien et le veilleur la
+/// relanceront sans personne devant l'écran, et une copie qui ne démarre pas sur ce système (programme abîmé, mauvaise
+/// architecture) arrêterait la défense sans bruit. Elle doit finir, sans erreur, en disant la version attendue ;
+/// sinon l'ancienne reste en place. Sous Windows, pas d'essai : le fichier provisoire n'a pas l'extension .exe, et
+/// son lancement par ce nom n'a pas été vérifié sur un vrai Windows.
+fn essayer(programme: &Path, attendue: Version) -> Result<(), String> {
+    if cfg!(windows) {
+        return Ok(());
+    }
+    let r = crate::commande::lancer_borne(
+        std::process::Command::new(programme)
+            .arg("--version")
+            .env("VANGUARD_HORS_LIGNE", "1"),
+        30,
+        64 << 10,
+    );
+    match r {
+        Some(r) if r.code == Some(0) && r.sortie.split_whitespace().any(|m| m == ecrire(attendue)) => Ok(()),
+        _ => Err(tr!(
+            "la nouvelle copie ne démarre pas sur cet ordinateur : l'ancienne reste en place",
+            "the new copy does not start on this computer: the old one stays in place"
+        )
+        .into()),
+    }
+}
+
+/// La copie de cet ordinateur posée depuis `source`, le programme lancé sur la clé (surveillance, entretien,
+/// raccourci, veilleur), par le même chemin que la mise à jour : à côté, version revérifiée, essayée, relue, puis
+/// mise en place d'un coup. Jamais par-dessus une copie plus récente : elle est gardée, et c'est elle que la
+/// surveillance lancera (« jamais vers une version plus ancienne »). Rend le chemin de la copie, ou pourquoi elle
+/// n'a pas pu se faire : jamais celui de la clé, qu'une minuterie ne retrouverait plus une fois débranchée.
+pub(crate) fn poser_copie(source: &Path) -> Result<PathBuf, String> {
+    let cible = copie_de_cet_ordinateur();
+    poser_copie_dans(source, &cible, essayer)?;
+    Ok(cible)
+}
+
+fn poser_copie_dans(source: &Path, cible: &Path, essai: Essai) -> Result<(), String> {
+    let octets = lire_octets(source, TAILLE_MAX)?;
+    let Some(version) = version_gravee(&octets) else {
+        return Err(tr!(
+            "pas de version gravée dans le programme",
+            "no engraved version in the program"
+        )
+        .into());
+    };
+    match lire_programme(cible, TAILLE_MAX) {
+        Lu::Version(v) if v > version => return Ok(()),
+        Lu::Version(v) if v == version && std::fs::read(cible).ok().as_deref() == Some(&octets[..]) => return Ok(()),
+        _ => {}
+    }
+    if let Some(d) = cible.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    installer(&octets, cible, version, essai)
+}
+
+/// La copie de cet ordinateur est-elle plus ancienne que ce programme ? Elle écrit alors encore l'état de Vanguard
+/// sans sceau (`sceau`), et le bilan le dit comme cause probable.
+pub(crate) fn copie_plus_ancienne() -> bool {
+    let Some(ici) = courante() else {
+        return false;
+    };
+    match lire_programme(&copie_de_cet_ordinateur(), TAILLE_MAX) {
+        Lu::Ancien => true,
+        Lu::Version(v) => v < ici,
+        Lu::Absent | Lu::Illisible(_) => false,
+    }
 }
 
 /// Le renommage final. Sous Windows, un programme qui tourne (la surveillance, lancée à l'heure pile) ne se remplace
@@ -468,6 +543,24 @@ fn depuis_github() {
         );
         return;
     }
+    if github::versions_vues_douteuses() {
+        trp!(
+            "\n  ✖ Les versions déjà vues ici ont été changées hors de Vanguard :\n    elles ne protègent plus d'un vieux manifeste remis sur GitHub.\n    Rien n'est vérifié tant qu'elles ne repartent pas de zéro.",
+            "\n  ✖ The versions already seen here were changed outside Vanguard:\n    they no longer protect against an old manifest put back on GitHub.\n    Nothing is checked until they start over."
+        );
+        if !demander(tr!(
+            "  Repartir de la version signée reçue maintenant ? [o/N] : ",
+            "  Start over from the signed version received now? [y/N]: "
+        ))
+        .oui()
+        {
+            return;
+        }
+        if let Err(e) = github::oublier_versions_vues() {
+            trp!("  ✖ {}", "  ✖ {}", affichable(&e.to_string()));
+            return;
+        }
+    }
     trp!(
         "\n  {GRIS}Dernière version publiée sur GitHub…{RESET}",
         "\n  {GRIS}Latest version published on GitHub…{RESET}"
@@ -483,13 +576,19 @@ fn depuis_github() {
             return;
         }
     };
+    // Le programme lancé et les copies d'ici servent de plancher : une version plus récente que la dernière signée
+    // sur GitHub (passée par la clé VANGUARD, sans jamais voir GitHub) trahit un ancien manifeste remis en place.
+    let ici: Vec<Version> = cibles
+        .iter()
+        .filter_map(|c| match lire_programme(c, TAILLE_MAX) {
+            Lu::Version(v) => Some(v),
+            _ => None,
+        })
+        .chain(courante())
+        .collect();
     let a_remplacer: Vec<PathBuf> = cibles.into_iter().filter(|c| plus_ancien(c, publiee.version)).collect();
     if a_remplacer.is_empty() {
-        trp!(
-            "  {VERT}✔{RESET} Rien de plus récent sur GitHub (dernière version : {}).",
-            "  {VERT}✔{RESET} Nothing newer on GitHub (latest version: {}).",
-            ecrire(publiee.version)
-        );
+        dire_a_jour(publiee.version, &ici, maintenant());
         return;
     }
     trp!(
@@ -520,7 +619,7 @@ fn depuis_github() {
         }
     };
     for c in &a_remplacer {
-        match installer(&octets, c, publiee.version) {
+        match installer(&octets, c, publiee.version, essayer) {
             Ok(()) => trp!(
                 "  {VERT}✔{RESET} {} : Vanguard {}.",
                 "  {VERT}✔{RESET} {}: Vanguard {}.",
@@ -533,6 +632,67 @@ fn depuis_github() {
                 affichable(&c.display().to_string()),
                 affichable(&e)
             ),
+        }
+    }
+}
+
+/// Les secondes depuis 1970 (0 si l'horloge est avant 1970). Une horloge en retard sur la date de la dernière
+/// version signée rend son âge inconnu (`github::age_jours`, donc « non vérifié ») : jamais « frais ».
+fn maintenant() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Ce que le contrôle depuis GitHub peut dire quand rien d'ici n'est plus ancien que la dernière version signée.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    AJour,
+    /// Trop vieille pour être crue la dernière : pourquoi (« date de 50 jours »).
+    Perimee(String),
+    /// Un programme d'ici porte un numéro plus récent (celui-ci) : un ancien manifeste a pu être remis en place.
+    PlusRecenteIci(Version),
+}
+
+/// Le verdict d'après la dernière version signée, les versions des programmes d'ici et l'heure. Seul le numéro
+/// compte pour le plancher, pas la date : une compilation de développement porte le numéro publié et une date
+/// plus récente, sans rien trahir.
+fn verdict(publiee: Version, ici: &[Version], maintenant: u64) -> Verdict {
+    let numero = |v: Version| (v.0, v.1, v.2);
+    if let Some(&v) = ici.iter().filter(|v| numero(**v) > numero(publiee)).max() {
+        return Verdict::PlusRecenteIci(v);
+    }
+    match github::age_jours(publiee, maintenant) {
+        Some(jours) if jours <= github::FRAICHEUR_JOURS => Verdict::AJour,
+        Some(jours) => Verdict::Perimee(trf!("date de {jours} jours", "is {jours} days old")),
+        None => Verdict::Perimee(tr!("n'a pas de date fiable", "has no reliable date").to_string()),
+    }
+}
+
+/// « Rien de plus récent », seulement si la dernière version signée est assez récente pour être crue la dernière
+/// et que rien d'ici n'est plus récent qu'elle : un vieux manifeste remis en place sur GitHub gèlerait sinon les
+/// mises à jour derrière une coche verte.
+fn dire_a_jour(publiee: Version, ici: &[Version], maintenant: u64) {
+    match verdict(publiee, ici, maintenant) {
+        Verdict::AJour => trp!(
+            "  {VERT}✔{RESET} Rien de plus récent sur GitHub (dernière version : {}).",
+            "  {VERT}✔{RESET} Nothing newer on GitHub (latest version: {}).",
+            ecrire(publiee)
+        ),
+        Verdict::Perimee(age) => {
+            trp!(
+                "  Non vérifié : la dernière version signée {age} ({}).\n  Rien de plus récent sur GitHub, mais rien ne prouve que ce soit\n  encore la dernière.",
+                "  Not verified: the latest signed version {age} ({}).\n  Nothing newer on GitHub, but nothing proves it is still the latest.",
+                ecrire(publiee)
+            );
+        }
+        Verdict::PlusRecenteIci(v) => {
+            trp!(
+                "  Non vérifié : Vanguard {} tourne ici, plus récent que la dernière\n  version signée sur GitHub ({}) : un ancien manifeste a pu être\n  remis en place.",
+                "  Not verified: Vanguard {} runs here, newer than the latest signed\n  version on GitHub ({}): an old manifest may have been put back.",
+                ecrire(v),
+                ecrire(publiee)
+            );
         }
     }
 }
@@ -556,7 +716,7 @@ fn proposer(source: &Path, cible: &Path, copie: Option<Version>, cle: Version) {
     {
         return;
     }
-    match remplacer(source, cible, cle, TAILLE_MAX) {
+    match remplacer(source, cible, cle, TAILLE_MAX, essayer) {
         Ok(()) => trp!(
             "  {VERT}✔{RESET} Copie de cet ordinateur mise à jour : Vanguard {}.\n    La surveillance, l'entretien et le raccourci lancent cette version.",
             "  {VERT}✔{RESET} Copy on this computer updated: Vanguard {}.\n    Monitoring, maintenance and the shortcut start this version.",
@@ -594,6 +754,34 @@ mod tests {
             courante().map(|v| v.3.to_string()).as_deref(),
             Some(env!("VANGUARD_COMMIT_SECONDES"))
         );
+    }
+
+    /// Une dernière version signée de plus de 45 jours n'est plus « à jour » : le nombre de jours est dit.
+    #[test]
+    fn a_jour_seulement_si_la_signee_est_recente() {
+        let jour = 86_400;
+        let v = (0, 85, 0, 1_792_540_000);
+        assert_eq!(verdict(v, &[], v.3 + 45 * jour), Verdict::AJour);
+        let Verdict::Perimee(dit) = verdict(v, &[], v.3 + 46 * jour) else {
+            panic!("46 jours : périmée");
+        };
+        assert!(dit.contains("46"), "{dit}");
+        assert!(matches!(verdict((0, 85, 0, 0), &[], v.3), Verdict::Perimee(_)));
+        // Horloge revenue en 2020 : l'âge est inconnu, jamais « à jour ».
+        assert!(matches!(verdict(v, &[], 1_577_836_800), Verdict::Perimee(_)));
+        // Une heure de décalage juste après la publication : à jour.
+        assert_eq!(verdict(v, &[], v.3 - 3_600), Verdict::AJour);
+    }
+
+    /// Une copie passée à la 0.86 par la clé, et GitHub qui rend le manifeste de la 0.85 : jamais la coche verte.
+    #[test]
+    fn une_copie_plus_recente_que_github_n_est_pas_a_jour() {
+        let v = (0, 85, 0, 1_792_540_000);
+        let ici = (0, 86, 0, 1_792_600_000);
+        assert_eq!(verdict(v, &[ici, v], v.3), Verdict::PlusRecenteIci(ici));
+        // Même numéro : à jour, même si la compilation d'ici est plus récente (développement).
+        assert_eq!(verdict(v, &[(0, 85, 0, 1_792_700_000)], v.3), Verdict::AJour);
+        assert_eq!(verdict(v, &[(0, 84, 2, 1)], v.3), Verdict::AJour);
     }
 
     #[test]
@@ -751,7 +939,7 @@ mod tests {
         let cible = racine.join("bin").join(NOM);
         faux_programme(&source, Some("0.80.0"));
         faux_programme(&cible, None);
-        remplacer(&source, &cible, (0, 80, 0, 0), TAILLE_MAX).unwrap();
+        remplacer(&source, &cible, (0, 80, 0, 0), TAILLE_MAX, SANS_ESSAI).unwrap();
         assert_eq!(std::fs::read(&cible).unwrap(), std::fs::read(&source).unwrap());
         assert!(!cible.with_file_name(format!("{NOM}.nouveau")).exists());
         #[cfg(unix)]
@@ -762,14 +950,73 @@ mod tests {
         // La clé a changé depuis l'affichage (une autre version) : rien n'est remplacé.
         faux_programme(&cible, Some("0.70.0"));
         faux_programme(&source, Some("0.69.0"));
-        assert!(remplacer(&source, &cible, (0, 80, 0, 0), TAILLE_MAX).is_err());
+        assert!(remplacer(&source, &cible, (0, 80, 0, 0), TAILLE_MAX, SANS_ESSAI).is_err());
         assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 70, 0, 0)));
         // Une source absente ou démesurée : l'ancienne copie reste, rien ne traîne à côté.
-        assert!(remplacer(&racine.join("absente"), &cible, (0, 80, 0, 0), TAILLE_MAX).is_err());
+        assert!(remplacer(&racine.join("absente"), &cible, (0, 80, 0, 0), TAILLE_MAX, SANS_ESSAI).is_err());
         faux_programme(&source, Some("0.80.0"));
-        assert!(remplacer(&source, &cible, (0, 80, 0, 0), 4).is_err());
+        assert!(remplacer(&source, &cible, (0, 80, 0, 0), 4, SANS_ESSAI).is_err());
         assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 70, 0, 0)));
         assert!(!cible.with_file_name(format!("{NOM}.nouveau")).exists());
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// Les faux programmes des tests ne se lancent pas : l'essai réel a son propre test.
+    const SANS_ESSAI: Essai = |_, _| Ok(());
+
+    fn essai_rate(_: &Path, _: Version) -> Result<(), String> {
+        Err("ne démarre pas".into())
+    }
+
+    /// La copie posée pour la surveillance passe par les mêmes garde-fous que la mise à jour : jamais par-dessus une
+    /// plus récente, jamais si l'essai échoue, rien qui traîne à côté.
+    #[test]
+    fn copie_locale_par_le_chemin_sur() {
+        let racine = crate::reseau::dossier_local().join("essai-copie-locale");
+        let _ = std::fs::remove_dir_all(&racine);
+        let source = racine.join("cle").join(NOM);
+        let cible = racine.join("bin").join(NOM);
+        faux_programme(&source, Some("0.80.0+5"));
+        // Pas encore de copie : posée.
+        poser_copie_dans(&source, &cible, SANS_ESSAI).unwrap();
+        assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 80, 0, 5)));
+        // Une copie plus récente que la clé : gardée telle quelle (une vieille clé ne fait pas revenir en arrière).
+        faux_programme(&cible, Some("0.81.0+1"));
+        poser_copie_dans(&source, &cible, SANS_ESSAI).unwrap();
+        assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 81, 0, 1)));
+        // Une copie plus ancienne : remplacée, sauf si la nouvelle ne démarre pas.
+        faux_programme(&cible, Some("0.79.0+1"));
+        assert!(poser_copie_dans(&source, &cible, essai_rate).is_err());
+        assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 79, 0, 1)));
+        assert!(!cible.with_file_name(format!("{NOM}.nouveau")).exists());
+        poser_copie_dans(&source, &cible, SANS_ESSAI).unwrap();
+        assert_eq!(std::fs::read(&cible).unwrap(), std::fs::read(&source).unwrap());
+        // Une source sans version gravée : rien n'est posé.
+        faux_programme(&source, None);
+        assert!(poser_copie_dans(&source, &cible, SANS_ESSAI).is_err());
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// L'essai lance vraiment le programme : il doit finir sans erreur en disant la version attendue.
+    #[cfg(unix)]
+    #[test]
+    fn essai_de_la_nouvelle_copie() {
+        use std::os::unix::fs::PermissionsExt;
+        let racine = crate::reseau::dossier_local().join("essai-demarrage");
+        std::fs::create_dir_all(&racine).unwrap();
+        let script = |nom: &str, corps: &str| {
+            let f = racine.join(nom);
+            std::fs::write(&f, format!("#!/bin/sh\n{corps}\n")).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            f
+        };
+        let bon = script("bon", r#"[ "$1" = --version ] && echo "vanguard 0.80.0""#);
+        assert_eq!(essayer(&bon, (0, 80, 0, 5)), Ok(()));
+        assert!(essayer(&bon, (0, 81, 0, 5)).is_err());
+        assert!(essayer(&script("plante", "echo vanguard 0.80.0; exit 3"), (0, 80, 0, 5)).is_err());
+        let texte = racine.join("pas-un-programme");
+        std::fs::write(&texte, "rien").unwrap();
+        assert!(essayer(&texte, (0, 80, 0, 5)).is_err());
         let _ = std::fs::remove_dir_all(&racine);
     }
 }

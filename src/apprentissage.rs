@@ -16,7 +16,7 @@ use crate::ui::*;
 /// Durée d'un choix : au-delà, Vanguard repose la question (la situation a pu changer).
 const DUREE_JOURS: i64 = 90;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct Appris {
     #[serde(default)]
     acceptees: BTreeMap<String, Acceptee>,
@@ -33,22 +33,37 @@ struct Acceptee {
 }
 
 fn fichier() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("appris.json")
+    crate::reseau::dossier_local().join(crate::sceau::APPRIS)
 }
 
-/// Les choix retenus ; `Err` si la liste existe mais ne se lit plus. Alors aucun choix n'est appliqué (les alertes se
-/// montrent comme d'habitude, jamais l'inverse) et rien ne l'écrase : les choix d'avant ne se perdent pas en silence.
-fn charger() -> Result<Appris, ()> {
-    match std::fs::read_to_string(fichier()) {
-        Ok(texte) => serde_json::from_str(&texte).map_err(|_| ()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Appris::default()),
-        Err(_) => Err(()),
+/// Pourquoi la liste des choix ne compte pas.
+enum Refus {
+    Illisible,
+    /// Changée hors de Vanguard (`sceau`) : un programme du compte qui s'y ajoute fait taire sa propre alerte. Ce
+    /// qu'elle contient maintenant, si ça se lit, pour que tu la reprennes ou l'oublies.
+    Falsifiee(Option<Appris>),
+}
+
+/// Les choix retenus ; `Err` si la liste existe mais ne se lit plus, ou a été changée hors de Vanguard. Alors aucun
+/// choix n'est appliqué (les alertes se montrent comme d'habitude, jamais l'inverse) et rien ne l'écrase : les choix
+/// d'avant ne se perdent pas en silence.
+fn charger() -> Result<Appris, Refus> {
+    use crate::sceau::Lecture;
+    match crate::sceau::lire(crate::sceau::APPRIS) {
+        Lecture::Absent => Ok(Appris::default()),
+        // Adoptée au premier usage : appliquée comme avant les sceaux, mais le bilan le dit (COM-ETA-001) et le menu
+        // propose de la garder.
+        Lecture::Intact(o) | Lecture::Adopte(o) => serde_json::from_slice(&o).map_err(|_| Refus::Illisible),
+        Lecture::Falsifie(o) => Err(Refus::Falsifiee(o.and_then(|o| serde_json::from_slice(&o).ok()))),
+        Lecture::Illisible(_) => Err(Refus::Illisible),
     }
 }
 
 fn enregistrer(appris: &Appris) -> std::io::Result<()> {
-    std::fs::create_dir_all(crate::reseau::dossier_local())?;
-    crate::reseau::ecrire_atomique(&fichier(), serde_json::to_string_pretty(appris).unwrap_or_default())
+    crate::sceau::ecrire(
+        crate::sceau::APPRIS,
+        serde_json::to_string_pretty(appris).unwrap_or_default(),
+    )
 }
 
 /// Une alerte reconnue d'un bilan à l'autre sans ses quantités (« 12 % libres » et « 9 % libres » sont la même). Une
@@ -115,13 +130,23 @@ pub fn accepter(c: &Constat) {
     let Some(niveau) = c.probleme else {
         return;
     };
-    let Ok(mut appris) = charger() else {
-        trp!(
-            "    ✖ La liste de tes choix ne se lit plus ({}) : rien n'est retenu, pour ne pas l'écraser.",
-            "    ✖ Your choice list can no longer be read ({}): nothing is saved, so as not to overwrite it.",
-            fichier().display()
-        );
-        return;
+    let mut appris = match charger() {
+        Ok(a) => a,
+        Err(Refus::Illisible) => {
+            trp!(
+                "    ✖ La liste de tes choix ne se lit plus ({}) : rien n'est retenu, pour ne pas l'écraser.",
+                "    ✖ Your choice list can no longer be read ({}): nothing is saved, so as not to overwrite it.",
+                fichier().display()
+            );
+            return;
+        }
+        Err(Refus::Falsifiee(_)) => {
+            trp!(
+                "    ✖ La liste de tes choix a été changée hors de Vanguard : rien\n      n'est retenu. « Ce que Vanguard a appris » la montre, pour la\n      reprendre ou l'oublier.",
+                "    ✖ Your choice list was changed outside Vanguard: nothing is\n      saved. “What Vanguard has learned” shows it, to take it back or\n      forget it."
+            );
+            return;
+        }
     };
     appris.acceptees.insert(
         signature(c.categorie, &c.message),
@@ -211,16 +236,27 @@ pub fn menu() {
     titre(tr!("Ce que Vanguard a appris", "What Vanguard has learned"));
     habitudes();
     section(tr!("TES CHOIX", "YOUR CHOICES"));
-    let Ok(mut appris) = charger() else {
-        trp!(
-            "  ✖ La liste de tes choix ne se lit plus : {}",
-            "  ✖ Your choice list can no longer be read: {}",
-            fichier().display()
-        );
-        return;
+    let mut appris = match charger() {
+        Ok(a) => a,
+        Err(Refus::Illisible) => {
+            trp!(
+                "  ✖ La liste de tes choix ne se lit plus : {}",
+                "  ✖ Your choice list can no longer be read: {}",
+                fichier().display()
+            );
+            return;
+        }
+        Err(Refus::Falsifiee(contenu)) => return reprendre(contenu),
     };
     let jour = aujourd_hui();
+    // Acceptée telle quelle au premier usage des sceaux : toi seul sais si ce sont tes choix (COM-ETA-001 le dit
+    // tant qu'elle n'est pas réécrite).
+    let adoptee = crate::sceau::adopte(crate::sceau::APPRIS);
     if appris.acceptees.is_empty() {
+        // Une liste vide ne tait rien : la resceller sans demander.
+        if adoptee {
+            let _ = enregistrer(&appris);
+        }
         for ligne in envelopper(
             tr!(
                 "Rien pour l'instant. Quand une alerte est normale chez toi, réponds « i » au moment de la corriger : Vanguard s'en souviendra pendant 90 jours, et te la montrera seulement pour info.",
@@ -269,6 +305,9 @@ pub fn menu() {
     a_oublier.sort_unstable();
     a_oublier.dedup();
     if a_oublier.is_empty() {
+        if adoptee {
+            garder_adoptee(&appris);
+        }
         return;
     }
     for i in &a_oublier {
@@ -280,6 +319,68 @@ pub fn menu() {
             "  {VERT}✔{RESET} {} choice(s) forgotten: these alerts will come back as usual.",
             a_oublier.len()
         ),
+        Err(e) => trp!("  ✖ Impossible d'enregistrer ({e}).", "  ✖ Could not save ({e})."),
+    }
+}
+
+/// La liste acceptée telle quelle au premier usage des sceaux (le jour où Vanguard est passé à une version qui
+/// scelle, ou `sceaux.json` effacé par un autre programme) : appliquée, mais seulement rescellée sur ton accord.
+fn garder_adoptee(appris: &Appris) {
+    trp!(
+        "\n  Cette liste a été acceptée telle quelle, sans sceau d'avant (mise à\n  jour de Vanguard, ou sceaux effacés par un autre programme).",
+        "\n  This list was accepted as it was, without an earlier seal (Vanguard\n  update, or seals deleted by another program)."
+    );
+    if !demander(tr!(
+        "  Ce sont bien tes choix : les garder ? [o/N] : ",
+        "  These are really your choices: keep them? [y/N]: "
+    ))
+    .oui()
+    {
+        return;
+    }
+    match enregistrer(appris) {
+        Ok(()) => trp!("  {VERT}✔{RESET} C'est noté.", "  {VERT}✔{RESET} Noted."),
+        Err(e) => trp!("  ✖ Impossible d'enregistrer ({e}).", "  ✖ Could not save ({e})."),
+    }
+}
+
+/// La liste changée hors de Vanguard : montrée telle qu'elle est maintenant, sans être appliquée. Toi seul sais si ces
+/// choix sont les tiens (une copie de Vanguard plus ancienne écrit aussi sans sceau) : les garder les rescelle, sinon
+/// ils sont oubliés, et leurs alertes reviennent.
+fn reprendre(contenu: Option<Appris>) {
+    trp!(
+        "  ✖ La liste de tes choix a été changée hors de Vanguard :\n    aucun n'est appliqué.",
+        "  ✖ Your choice list was changed outside Vanguard:\n    none is applied."
+    );
+    let appris = contenu.unwrap_or_default();
+    for a in appris.acceptees.values() {
+        afficher_aligne(
+            "    ",
+            &format!("{} : {}", crate::langue::categorie(&a.categorie), a.message),
+            4,
+            "",
+        );
+    }
+    let garder = !appris.acceptees.is_empty()
+        && demander(tr!(
+            "\n  Ce sont bien tes choix : les garder ? [o/N] : ",
+            "\n  These are really your choices: keep them? [y/N]: "
+        ))
+        .oui();
+    let ecrit = if garder {
+        enregistrer(&appris)
+    } else if demander(tr!(
+        "  Tout oublier (leurs alertes reviendront) ? [o/N] : ",
+        "  Forget everything (their alerts will come back)? [y/N]: "
+    ))
+    .oui()
+    {
+        crate::sceau::effacer(crate::sceau::APPRIS)
+    } else {
+        return;
+    };
+    match ecrit {
+        Ok(()) => trp!("  {VERT}✔{RESET} C'est noté.", "  {VERT}✔{RESET} Noted."),
         Err(e) => trp!("  ✖ Impossible d'enregistrer ({e}).", "  ✖ Could not save ({e})."),
     }
 }
@@ -333,6 +434,37 @@ mod tests {
         let mut c = [constat("Groupes", Niveau::Moyen, "Tu es dans le groupe docker.")];
         assert_eq!(appliquer_le(&a, &mut c, jour("2027-01-16")), 0);
         assert_eq!(c[0].probleme, Some(Niveau::Moyen));
+    }
+
+    /// Une ligne ajoutée à appris.json par un autre programme ne fait taire aucune alerte : la liste changée hors de
+    /// Vanguard ne compte plus du tout, ni pour l'ajout ni pour les choix d'avant.
+    #[test]
+    fn liste_changee_a_cote_jamais_appliquee() {
+        let message = "Tu es dans le groupe docker.";
+        let mut a = appris(
+            "Groupes",
+            message,
+            Niveau::Moyen,
+            &aujourd_hui().format("%Y-%m-%d").to_string(),
+        );
+        enregistrer(&a).unwrap();
+        let mut c = [constat("Groupes", Niveau::Moyen, message)];
+        assert_eq!(appliquer(&mut c), 1);
+        let ajout = a.acceptees.values().next().unwrap().clone();
+        a.acceptees.insert(
+            "Persistance : x".into(),
+            Acceptee {
+                categorie: "Persistance".into(),
+                ..ajout
+            },
+        );
+        std::fs::write(fichier(), serde_json::to_string(&a).unwrap()).unwrap();
+        let mut c = [constat("Groupes", Niveau::Moyen, message)];
+        assert_eq!(appliquer(&mut c), 0);
+        assert_eq!(c[0].probleme, Some(Niveau::Moyen));
+        assert!(matches!(charger(), Err(Refus::Falsifiee(Some(l))) if l.acceptees.len() == 2));
+        assert_eq!(nombre(), None);
+        crate::sceau::effacer(crate::sceau::APPRIS).unwrap();
     }
 
     #[test]

@@ -19,6 +19,26 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   est lu en Rust, sans commande externe. Lecture seule : rien n'est retiré, car celui qui l'a posé pourrait le voir ;
   l'écran dit de garder des captures et de demander de l'aide d'abord. Ce qui n'a pas pu être vérifié est compté, et
   le verdict n'est jamais « aucun logiciel espion ». Au bilan aussi, sans réseau.
+- **Chaîne de confiance des mises à jour.** Une clé de secours, gardée hors ligne, signe aussi les versions (la
+  principale perdue ou volée, la mise à jour continue) ; la clé principale peut être chiffrée, sa phrase demandée une
+  fois par publication (`outils/signer-versions.sh`, `--secours`). Vanguard retient la plus haute version signée déjà
+  vue et refuse un manifeste plus vieux ; une dernière version signée de plus de 45 jours n'est plus dite « à jour »,
+  mais non vérifiée. Le programme macOS est contrôlé avant d'être signé (commit, empreinte du journal de sa
+  compilation, Mach-O universel, version). La copie locale de la surveillance passe par la mise à jour (jamais vers
+  une version plus ancienne), et une nouvelle copie est essayée avant de remplacer l'ancienne (Linux et macOS).
+- **État de Vanguard scellé.** `appris.json`, `integrite.json`, `surveillance-botnets.txt` et les versions déjà
+  vues portent une empreinte BLAKE3 : changés hors de Vanguard (par un programme qui voudrait faire taire son
+  alerte), ils ne comptent plus et le bilan le dit (COM-ETA-001) ; abîmés, ils ne font jamais taire une alerte.
+- **Chaîne de confiance, seconde relecture.** Une copie d'ici plus récente que la dernière version signée sur GitHub
+  (passée par la clé) n'affiche plus « rien de plus récent » mais « non vérifié » : un ancien manifeste a pu être
+  remis en place. Une horloge en retard ne fait plus passer un vieux manifeste pour frais : « non vérifié ».
+  `sceaux.json` effacé ne fait plus accepter en silence les fichiers d'état tels quels : ils restent « adoptés »,
+  dits au bilan (COM-ETA-001), et la référence d'intégrité comme les versions déjà vues ne sont alors pas crues.
+  L'état de la machine au dernier passage de la surveillance et la liste des changements déjà signalés par la
+  surveillance d'intégrité sont scellés à leur tour. `signer-versions.sh --secours` refuse une clé de secours en
+  clair.
+- **CI.** `/dev/root` lu par son numéro comme findmnt, liens d'activation d'unités systemd disparues écartés comme
+  systemctl, borne de temps du client HTTP local adaptée à Windows ; `claude-journal.yml` en analyse seule.
 
 ## 22 octobre 2026, au soir : version 0.85
 

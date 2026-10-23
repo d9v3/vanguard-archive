@@ -666,19 +666,42 @@ fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
 /// lire.
 #[cfg(target_os = "linux")]
 fn unites_activees(maison: &std::path::Path, utilisateur: bool) -> Option<Vec<String>> {
+    let chemins = |liste: &[&str]| liste.iter().map(PathBuf::from).collect::<Vec<_>>();
     if utilisateur {
         let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
+        let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
         // SAFETY : getuid ne peut pas échouer et ne touche à aucune mémoire du programme.
         let uid = unsafe { libc::getuid() };
         let compte = config.join("systemd/user");
+        let session = PathBuf::from(format!("/run/user/{uid}/systemd"));
+        // Les dossiers où le gestionnaire de la session cherche les unités (sans ceux des générateurs, dont les unités
+        // sont « generated », jamais « enabled »).
+        let mut recherche = vec![
+            config.join("systemd/user.control"),
+            session.join("user.control"),
+            compte.clone(),
+            PathBuf::from("/etc/systemd/user"),
+            session.join("user"),
+            PathBuf::from("/run/systemd/user"),
+            donnees.join("systemd/user"),
+        ];
+        let partages = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+        recherche.extend(
+            partages
+                .split(':')
+                .filter(|d| d.starts_with('/'))
+                .map(|d| std::path::Path::new(d).join("systemd/user")),
+        );
+        recherche.extend(chemins(&["/usr/local/lib/systemd/user", "/usr/lib/systemd/user"]));
         unites_activees_dans(
             &[compte.clone(), PathBuf::from("/etc/systemd/user")],
             &[
                 compte,
                 PathBuf::from("/etc/systemd/user"),
-                PathBuf::from(format!("/run/user/{uid}/systemd/user")),
+                session.join("user"),
                 PathBuf::from("/run/systemd/user"),
             ],
+            &recherche,
         )
     } else {
         unites_activees_dans(
@@ -687,15 +710,40 @@ fn unites_activees(maison: &std::path::Path, utilisateur: bool) -> Option<Vec<St
                 PathBuf::from("/etc/systemd/system"),
                 PathBuf::from("/run/systemd/system"),
             ],
+            &chemins(&[
+                "/etc/systemd/system.control",
+                "/run/systemd/system.control",
+                "/etc/systemd/system",
+                "/etc/systemd/system.attached",
+                "/run/systemd/system",
+                "/run/systemd/system.attached",
+                "/usr/local/lib/systemd/system",
+                "/usr/lib/systemd/system",
+                "/lib/systemd/system",
+            ]),
         )
     }
 }
 
+/// L'unité `nom` existe-t-elle dans un dossier où systemd cherche les unités (son modèle « x@.service » pour une
+/// instance) ? Un lien d'activation resté après le retrait de son unité ne démarre rien, et systemctl ne la liste
+/// pas : sur Ubuntu 24.04, apport a cessé de fournir apport.service en laissant son lien dans multi-user.target.wants.
+#[cfg(target_os = "linux")]
+fn unite_existe(nom: &str, recherche: &[PathBuf]) -> bool {
+    let modele = nom
+        .split_once('@')
+        .and_then(|(debut, reste)| Some(format!("{debut}@.{}", reste.rsplit_once('.')?.1)));
+    recherche
+        .iter()
+        .any(|d| d.join(nom).exists() || modele.as_ref().is_some_and(|m| d.join(m).exists()))
+}
+
 /// Une unité est activée par un lien à son nom dans un dossier « *.wants », « *.requires » ou « *.upholds », ou
 /// par un alias (lien d'un autre nom vers son fichier, « display-manager.service » vers le gestionnaire de
-/// connexion). Masquée (lien vers /dev/null dans `masques`), elle ne démarre plus : elle ne compte pas.
+/// connexion). Masquée (lien vers /dev/null dans `masques`), elle ne démarre plus : elle ne compte pas ; absente de
+/// tous les dossiers de `recherche` non plus (`unite_existe`).
 #[cfg(target_os = "linux")]
-fn unites_activees_dans(dossiers: &[PathBuf], masques: &[PathBuf]) -> Option<Vec<String>> {
+fn unites_activees_dans(dossiers: &[PathBuf], masques: &[PathBuf], recherche: &[PathBuf]) -> Option<Vec<String>> {
     let null = std::path::Path::new("/dev/null");
     let mut activees = std::collections::BTreeSet::new();
     for d in dossiers {
@@ -725,6 +773,7 @@ fn unites_activees_dans(dossiers: &[PathBuf], masques: &[PathBuf]) -> Option<Vec
         !masques
             .iter()
             .any(|m| std::fs::read_link(m.join(u)).is_ok_and(|c| c == null))
+            && unite_existe(u, recherche)
     });
     Some(activees.into_iter().collect())
 }
@@ -1712,7 +1761,19 @@ mod tests {
         symlink("/dev/null", run.join("cache.service")).unwrap();
         // Lien d'une unité posée ailleurs (systemctl link) : « linked », pas activée.
         symlink(usr.join("anydesk.service"), etc.join("anydesk.service")).unwrap();
-        let l = unites_activees_dans(&[etc.clone(), d.join("absent")], &[etc.clone(), run.clone()]).unwrap();
+        // Le lien resté après le retrait de son unité (apport.service sur Ubuntu 24.04) : rien ne démarre, systemctl
+        // ne la liste pas.
+        symlink(
+            usr.join("apport.service"),
+            etc.join("multi-user.target.wants").join("apport.service"),
+        )
+        .unwrap();
+        let l = unites_activees_dans(
+            &[etc.clone(), d.join("absent")],
+            &[etc.clone(), run.clone()],
+            &[etc.clone(), usr.clone()],
+        )
+        .unwrap();
         assert_eq!(
             l,
             [
