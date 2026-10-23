@@ -37,13 +37,17 @@ fn juger(e: &Etat) -> Constat {
                 ],
             )
         } else {
-            c.corriger(
+            let c = c.corriger(
                 tr!(
                     "Régler l'heure automatiquement (NTP)",
                     "Set the time automatically (NTP)"
                 ),
                 &["sudo timedatectl set-ntp true"],
-            )
+            );
+            // Se défait : l'état d'avant (« no ») est relevé, puis remis par timedatectl.
+            #[cfg(target_os = "linux")]
+            let c = c.annulable(vec![crate::optimiser::Geste::ntp()]);
+            c
         };
     }
     match e.synchronisee {

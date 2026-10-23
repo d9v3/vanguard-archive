@@ -56,6 +56,44 @@ pub struct Correctif {
     /// Port bloqué en entrée par cette correction (« 8080/tcp »), retenu une fois appliquée.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bloque: Option<String>,
+    /// Ce qui permet de l'annuler (`optimiser::annulables`) : dit avant de l'appliquer.
+    #[serde(skip)]
+    pub defaire: Defaire,
+}
+
+/// Comment une correction se défait.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Defaire {
+    /// Vanguard ne sait pas relever l'état d'avant : la correction est dite non annulable avant d'être appliquée.
+    #[default]
+    Inconnu,
+    /// Les gestes dont la valeur d'avant est relevée juste avant d'appliquer, puis remise pour annuler.
+    Gestes(Vec<crate::optimiser::Geste>),
+    /// Remet en marche une protection de base (pare-feu, antivirus, chiffrement, UAC…) : Vanguard ne la remet
+    /// jamais hors service, même pour annuler.
+    Protection,
+}
+
+impl Correctif {
+    /// Comment cette correction se défait. Sous Windows, une correction faite tout entière de corrections natives
+    /// (DWORD sous HKLM) se défait d'elle-même, sauf celles qui rallument l'UAC.
+    pub(crate) fn comment_defaire(&self) -> Defaire {
+        #[cfg(windows)]
+        if self.defaire == Defaire::Inconnu && !self.commandes.is_empty() {
+            return windows::corrections::comment_defaire(&self.commandes);
+        }
+        self.defaire.clone()
+    }
+
+    /// Pourquoi elle ne se défait pas ; `None` : elle se défait (si son état d'avant se relève).
+    pub(crate) fn pourquoi_pas(&self) -> Option<crate::optimiser::annulables::PourquoiPas> {
+        use crate::optimiser::annulables::PourquoiPas;
+        match self.comment_defaire() {
+            Defaire::Gestes(_) => None,
+            Defaire::Protection => Some(PourquoiPas::Protection),
+            Defaire::Inconnu => Some(PourquoiPas::NonReleve),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -234,7 +272,25 @@ impl Constat {
             commandes: commandes.iter().map(ToString::to_string).collect(),
             automatique: true,
             bloque: None,
+            defaire: Defaire::Inconnu,
         });
+        self
+    }
+
+    /// La correction se défait : la valeur d'avant de chacun de ces gestes est relevée juste avant de l'appliquer.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub(crate) fn annulable(mut self, gestes: Vec<crate::optimiser::Geste>) -> Self {
+        if let Some(k) = &mut self.correctif {
+            k.defaire = Defaire::Gestes(gestes);
+        }
+        self
+    }
+
+    /// La correction remet en marche une protection de base : jamais défaite par Vanguard.
+    pub(crate) fn protection(mut self) -> Self {
+        if let Some(k) = &mut self.correctif {
+            k.defaire = Defaire::Protection;
+        }
         self
     }
 
@@ -461,7 +517,8 @@ fn cles_ssh() -> Vec<Constat> {
             .corriger(
                 tr!("Restreindre ~/.ssh à toi seul", "Restrict ~/.ssh to you only"),
                 &["chmod 700 ~/.ssh"],
-            ),
+            )
+            .annulable(vec![crate::optimiser::Geste::droits(&dossier)]),
         );
     }
     for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
@@ -507,7 +564,8 @@ fn cles_ssh() -> Vec<Constat> {
                 .corriger(
                     trf!("Protéger la clé {nom}", "Protect the key {nom}"),
                     &[&format!("chmod 600 {chemin}")],
-                ),
+                )
+                .annulable(vec![crate::optimiser::Geste::droits(&f.path())]),
             );
         }
     }
@@ -824,10 +882,16 @@ pub fn appliquer(commandes: &[String]) -> bool {
 /// correctif en échec n'empêche pas les suivants. Sous Linux et macOS, les commandes d'un correctif s'arrêtent à la
 /// première en échec ; sous Windows, une seule fenêtre UAC pour tous.
 pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
+    appliquer_annulables(correctifs, &[])
+}
+
+/// Comme `appliquer_chacune`, pour des corrections du bilan : `annulables`, pour chacune, l'id de la note qui la
+/// défait (`optimiser::annulables`), gardé avec elle dans « Ce que Vanguard a changé ».
+pub(crate) fn appliquer_annulables(correctifs: &[Vec<String>], annulables: &[Option<String>]) -> Vec<bool> {
     let (resultats, notes) = lancer_chacune(correctifs);
     // Gardé sur cet ordinateur : « Ce que Vanguard a changé » (changements.rs), avec la valeur d'avant quand le
-    // processus élevé l'a lue, pour annuler exactement.
-    crate::changements::noter(&notes, &resultats);
+    // processus élevé l'a lue, et le lien vers la note qui l'annule exactement.
+    crate::changements::noter_annulables(&notes, &resultats, annulables);
     resultats
 }
 

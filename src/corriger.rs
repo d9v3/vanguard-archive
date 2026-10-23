@@ -1,6 +1,7 @@
 //! Application interactive des correctifs : chaque action est montrée puis confirmée.
 
-use crate::machine::{self, Audit, Constat, Correctif};
+use crate::machine::{self, Audit, Constat, Correctif, Defaire};
+use crate::optimiser::annulables;
 use crate::reseau::{Hote, Rapport};
 use crate::risk::Niveau;
 use crate::ui::*;
@@ -40,6 +41,7 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
             for cmd in &k.commandes {
                 println!("    {GRIS}{cmd}{RESET}");
             }
+            dire_si_annulable(k);
             let rep = demander(tr!(
                 "  Appliquer ? [o]ui / [n]on / [t]out appliquer / [i]gnorer, c'est normal chez moi : ",
                 "  Apply? [y]es / [n]o / [a]ll / [i]gnore, this is normal for me: "
@@ -64,6 +66,11 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                     "    {GRIS}The {} remaining fixes, in one go.{RESET}",
                     lot.len()
                 );
+                // Les suivantes n'ont pas été montrées une à une : ce qui ne s'annulera pas est dit avant.
+                for (_, k) in &lot[1..] {
+                    afficher_aligne("    • ", &k.action, 6, "");
+                    dire_si_annulable(k);
+                }
             }
             // Une liste de commandes par correction : chacune réussit ou échoue pour elle-même.
             #[cfg_attr(not(windows), allow(unused_mut))]
@@ -100,12 +107,36 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                     ),
                 }
             }
-            let mut resultats = machine::appliquer_chacune(&groupes);
+            // Les valeurs d'avant, relevées juste avant d'appliquer et notées (scellées) : sans note enregistrée, une
+            // correction annoncée annulable ne le serait plus, rien n'est appliqué.
+            // Celles du lot qui touchent la même chose partagent une note : leur état d'avant n'existe qu'une fois.
+            let (releves, ids_lot) = annulables::regrouper(lot.iter().map(|(_, k)| relever(k).ok()).collect());
+            let a_noter: Vec<&annulables::Releve> = releves.iter().flatten().collect();
+            if !a_noter.is_empty() && !annulables::noter(&a_noter) {
+                trp!(
+                    "    ✖ Valeurs d'avant non enregistrées : rien n'a été appliqué.",
+                    "    ✖ Previous values not saved: nothing was applied."
+                );
+                continue;
+            }
+            let mut ids = ids_lot;
+            if groupes.len() > lot.len() {
+                ids.insert(0, None);
+            }
+            let mut resultats = machine::appliquer_annulables(&groupes, &ids);
             // Windows : le point de restauration est passé en premier dans la fenêtre administrateur. Refusé là, ou
             // fenêtre refusée : rien n'a été fait, il sera retenté avant la prochaine correction acceptée.
             if groupes.len() > lot.len() && !resultats.remove(0) {
                 point_cree = false;
             }
+            let decale = usize::from(groupes.len() > lot.len());
+            annulables::apres_application(
+                &ids[decale..]
+                    .iter()
+                    .zip(&resultats)
+                    .filter_map(|(id, ok)| Some((id.clone()?, *ok)))
+                    .collect::<Vec<_>>(),
+            );
             for ((c, k), reussi) in lot.iter().zip(resultats) {
                 if reussi {
                     machine::retenir_blocage(k);
@@ -152,6 +183,30 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
         }
     }
     appliquees
+}
+
+/// Relève l'état d'avant d'une correction : erreur, pourquoi elle ne s'annulera pas.
+fn relever(k: &Correctif) -> Result<annulables::Releve, annulables::PourquoiPas> {
+    match k.comment_defaire() {
+        Defaire::Gestes(g) => annulables::relever(annulables::id_bilan(), &k.action, &g),
+        _ => Err(k.pourquoi_pas().unwrap_or(annulables::PourquoiPas::NonReleve)),
+    }
+}
+
+/// Dit, avant d'appliquer, si la correction pourra se défaire : son état d'avant relevé, ou pourquoi pas.
+fn dire_si_annulable(k: &Correctif) {
+    match relever(k) {
+        Ok(_) => trp!(
+            "    {GRIS}↩ annulable ensuite depuis « Ce que Vanguard a changé »{RESET}",
+            "    {GRIS}↩ can be undone later from “What Vanguard changed”{RESET}"
+        ),
+        Err(e) => afficher_aligne(
+            "    ⚠ ",
+            &trf!("Non annulable : {}.", "Not undoable: {}.", e.texte()),
+            6,
+            "",
+        ),
+    }
 }
 
 /// Propose les corrections de la machine, puis la marche à suivre pour le reste. Retourne le nouvel audit.

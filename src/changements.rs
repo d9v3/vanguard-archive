@@ -1,7 +1,9 @@
 //! Ce que Vanguard a changé : chaque correction lancée après accord (commandes, date, réussie ou non) est notée sur cet
 //! ordinateur seulement (changements.jsonl, jamais sur la clé ni ailleurs), et se relit au menu Cette machine ou par
-//! `vanguard changements`. Les réglages d'Optimiser gardent en plus leur valeur d'avant, pour s'annuler exactement ;
-//! un blocage (protection/blocage) garde de quoi se défaire exactement, et `vanguard blocage annuler` le défait.
+//! `vanguard changements`. Les réglages d'Optimiser et les corrections du bilan qui le peuvent gardent en plus leur
+//! valeur d'avant (reglages.json, `optimiser::annulables`), pour s'annuler exactement : une correction s'annule ici,
+//! une à une ; un blocage (protection/blocage) garde de quoi se défaire exactement, et `vanguard blocage annuler` le
+//! défait. « Tout remettre comme avant » (`annulation`) défait le tout.
 
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +21,12 @@ struct Changement {
     /// Un blocage de menace : ce qui a été bloqué, et ce qui l'annule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     blocage: Option<Blocage>,
+    /// Une correction du bilan qui se défait : l'id de la note qui garde ses valeurs d'avant (reglages.json).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    annulable: Option<String>,
+    /// La date où elle a été défaite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    defaite: Option<String>,
 }
 
 /// Un blocage noté : de quoi le montrer, le reconnaître et l'annuler exactement.
@@ -82,19 +90,40 @@ fn fichier() -> std::path::PathBuf {
 
 /// Note des corrections lancées (une liste de commandes chacune) et leur résultat.
 pub fn noter(correctifs: &[Vec<String>], resultats: &[bool]) {
-    noter_dans(&fichier(), correctifs, resultats);
+    noter_dans(&fichier(), correctifs, resultats, &[]);
 }
 
-fn noter_dans(chemin: &std::path::Path, correctifs: &[Vec<String>], resultats: &[bool]) {
+/// Comme `noter`, avec pour chaque correction l'id de la note qui la défait (`None` : elle ne se défait pas).
+pub(crate) fn noter_annulables(correctifs: &[Vec<String>], resultats: &[bool], annulables: &[Option<String>]) {
+    noter_dans(&fichier(), correctifs, resultats, annulables);
+}
+
+fn noter_dans(chemin: &std::path::Path, correctifs: &[Vec<String>], resultats: &[bool], annulables: &[Option<String>]) {
     let date = maintenant();
     let mut tous = lire_de(chemin);
-    for (commandes, &reussi) in correctifs.iter().zip(resultats) {
+    for (i, (commandes, &reussi)) in correctifs.iter().zip(resultats).enumerate() {
         tous.push(Changement {
             date: date.clone(),
             commandes: commandes.clone(),
             reussi,
             blocage: None,
+            annulable: annulables.get(i).cloned().flatten(),
+            defaite: None,
         });
+    }
+    ecrire(chemin, tous);
+}
+
+/// Note que la correction liée à cette note (`annulable`) est défaite.
+pub(crate) fn marquer_defaite(id: &str) {
+    marquer_defaite_dans(&fichier(), id);
+}
+
+fn marquer_defaite_dans(chemin: &std::path::Path, id: &str) {
+    let mut tous = lire_de(chemin);
+    let date = maintenant();
+    for c in tous.iter_mut().filter(|c| c.annulable.as_deref() == Some(id)) {
+        c.defaite = Some(date.clone());
     }
     ecrire(chemin, tous);
 }
@@ -151,6 +180,8 @@ pub(crate) fn noter_blocage_dans(chemin: &std::path::Path, commandes: Vec<String
             annulation: blocage.annulation.filter(|_| reussi),
             ..blocage
         }),
+        annulable: None,
+        defaite: None,
     });
     ecrire(chemin, tous);
 }
@@ -255,12 +286,18 @@ fn lire_texte(texte: &str) -> Vec<Changement> {
     texte.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
-/// Les corrections réussies qui ne sont pas des blocages, du plus ancien au plus récent : (date, première commande).
-/// Une correction n'a pas de valeur d'avant notée : elle se défait à la main, avec la commande inverse.
+/// Les corrections réussies qui ne sont ni des blocages ni des corrections qui se défont (leur note gardée dans
+/// reglages.json), du plus ancien au plus récent : (date, première commande). Sans valeur d'avant notée, elles se
+/// défont à la main, avec la commande inverse.
 pub(crate) fn a_defaire_a_la_main() -> Vec<(String, String)> {
+    let notes: std::collections::HashSet<String> = crate::optimiser::annulables::notes(None)
+        .into_iter()
+        .map(|n| n.id)
+        .collect();
     lire()
         .into_iter()
         .filter(|c| c.reussi && c.blocage.is_none())
+        .filter(|c| c.annulable.as_ref().is_none_or(|id| !notes.contains(id)) && c.defaite.is_none())
         .map(|c| (c.date, c.commandes.into_iter().next().unwrap_or_default()))
         .collect()
 }
@@ -277,7 +314,8 @@ fn resume_de(chemin: &std::path::Path) -> Option<(usize, usize, String)> {
     Some((tous.len(), tous.iter().filter(|c| c.reussi).count(), derniere))
 }
 
-/// `vanguard changements` et le menu Cette machine.
+/// `vanguard changements` et le menu Cette machine : les changements notés, puis, s'il y en a, les corrections qui se
+/// défont, à annuler une par une (ou tout remettre comme avant).
 pub fn afficher() {
     titre(tr!("Ce que Vanguard a changé", "What Vanguard changed"));
     let tous = lire();
@@ -288,6 +326,8 @@ pub fn afficher() {
         );
         return;
     }
+    let notes = crate::optimiser::annulables::notes(None);
+    let a_sa_note = |id: &String| notes.iter().any(|n| &n.id == id);
     for c in tous.iter().rev().take(30) {
         let marque = if c.reussi {
             format!("{VERT}✔{RESET}")
@@ -327,9 +367,14 @@ pub fn afficher() {
         } else {
             String::new()
         };
+        let etat = match (&c.defaite, &c.annulable) {
+            (Some(le), _) => trf!(" (défaite le {le})", " (undone on {le})"),
+            (None, Some(id)) if a_sa_note(id) => tr!(" (annulable)", " (undoable)").to_string(),
+            _ => String::new(),
+        };
         afficher_aligne(
             &format!("  {marque} {GRIS}{}{RESET}  ", c.date),
-            &format!("{}{suite}", commande_affichable(premiere)),
+            &format!("{}{suite}{etat}", commande_affichable(premiere)),
             21,
             "",
         );
@@ -346,12 +391,69 @@ pub fn afficher() {
     afficher_aligne(
         "  ",
         tr!(
-            "Les réglages d'Optimiser s'annulent exactement par « Tout remettre comme avant », un blocage par « vanguard blocage annuler » ; une correction se défait à la main, avec la commande inverse.",
-            "Optimize settings are undone exactly with “Put everything back”, a block with “vanguard blocking undo”; a fix is undone by hand, with the opposite command."
+            "Une correction marquée « annulable » se défait ici ; les réglages d'Optimiser et de Gaming, les blocages et le mode Wi-Fi public, par « Tout remettre comme avant » (ou leur menu) ; une autre correction se défait à la main, avec la commande inverse.",
+            "A fix marked “undoable” is undone here; Optimize and Gaming settings, blocks and public Wi-Fi mode, with “Put everything back” (or their menu); any other fix is undone by hand, with the opposite command."
         ),
         2,
         GRIS,
     );
+    annuler_des_corrections();
+}
+
+/// Les corrections du bilan qui se défont (leur note gardée), de la plus récente à la plus ancienne, à annuler une
+/// par une ; « T » remet tout comme avant.
+fn annuler_des_corrections() {
+    use crate::optimiser::annulables::{self, Issue, Origine};
+    use crate::selection::{Ligne, choisir};
+    loop {
+        let notes = annulables::notes(Some(Origine::Bilan));
+        if notes.is_empty() {
+            return;
+        }
+        let mut lignes = vec![
+            Ligne::Texte(String::new()),
+            Ligne::Texte(ligne_section(tr!("Annuler une correction", "Undo a fix"))),
+        ];
+        for (i, n) in notes.iter().enumerate() {
+            lignes.push(Ligne::choix(
+                &(i + 1).to_string(),
+                &couper(&affichable(&n.titre), 44),
+                &n.date,
+            ));
+        }
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::choix(
+            "T",
+            tr!("Tout remettre comme avant", "Put everything back"),
+            tr!("bilan, Optimiser, Gaming…", "check-up, Optimize, Gaming…"),
+        ));
+        lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
+        let Some(choix) = choisir(
+            &lignes,
+            tr!("\n  Numéro (Entrée pour revenir) : ", "\n  Number (Enter to go back): "),
+            "1",
+            tr!("revenir", "back"),
+        ) else {
+            return;
+        };
+        if choix.trim().eq_ignore_ascii_case("t") {
+            crate::annulation::tout_remettre();
+            return;
+        }
+        let Some(n) = choix
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| notes.get(i.checked_sub(1)?))
+        else {
+            return;
+        };
+        println!();
+        afficher_aligne("  ", &affichable(&n.titre), 2, GRAS);
+        if let Some(Issue::Revenu | Issue::Absent) = annulables::annuler_une(&n.id) {
+            marquer_defaite(&n.id);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -367,6 +469,7 @@ mod tests {
             &f,
             &[vec!["chmod 700 ~/.ssh".into()], vec!["false".into(), "true".into()]],
             &[true, false],
+            &[],
         );
         let tous = lire_de(&f);
         assert_eq!(tous.len(), 2);
@@ -377,7 +480,7 @@ mod tests {
         assert_eq!(lire_texte(&t).len(), 1);
         // Au-delà de la limite, les plus anciens partent.
         let beaucoup: Vec<Vec<String>> = (0..GARDES + 5).map(|i| vec![format!("echo {i}")]).collect();
-        noter_dans(&f, &beaucoup, &vec![true; beaucoup.len()]);
+        noter_dans(&f, &beaucoup, &vec![true; beaucoup.len()], &[]);
         let tous = lire_de(&f);
         assert_eq!(tous.len(), GARDES);
         assert_eq!(tous.last().unwrap().commandes[0], format!("echo {}", GARDES + 4));
@@ -422,7 +525,7 @@ mod tests {
         assert!(lire_de(&f)[1].blocage.as_ref().unwrap().annulation.is_none());
         // Bien plus de corrections que la limite : le blocage en place reste, le reste est élagué.
         let beaucoup: Vec<Vec<String>> = (0..GARDES + 20).map(|i| vec![format!("echo {i}")]).collect();
-        noter_dans(&f, &beaucoup, &vec![true; beaucoup.len()]);
+        noter_dans(&f, &beaucoup, &vec![true; beaucoup.len()], &[]);
         let tous = lire_de(&f);
         assert_eq!(tous.len(), GARDES);
         assert_eq!(tous[0].blocage.as_ref().map(|b| b.id.as_str()), Some("a"));
@@ -435,7 +538,7 @@ mod tests {
                 .iter()
                 .any(|c| c.blocage.as_ref().is_some_and(|b| b.annule.is_some()))
         );
-        noter_dans(&f, &[vec!["echo fin".into()]], &[true]);
+        noter_dans(&f, &[vec!["echo fin".into()]], &[true], &[]);
         let tous = lire_de(&f);
         assert_eq!(tous.len(), GARDES);
         assert!(tous.iter().all(|c| c.blocage.is_none()));

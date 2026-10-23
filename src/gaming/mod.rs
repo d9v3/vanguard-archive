@@ -14,7 +14,7 @@ pub(crate) mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 pub(crate) struct Element {
     pub(crate) titre: String,
@@ -26,17 +26,40 @@ pub(crate) struct Element {
     pub(crate) lien: Option<&'static str>,
     /// Déconseillé sur cette machine : affiché, mais pas inclus dans « tout ».
     pub(crate) deconseille: Option<&'static str>,
-    /// Réglage du système : ses valeurs d'avant, notées avant de l'appliquer pour pouvoir le remettre.
-    pub(crate) annulable: Option<annulation::Annulable>,
+    /// Réglage du système : son nom stable et ce qu'il change, dont les valeurs d'avant sont relevées et notées
+    /// (reglages.json, comme Optimiser) avant de l'appliquer, pour pouvoir le remettre.
+    pub(crate) annulable: Option<(&'static str, Vec<crate::optimiser::Geste>)>,
 }
 
 impl Element {
     // macOS : pas de réglage du système à remettre (le compteur de Metal dit comment l'enlever).
     #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub(crate) fn annulable(mut self, id: &'static str, avant: Vec<annulation::Valeur>) -> Element {
-        self.annulable = Some(annulation::Annulable { id, avant });
+    pub(crate) fn annulable(mut self, id: &'static str, gestes: Vec<crate::optimiser::Geste>) -> Element {
+        self.annulable = Some((id, gestes));
         self
     }
+}
+
+pub(crate) use annulation::Avant as NoteDAvant;
+/// Les notes de Gaming d'avant (jeux.json), à reprendre dans reglages.json.
+pub(crate) use annulation::Notes as NotesDAvant;
+
+/// Les notes de Gaming d'avant de ce dossier ; `None` sans jeux.json.
+pub(crate) fn notes_d_avant(dossier: &std::path::Path) -> Option<NotesDAvant> {
+    annulation::lire(dossier)
+}
+
+/// Garde dans jeux.json ce qui ne s'est pas repris (rien : le fichier part).
+pub(crate) fn garder_notes_d_avant(dossier: &std::path::Path, reste: &NotesDAvant) {
+    annulation::garder(dossier, reste);
+}
+
+/// Une note de Gaming d'avant dans la forme d'Optimiser.
+pub(crate) fn convertir_note(
+    id: &str,
+    valeurs: &[annulation::Valeur],
+) -> Option<Vec<(crate::optimiser::Geste, Option<String>)>> {
+    annulation::convertir(id, valeurs)
 }
 
 pub(crate) fn element(
@@ -136,9 +159,25 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
     let mut commandes = Vec::new();
     let mut a_noter = Vec::new();
     for (el, _) in liste.iter().zip(&voulu).filter(|(el, v)| **v && el.fait != Some(true)) {
-        a_noter.extend(el.annulable.as_ref().map(|a| (a, el.titre.as_str())));
         for l in presentation(el) {
             println!("{l}");
+        }
+        // Relevé avant de demander : ce qui ne pourra pas se remettre est dit avant d'être lancé.
+        if let Some((id, gestes)) = &el.annulable {
+            let id = format!("{}{id}", crate::optimiser::annulables::JEUX);
+            match crate::optimiser::annulables::relever(id, &el.titre, gestes) {
+                Ok(r) => a_noter.push(r),
+                Err(e) => afficher_aligne(
+                    "  ⚠ ",
+                    &trf!(
+                        "Ne pourra pas se remettre comme avant : {}.",
+                        "Cannot be put back as before: {}.",
+                        e.texte()
+                    ),
+                    4,
+                    "",
+                ),
+            }
         }
         if let Some(lien) = el.lien {
             trp!(
@@ -164,15 +203,10 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
         return;
     }
     // Sans valeurs d'avant notées, un réglage ne pourrait plus se remettre exactement : rien n'est changé.
-    if !a_noter.is_empty() {
-        let mut notes = annulation::charger();
-        for (a, titre) in &a_noter {
-            notes.noter(a, titre);
-        }
-        if !annulation::sauver(&notes) {
-            trp!("  Rien n'a été changé.", "  Nothing was changed.");
-            return;
-        }
+    let notes: Vec<&crate::optimiser::annulables::Releve> = a_noter.iter().collect();
+    if !notes.is_empty() && !crate::optimiser::annulables::noter(&notes) {
+        trp!("  Rien n'a été changé.", "  Nothing was changed.");
+        return;
     }
     if machine::appliquer(&commandes) {
         let fait = trf!(
@@ -193,7 +227,7 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
 /// liste, ouverte directement.)
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), note: Option<String>) -> Option<String> {
-    let notes = annulation::charger().reglages.len();
+    let notes = reglages_notes();
     let mut lignes = vec![
         Ligne::Texte(String::new()),
         Ligne::Texte(ligne_titre("Gaming")),
@@ -226,96 +260,11 @@ pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), no
     Some(choix.trim().to_string()).filter(|c| c == "1" || c == "2" || (c == "3" && notes > 0))
 }
 
-/// Remet comme avant les réglages pour jouer appliqués par Vanguard : ceux cochés reprennent leurs valeurs notées
-/// (`commandes`), puis ne perdent leur note que si `relire` les retrouve en place.
+/// Remet comme avant les réglages pour jouer appliqués par Vanguard (choix 3 du menu), par le mécanisme d'Optimiser :
+/// ceux cochés reprennent leurs valeurs notées, puis ne perdent leur note que si elles sont relues en place.
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn remettre(
-    commandes: impl Fn(&str, &[annulation::Valeur]) -> Vec<String>,
-    relire: impl Fn(&str, &[annulation::Valeur]) -> Vec<annulation::Valeur>,
-) {
-    let mut notes = annulation::charger();
-    let entete = vec![
-        String::new(),
-        ligne_titre(tr!(
-            "Remettre les réglages comme avant",
-            "Put the settings back as before"
-        )),
-        trf!(
-            "  {GRIS}Les valeurs notées avant que Vanguard les change.{RESET}",
-            "  {GRIS}The values noted before Vanguard changed them.{RESET}"
-        ),
-        String::new(),
-    ];
-    let liste: Vec<(&String, &annulation::Avant)> = notes.reglages.iter().collect();
-    let cases: Vec<Case> = liste
-        .iter()
-        .map(|(_, a)| Case {
-            texte: a.titre.clone(),
-            precision: trf!("réglé le {}", "set on {}", a.date),
-            detail: String::new(),
-            cochee: false,
-            recommandee: true,
-            fixe: false,
-        })
-        .collect();
-    let Some(voulu) = cocher(&entete, &cases) else {
-        return;
-    };
-    // Un correctif par réglage : un réglage qui ne revient pas (module encore utilisé) n'empêche pas les autres.
-    let mut a_lancer: Vec<Vec<String>> = Vec::new();
-    let mut choisis = Vec::new();
-    for ((id, a), _) in liste.iter().zip(&voulu).filter(|(_, v)| **v) {
-        println!("\n  {GRAS}{}{RESET}", a.titre);
-        let c = commandes(id, &a.valeurs);
-        for l in &c {
-            println!("    {GRIS}{}{RESET}", crate::ui::commande_affichable(l));
-        }
-        a_lancer.push(c);
-        choisis.push((*id).clone());
-    }
-    if a_lancer.iter().all(Vec::is_empty) || !demander(tr!("\n  Remettre ? [o/N] : ", "\n  Put back? [y/N]: ")).oui() {
-        trp!("  Rien n'a été changé.", "  Nothing was changed.");
-        return;
-    }
-    let mut point = Vec::new();
-    if !avec_restauration(&mut point) {
-        trp!("  Annulé.", "  Cancelled.");
-        return;
-    }
-    if !point.is_empty() {
-        a_lancer.insert(0, point);
-    }
-    machine::appliquer_chacune(&a_lancer);
-    // Seuls les réglages choisis sont relus : les autres gardent leur note telle quelle.
-    let mut a_relire = annulation::Notes::default();
-    for id in &choisis {
-        if let Some(a) = notes.reglages.remove(id) {
-            a_relire.reglages.insert(id.clone(), a);
-        }
-    }
-    let titres: std::collections::BTreeMap<String, String> = a_relire
-        .reglages
-        .iter()
-        .map(|(id, a)| (id.clone(), a.titre.clone()))
-        .collect();
-    let remis = annulation::retirer_remis(&mut a_relire, relire);
-    for (id, a) in &a_relire.reglages {
-        afficher_aligne(
-            "  ✖ ",
-            &trf!(
-                "{} : pas tout à fait revenu (programme encore ouvert, ou redémarrage nécessaire). La note reste pour réessayer.",
-                "{}: not fully back (program still open, or restart needed). The note stays so you can try again.",
-                a.titre
-            ),
-            4,
-            "",
-        );
-        notes.reglages.insert(id.clone(), a.clone());
-    }
-    for id in &remis {
-        println!("  {VERT}✔{RESET} {}", titres[id]);
-    }
-    annulation::sauver(&notes);
+pub(crate) fn remettre() {
+    crate::optimiser::annulables::remettre_jeux();
 }
 
 /// Le nombre de réglages pour jouer changés par Vanguard, à remettre comme avant (choix 3 du menu). macOS n'a pas
@@ -324,7 +273,7 @@ pub(crate) fn reglages_notes() -> usize {
     if cfg!(target_os = "macos") {
         0
     } else {
-        annulation::charger().reglages.len()
+        crate::optimiser::annulables::nombre(crate::optimiser::annulables::Origine::Jeux)
     }
 }
 

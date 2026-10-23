@@ -622,7 +622,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard traces [dossier]` | collecter les traces après une infection, avant de nettoyer : processus, connexions, démarrage, comptes, journaux, fichiers récents, dans un dossier daté avec leurs empreintes SHA-256, et la chronologie de l'incident (CHRONOLOGIE.txt) ; lecture seule |
 | `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
-| `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat |
+| `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat ; une correction marquée « annulable » s'y annule, puis l'état d'avant est relu |
 | `vanguard parametres [réglage valeur]` | paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, protection en temps réel (`temps-reel non --pendant 1h\|4h`, ou jusqu'à reprise), surveillance, entretien du mois, alertes apprises, blocage, restrictions des extensions, clé abuse.ch (masquée) ; la valeur d'avant est montrée pour revenir |
 | `vanguard blocage [chercher\|annuler\|auto\|clic\|catégorie mode]` | blocage des menaces : « Bloquer » d'un clic pour chaque menace (geste montré, noté, annulable) ; protection active, après un accord, qui bloque toute seule ce qui ne fait aucun doute (empreinte de MalwareBazaar, outil d'attaque connu, serveur de commande) |
 | `vanguard a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
@@ -648,7 +648,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard cameras` | caméras cachées sur le réseau (location, chez quelqu'un) |
 | `vanguard objets` | routeur et objets connectés d'après le dernier scan gardé : modèle du routeur, caméras, imprimantes, NAS… et leur mot de passe d'origine (rien n'est sondé) |
 | `vanguard dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
-| `vanguard optimiser [recommandes\|confidentialite\|performance\|confort\|annuler]` | les réglages d'Optimiser, chacun montré, accepté et annulable exactement ; `annuler` remet tout comme avant ; sans argument, le menu Optimiser |
+| `vanguard optimiser [recommandes\|confidentialite\|performance\|confort\|annuler]` | les réglages d'Optimiser, chacun montré, accepté et annulable exactement ; `annuler` remet tout comme avant (corrections du bilan, Optimiser, Gaming, blocages, mode Wi-Fi public) ; sans argument, le menu Optimiser |
 | `vanguard wifi-public [on\|off\|portail]` | mode Wi-Fi public (café, hôtel, aéroport) : entrées fermées, partage et annonce du nom coupés, DNS protecteur, après accord ; `off` remet tout exactement, `portail` rouvre la page de connexion du réseau |
 | `vanguard appris` | ce que Vanguard a appris : les habitudes et les choix notés, et les oublier |
 | `vanguard motdepasse` | mots de passe fuités |

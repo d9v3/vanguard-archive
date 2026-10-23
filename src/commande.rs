@@ -799,11 +799,10 @@ mod tests_sh_chaine {
             "constante : la commande qui vide le cache DNS, choisie à la compilation",
         ),
         (
-            "gaming/linux.rs",
-            "nom",
-            "fichier_de_vanguard : liste blanche de chemins écrits par Vanguard",
+            "optimiser/linux.rs",
+            "suite",
+            "la commande `apres` d'un fichier de la liste fermée POSES, écrite dans le code",
         ),
-        ("gaming/linux.rs", "n", "chiffres seulement, vérifié juste avant"),
         (
             "machine/linux/durcissement.rs",
             "lignes",

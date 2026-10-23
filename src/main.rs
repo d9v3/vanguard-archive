@@ -4,6 +4,7 @@
 //! Lancé sans argument, affiche un menu.
 
 mod a_laisser;
+mod annulation;
 mod apprentissage;
 mod archives;
 mod audit;

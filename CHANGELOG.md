@@ -9,6 +9,24 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Les corrections du bilan s'annulent, une par une.** Avant chaque correction (Linux, Windows, macOS), Vanguard
+  relève l'état d'avant de ce qu'elle change (fichier de sysctl ou de sshd posé par Vanguard, réglages du noyau,
+  service, heure réseau, droits d'un fichier personnel, valeur du registre, préférence) et le note, scellé, dans
+  reglages.json, comme Optimiser ; chaque valeur est relue sur une liste fermée avant d'être remise en
+  administrateur. « Ce que Vanguard a changé » annule une correction marquée « annulable », puis relit l'état :
+  revenu, ou pas (et pourquoi). Une correction dont l'état d'avant ne se relève pas est dite « non annulable »
+  avant d'être appliquée ; celle qui rallume une protection (pare-feu, antivirus, BitLocker, UAC, SELinux,
+  Gatekeeper) ne se défait jamais. « Tout remettre comme avant » défait maintenant le bilan, Optimiser, Gaming, les
+  blocages et le mode Wi-Fi public, du plus récent au plus ancien, en une demande administrateur. Les réglages de
+  Gaming passent par le même mécanisme : leurs notes de jeux.json, qui n'était pas scellé, sont reprises sans perte.
+- **Annuler ne rouvre jamais ce qu'une correction a fermé.** Une note des fichiers de sysctl et de sshd que
+  Vanguard pose n'est remise que si elle porte les valeurs sûres qu'il y écrit (« ptrace_scope = 0 »,
+  « PermitRootLogin yes » ou un algorithme faible ajouté sont refusés), et leur contenu est montré avant la question ;
+  une note qui viserait l'UAC est refusée sous Windows. jeux.json n'est repris qu'une fois, jamais par-dessus un
+  reglages.json adopté. Les corrections d'un même « [t]out appliquer » qui touchent le même fichier partagent une
+  note : en annuler une les marque toutes défaites. Deux notes sur la même cible défaites ensemble sont toutes deux
+  remises, sans faux ✖. Un service activé mais arrêté est dit non annulable plutôt que faussement remis, et les
+  droits de ~/.ssh corrigés s'annulent.
 - **Un problème reconnu à sa règle et à son objet, plus à son texte traduit.** Les ports ouverts, les lancements
   automatiques suspects, les extensions de navigateur, les comptes oubliés ou ajoutés aux administrateurs, les
   logiciels espions, la prise de contrôle à distance, les logiciels périmés et le carnet de la clé VANGUARD portent

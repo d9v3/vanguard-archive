@@ -584,7 +584,7 @@ Each menu entry is also a command.
 | `vanguard evidence [folder]` | collect the traces after an infection, before cleaning up: processes, connections, startup, accounts, logs, recent files, in a dated folder with their SHA-256 fingerprints, and the incident timeline (CHRONOLOGIE.txt); read-only |
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal can be reverted exactly |
-| `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
+| `vanguard changes` | what Vanguard changed: each fix run here, its date and its result; a fix marked “undoable” is undone there, then the previous state is read back |
 | `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, real-time protection (`real-time no --for 1h\|4h`, or until turned back on), monitoring, monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
 | `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks clear-cut threats by itself (MalwareBazaar fingerprint, known attack tool, command server) |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
@@ -610,7 +610,7 @@ Each menu entry is also a command.
 | `vanguard cameras` | hidden cameras on the network (rental, someone else's place) |
 | `vanguard iot` | router and connected devices from the last scan kept: the router's model, cameras, printers, NAS… and their default password (nothing is probed) |
 | `vanguard fast-dns` | fastest DNS, measured here and undoable; a DNS that protects you is kept |
-| `vanguard optimize [recommended\|privacy\|performance\|comfort\|undo]` | the Optimize settings, each shown, accepted and exactly undoable; `undo` puts everything back as it was; no argument: the Optimize menu |
+| `vanguard optimize [recommended\|privacy\|performance\|comfort\|undo]` | the Optimize settings, each shown, accepted and exactly undoable; `undo` puts everything back as it was (check-up fixes, Optimize, Gaming, blocks, public Wi-Fi mode); no argument: the Optimize menu |
 | `vanguard public-wifi [on\|off\|portal]` | public Wi-Fi mode (café, hotel, airport): incoming connections closed, sharing and name announcement off, protective DNS, after your consent; `off` puts everything back exactly, `portal` reopens the network's sign-in page |
 | `vanguard learned` | what Vanguard has learned: the habits and choices recorded, and forgetting them |
 | `vanguard password` | leaked passwords |

