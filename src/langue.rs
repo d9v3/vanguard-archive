@@ -188,6 +188,7 @@ fn categorie_en(nom: &str) -> Option<&'static str> {
         "Clé USB" => "USB key",
         "Clés SSH" => "SSH keys",
         "Durcissement" => "Hardening",
+        "Autodiagnostic" => "Self-test",
         "Comptes" => "Accounts",
         "Extensions" => "Browser extensions",
         "Failles connues" => "Known flaws",

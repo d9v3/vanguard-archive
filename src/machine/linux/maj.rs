@@ -1151,7 +1151,7 @@ fn paquets_etrangers() -> Option<Vec<String>> {
 }
 
 /// La lecture native ; `None` dès qu'un dépôt configuré manque ou ne se lit pas.
-fn etrangers_lus() -> Option<Vec<String>> {
+pub(super) fn etrangers_lus() -> Option<Vec<String>> {
     let depots = depots_configures(&std::fs::read_to_string("/etc/pacman.conf").ok()?);
     if depots.is_empty() {
         return None;
@@ -1498,13 +1498,7 @@ mod tests {
     /// est possible (aucune base en xz) et que pacman est là.
     #[test]
     fn etrangers_comme_pacman_qm() {
-        let Some(natifs) = etrangers_lus() else {
-            return crate::essais::saute("paquets étrangers illisibles en Rust");
-        };
-        let Some(selon_pacman) = etrangers_selon_pacman() else {
-            return crate::essais::saute("pacman absent");
-        };
-        assert_eq!(natifs, selon_pacman);
+        crate::autotest::croisees::essayer("AUT-LNX-003");
     }
 
     use super::*;

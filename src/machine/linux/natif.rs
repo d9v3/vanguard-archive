@@ -1611,19 +1611,11 @@ mod tests {
 
     #[test]
     fn comme_pacman_q() {
-        let Some(sortie) = commande("pacman", &["-Q"]) else {
+        // La liste entière : la même comparaison que l'autotest (machine::linux::croisees).
+        crate::autotest::croisees::essayer("AUT-LNX-001");
+        if commande("pacman", &["-V"]).is_none() {
             return crate::essais::saute("pacman absent");
-        };
-        let attendu: Vec<(String, String)> = sortie
-            .lines()
-            .filter_map(|l| l.split_once(' '))
-            .map(|(n, v)| (n.to_string(), v.to_string()))
-            .collect();
-        let mut natif = paquets_pacman().unwrap();
-        let mut attendu = attendu;
-        natif.sort();
-        attendu.sort();
-        assert_eq!(natif, attendu);
+        }
         // Le propriétaire de deux fichiers sûrs, et les champs d'un paquet.
         if let Some(sortie) = commande("pacman", &["-Qoq", "/usr/bin/pacman", "/etc/pacman.conf"]) {
             let p = proprietaire_pacman(&[Path::new("/usr/bin/pacman"), Path::new("/etc/pacman.conf")]).unwrap();
@@ -1639,18 +1631,7 @@ mod tests {
 
     #[test]
     fn comme_dpkg_query() {
-        let Some(sortie) = commande("dpkg-query", &["-W", "-f=${db:Status-Status} ${Package} ${Version}\n"]) else {
-            return crate::essais::saute("dpkg-query absent");
-        };
-        let mut attendu: Vec<(String, String)> = sortie
-            .lines()
-            .filter_map(|l| l.strip_prefix("installed "))
-            .filter_map(|l| l.split_once(' '))
-            .map(|(n, v)| (n.to_string(), v.to_string()))
-            .collect();
-        attendu.sort();
-        attendu.dedup();
-        assert_eq!(paquets_dpkg().unwrap(), attendu);
+        crate::autotest::croisees::essayer("AUT-LNX-002");
         if let Some(sortie) = commande("dpkg", &["--print-foreign-architectures"]) {
             let natif = architectures_dpkg().unwrap_or_default();
             for a in sortie.split_whitespace() {
@@ -1716,14 +1697,12 @@ mod tests {
 
     #[test]
     fn comme_id_ng() {
+        crate::autotest::croisees::essayer("AUT-LNX-005");
         let Some(sortie) = commande("id", &["-nG"]) else {
             return crate::essais::saute("id absent");
         };
-        let attendu: HashSet<&str> = sortie.split_whitespace().collect();
-        let natif = groupes().unwrap();
-        assert_eq!(natif.iter().map(String::as_str).collect::<HashSet<_>>(), attendu);
         assert_eq!(
-            natif.first().map(String::as_str),
+            groupes().unwrap().first().map(String::as_str),
             sortie.split_whitespace().next(),
             "le principal d'abord"
         );
@@ -1731,30 +1710,20 @@ mod tests {
 
     #[test]
     fn comme_systemctl_is_enabled() {
-        for utilisateur in [false, true] {
-            let mut args = vec![
+        crate::autotest::croisees::essayer("AUT-LNX-004");
+        // La lecture croisée ne regarde pas si l'unité existe : le test, lui, confronte unite_existe au vrai
+        // système, sans quoi seul un dossier inventé le vérifierait.
+        if let Some(s) = commande(
+            "systemctl",
+            &[
                 "list-unit-files",
                 "--no-legend",
                 "--plain",
                 "--state=enabled,disabled,masked",
-            ];
-            if utilisateur {
-                args.insert(0, "--user");
-            }
-            let Some(sortie) = commande("systemctl", &args) else {
-                continue;
-            };
-            for ligne in sortie.lines() {
-                let mut c = ligne.split_whitespace();
-                let (Some(unite), Some(etat)) = (c.next(), c.next()) else {
-                    continue;
-                };
-                assert_eq!(
-                    unite_activee(unite, utilisateur),
-                    Some(etat == "enabled"),
-                    "{unite} {etat} (utilisateur : {utilisateur})"
-                );
-                assert!(unite_existe(unite) || utilisateur, "{unite}");
+            ],
+        ) {
+            for u in s.lines().filter_map(|l| l.split_whitespace().next()) {
+                assert!(unite_existe(u), "{u}");
             }
         }
     }

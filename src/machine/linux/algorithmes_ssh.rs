@@ -419,7 +419,7 @@ fn version_sshd() -> Option<(u32, u32)> {
 }
 
 /// La version du paquet d'OpenSSH dans la base de pacman, sinon de dpkg.
-fn version_du_paquet() -> Option<(u32, u32)> {
+pub(super) fn version_du_paquet() -> Option<(u32, u32)> {
     let pacman = || Some(natif::desc_pacman("openssh")?.get("VERSION")?.first()?.clone());
     let dpkg = || {
         let paquets = natif::paquets_dpkg()?;
@@ -439,7 +439,7 @@ fn version_de_paquet(version: &str) -> Option<(u32, u32)> {
 /// La version écrite dans le programme sshd (« OpenSSH_9.6p1 », suivie d'un zéro ou d'une espace). Il y garde
 /// aussi des motifs de compatibilité pour reconnaître les vieux clients (« OpenSSH_2.*,OpenSSH_3.0* ») : ceux-là
 /// finissent par « * » ou « , » et ne comptent pas ; parmi les vraies, la plus haute.
-fn version_dans_le_programme(octets: &[u8]) -> Option<(u32, u32)> {
+pub(super) fn version_dans_le_programme(octets: &[u8]) -> Option<(u32, u32)> {
     const MOTIF: &[u8] = b"OpenSSH_";
     octets
         .windows(MOTIF.len())
@@ -494,25 +494,7 @@ mod tests {
     /// Sur cet ordinateur, la version lue sans lancer sshd est celle que « sshd -V » écrit, quand il est là.
     #[test]
     fn version_comme_sshd() {
-        let Some(sshd) = ["/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"]
-            .into_iter()
-            .find(|p| Path::new(p).exists())
-        else {
-            return crate::essais::saute("sshd absent");
-        };
-        let Some(attendue) = crate::commande::lancer(Command::new(sshd).arg("-V"), 5)
-            .and_then(|r| version_openssh(&r.erreurs).or_else(|| version_openssh(&r.sortie)))
-        else {
-            return crate::essais::saute("version de sshd illisible");
-        };
-        if let Some(v) = version_du_paquet() {
-            assert_eq!(v, attendue, "paquet");
-        }
-        assert_eq!(
-            version_dans_le_programme(&std::fs::read(sshd).unwrap()),
-            Some(attendue),
-            "programme"
-        );
+        crate::autotest::croisees::essayer("AUT-LNX-009");
     }
 
     /// « sshd -T » d'un OpenSSH 9.6 réglé par défaut (lignes des algorithmes seulement).

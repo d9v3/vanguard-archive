@@ -78,7 +78,6 @@ impl Etat {
 /// Une combinaison que les constructeurs ne font jamais : non vérifié avec un niveau élevé ou critique (une alerte
 /// qu'on ne peut pas prouver ne crie pas plus fort qu'un « moyen »), sain avec une correction, une précision qui
 /// contredit `verifie`.
-#[cfg(test)]
 pub(crate) fn coherent(probleme: Option<Niveau>, verifie: bool, correctif: bool, precision: &Precision) -> bool {
     let trop_fort = !verifie && probleme.is_some_and(|n| n >= Niveau::Eleve);
     let sain_corrige = verifie && probleme.is_none() && correctif;

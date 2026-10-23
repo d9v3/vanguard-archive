@@ -35,6 +35,9 @@ struct Fichier {
     /// Ne plus télécharger les fichiers des dernières versions des logiciels (oui par défaut).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     sans_versions: bool,
+    /// Ne plus faire l'autodiagnostic de la semaine avec la surveillance (fait par défaut).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    sans_autotest: bool,
 }
 
 /// Au-delà, ce n'est pas le fichier de Vanguard : il n'est pas lu (le processus élevé de Windows le lit aussi).
@@ -90,6 +93,9 @@ pub(crate) fn emojis() -> Option<String> {
 
 /// Travailler sans Internet : VANGUARD_HORS_LIGNE posée (sauf à « 0 », « non »…), sinon le fichier.
 pub(crate) fn hors_ligne() -> bool {
+    if HORS_LIGNE_FORCE.load(std::sync::atomic::Ordering::SeqCst) {
+        return true;
+    }
     let variable = std::env::var_os("VANGUARD_HORS_LIGNE").map(|v| v.to_string_lossy().into_owned());
     hors_ligne_voulu(variable.as_deref(), au_demarrage().hors_ligne)
 }
@@ -100,6 +106,20 @@ pub(crate) fn hors_ligne() -> bool {
 #[cfg(any(windows, target_os = "macos", test))]
 pub(crate) fn versions_logiciels() -> bool {
     !charger_de(&fichier()).unwrap_or_default().sans_versions
+}
+
+/// L'autodiagnostic de la semaine, avec la surveillance ? Oui par défaut ; lu à chaque usage, comme les versions.
+pub(crate) fn autotest_hebdomadaire() -> bool {
+    !charger_de(&fichier()).unwrap_or_default().sans_autotest
+}
+
+/// Hors ligne forcé pour ce processus (`vanguard autotest` sans `--internet`) : poser `VANGUARD_HORS_LIGNE` par
+/// `set_var` n'est pas sûr dès qu'un fil existe (`unsafe` en Rust 2024), ce drapeau, si.
+static HORS_LIGNE_FORCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Travailler sans Internet jusqu'à la fin du processus, quoi que disent la variable et le fichier.
+pub(crate) fn forcer_hors_ligne() {
+    HORS_LIGNE_FORCE.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// La variable d'environnement l'emporte sur le fichier.
@@ -130,10 +150,11 @@ enum Reglage {
     Restrictions,
     CleAbuseCh,
     VersionsLogiciels,
+    Autotest,
 }
 
 impl Reglage {
-    const TOUS: [Reglage; 11] = [
+    const TOUS: [Reglage; 12] = [
         Reglage::Langue,
         Reglage::Emojis,
         Reglage::HorsLigne,
@@ -145,6 +166,7 @@ impl Reglage {
         Reglage::Restrictions,
         Reglage::CleAbuseCh,
         Reglage::VersionsLogiciels,
+        Reglage::Autotest,
     ];
 
     /// Le mot de la ligne de commande.
@@ -161,6 +183,7 @@ impl Reglage {
             Reglage::Restrictions => "restrictions",
             Reglage::CleAbuseCh => "abuse.ch",
             Reglage::VersionsLogiciels => tr!("versions-logiciels", "software-versions"),
+            Reglage::Autotest => "autotest",
         }
     }
 
@@ -188,6 +211,7 @@ impl Reglage {
             "versions-logiciels" | "software-versions" | "versions" | "perimes" | "périmés" | "outdated" => {
                 Some(Reglage::VersionsLogiciels)
             }
+            "autotest" | "self-test" | "autodiagnostic" | "selftest" => Some(Reglage::Autotest),
             _ => None,
         }
     }
@@ -205,6 +229,7 @@ impl Reglage {
             Reglage::Restrictions => tr!("Restrictions des extensions", "Extension restrictions"),
             Reglage::CleAbuseCh => tr!("Clé abuse.ch", "abuse.ch key"),
             Reglage::VersionsLogiciels => tr!("Versions des logiciels", "Software versions"),
+            Reglage::Autotest => tr!("Autodiagnostic de la semaine", "Weekly self-test"),
         }
     }
 
@@ -232,6 +257,7 @@ impl Reglage {
             | Reglage::Entretien
             | Reglage::Restrictions
             | Reglage::VersionsLogiciels
+            | Reglage::Autotest
                 if anglais =>
             {
                 &["yes", "no"]
@@ -241,7 +267,8 @@ impl Reglage {
             | Reglage::Surveillance
             | Reglage::Entretien
             | Reglage::Restrictions
-            | Reglage::VersionsLogiciels => &["oui", "non"],
+            | Reglage::VersionsLogiciels
+            | Reglage::Autotest => &["oui", "non"],
             Reglage::Appris | Reglage::Blocage | Reglage::CleAbuseCh => &[],
         }
     }
@@ -311,6 +338,12 @@ fn changer_dans(f: &mut Fichier, r: Reglage, valeur: &str) -> Result<(String, St
             f.sans_versions = !nouveau;
             Ok((avant, mot_oui_non(!f.sans_versions).to_string()))
         }
+        Reglage::Autotest => {
+            let nouveau = oui_non(valeur).ok_or(())?;
+            let avant = mot_oui_non(!f.sans_autotest).to_string();
+            f.sans_autotest = !nouveau;
+            Ok((avant, mot_oui_non(!f.sans_autotest).to_string()))
+        }
         _ => Err(()),
     }
 }
@@ -332,6 +365,7 @@ fn valeur(r: Reglage) -> String {
             .map_or_else(|| tr!("auto", "auto").to_string(), |e| mot_oui_non(e).to_string()),
         Reglage::HorsLigne => mot_oui_non(fichier.hors_ligne).to_string(),
         Reglage::VersionsLogiciels => mot_oui_non(!fichier.sans_versions).to_string(),
+        Reglage::Autotest => mot_oui_non(!fichier.sans_autotest).to_string(),
         Reglage::TempsReel => crate::protection::temps_reel::valeur(),
         Reglage::Surveillance => mot_oui_non(crate::reseau::surveillance::active()).to_string(),
         Reglage::Entretien => mot_oui_non(crate::entretien::active()).to_string(),
@@ -589,7 +623,7 @@ fn changer(r: Reglage, saisie: &str) -> bool {
         false
     };
     let (avant, apres) = match r {
-        Reglage::Langue | Reglage::Emojis | Reglage::HorsLigne | Reglage::VersionsLogiciels => {
+        Reglage::Langue | Reglage::Emojis | Reglage::HorsLigne | Reglage::VersionsLogiciels | Reglage::Autotest => {
             let chemin = fichier();
             let lu = charger_de(&chemin);
             let mut f = lu.clone().unwrap_or_default();
@@ -729,6 +763,10 @@ fn explication(r: Reglage) -> &'static str {
         Reglage::VersionsLogiciels => tr!(
             "Oui : Vanguard télécharge une fois par jour, en entier, les fichiers publics des dernières versions (sites des éditeurs, endoflife.date, Homebrew, avis de Mozilla) et le catalogue des failles exploitées de la CISA, les mêmes pour tous : la liste de tes logiciels ne sort jamais. Non : rien n'est téléchargé ; les copies déjà gardées servent encore 30 jours au plus (3 jours pour dire « à jour »), puis les logiciels pas à jour ne sont plus vérifiés, ce qui est dit.",
             "Yes: once a day, Vanguard downloads the public files of the latest versions in full (publishers' sites, endoflife.date, Homebrew, Mozilla advisories) and CISA's exploited flaws catalog, the same for everyone: the list of your software never leaves. No: nothing is downloaded; the copies already kept still serve for 30 days at most (3 days to say “up to date”), then outdated software is no longer checked, which is said."
+        ),
+        Reglage::Autotest => tr!(
+            "Oui : une fois par semaine, avec la surveillance, Vanguard compare ses propres lectures (logiciels installés, services, ports, comptes, pare-feu) à ce qu'en disent les outils du système, et note ce qui ralentit. Rien n'est changé, rien n'est envoyé, aucune notification ; reporté pendant un jeu. « vanguard autotest » le fait à la main.",
+            "Yes: once a week, with the monitoring, Vanguard compares its own readings (installed software, services, ports, accounts, firewall) with what the system's tools say, and notes what slows down. Nothing is changed, nothing is sent, no notification; postponed during a game. “vanguard autotest” does it by hand."
         ),
         Reglage::TempsReel => tr!(
             "Coupe d'un coup ce que Vanguard fait tout seul en continu : la surveillance horaire et la protection active du blocage, pendant 1 heure, 4 heures ou jusqu'à ce que tu la remettes. Les réglages de chacun ne changent pas : à la reprise, chacun retrouve son état d'avant. Jamais Defender, le pare-feu ni l'UAC.",
@@ -912,6 +950,7 @@ mod tests {
             emojis: Some(false),
             hors_ligne: true,
             sans_versions: true,
+            sans_autotest: true,
         };
         enregistrer_dans(&voulu, &f).unwrap();
         assert_eq!(charger_de(&f).unwrap(), voulu);
@@ -1053,10 +1092,11 @@ mod tests {
                 Reglage::Entretien => ("entretien", "check-up"),
                 Reglage::Appris => ("alertes apprises", "learned alerts"),
                 Reglage::Blocage => ("blocage", "blocking"),
-                // Onze réglages sur deux lignes de 70 colonnes : les plus longs y sont dits en un mot.
+                // Douze réglages sur deux lignes de 70 colonnes : les plus longs y sont dits en un mot.
                 Reglage::Restrictions => ("extensions", "extensions"),
                 Reglage::CleAbuseCh => ("clé abuse.ch", "abuse.ch key"),
                 Reglage::VersionsLogiciels => ("versions", "software versions"),
+                Reglage::Autotest => ("autotest", "self-test"),
             };
             // Sans tenir compte des majuscules : la phrase du guide commence par l'un d'eux.
             assert!(

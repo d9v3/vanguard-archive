@@ -262,8 +262,7 @@ impl Constat {
         Etat::de(self.probleme, self.verifie, &self.precision)
     }
 
-    /// Pas une combinaison impossible (`modele::etat::coherent`).
-    #[cfg(test)]
+    /// Pas une combinaison impossible (`modele::etat::coherent`) : un invariant vérifié par l'autotest.
     pub(crate) fn coherent(&self) -> bool {
         crate::modele::etat::coherent(self.probleme, self.verifie, self.correctif.is_some(), &self.precision)
     }
@@ -337,11 +336,23 @@ fn niveau_expose(pare_feu_actif: bool, niveau: Niveau) -> Niveau {
 pub(crate) type Verification<'a> = Box<dyn FnOnce() -> Vec<Constat> + Send + 'a>;
 
 /// Lance les vérifications en même temps (chacune attend surtout des commandes du système) et rend leurs constats
-/// dans l'ordre de la liste. Une vérification qui plante le dit, sans emporter les autres.
+/// dans l'ordre de la liste. Une vérification qui plante le dit, sans emporter les autres. La durée de chaque règle
+/// va au journal des mesures (`autotest::mesures`), qui voit ainsi une règle ralentir d'une semaine à l'autre.
 fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
+    let (constats, durees) = en_parallele_mesure(verifications);
+    crate::autotest::mesures::noter(&durees);
+    constats
+}
+
+/// `en_parallele`, avec la durée de chaque règle du registre (celles qui n'ont pas d'identifiant ne sont pas
+/// mesurées).
+fn en_parallele_mesure(
+    verifications: Vec<Verification<'_>>,
+) -> (Vec<Constat>, Vec<(&'static str, std::time::Duration)>) {
     // VANGUARD_CHRONO : chaque vérification dit son temps sur la sortie d'erreur, pour trouver ce qui ralentit le bilan.
     let chrono = std::env::var_os("VANGUARD_CHRONO").is_some();
-    std::thread::scope(|s| {
+    let mut durees = Vec::new();
+    let constats = std::thread::scope(|s| {
         let fils: Vec<_> = verifications
             .into_iter()
             .map(|v| {
@@ -367,10 +378,40 @@ fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
                         .map_or("(rien)", |c| if c.regle.is_empty() { c.categorie } else { c.regle });
                     eprintln!("chrono {i:>2} {:>6} ms  {quoi}", duree.as_millis());
                 }
+                if let Some(c) = constats.first().filter(|c| !c.regle.is_empty()) {
+                    durees.push((c.regle, duree));
+                }
                 constats
             })
             .collect()
-    })
+    });
+    (constats, durees)
+}
+
+/// Les règles de ce système que `garder` retient, lancées pour l'autotest sous garde et délai comme au bilan, en même
+/// temps ou une par une (des durées propres quand une régression est signalée) : leurs constats bruts (sans les
+/// alertes déclarées normales) et la durée de chacune. Rien n'est noté au journal des mesures : l'autotest les garde
+/// dans son résultat.
+pub(crate) fn essai_des_regles(
+    une_par_une: bool,
+    garder: impl Fn(&str) -> bool,
+) -> (Vec<Constat>, Vec<(&'static str, std::time::Duration)>) {
+    BILAN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let choisies: Vec<&'static regles::Regle> = regles::regles(regles::Os::actuel())
+        .into_iter()
+        .filter(|r| garder(r.id))
+        .collect();
+    if !une_par_une {
+        return en_parallele_mesure(choisies.into_iter().map(regles::verification).collect());
+    }
+    let mut constats = Vec::new();
+    let mut durees = Vec::new();
+    for r in choisies {
+        let debut = std::time::Instant::now();
+        constats.extend(regles::verification(r)());
+        durees.push((r.id, debut.elapsed()));
+    }
+    (constats, durees)
 }
 
 /// L'audit d'un système : les règles du registre, celles du système (le pare-feu en tête) puis les communes
@@ -1086,6 +1127,9 @@ pub fn auditer(bavard: bool) -> Audit {
     if crate::apprentissage::appliquer(&mut a.constats) > 0 {
         a.score = score(&a.constats);
     }
+    // Une règle dont la lecture croisée a divergé au dernier autotest : ses constats sains le disent (jamais ses
+    // problèmes), sans changer la note.
+    crate::autotest::annoter(&mut a.constats);
     // Vérifications impossibles : souvent une version de Windows ou une distribution que le code ne connaît pas.
     // Seulement à la demande : la surveillance horaire répéterait les mêmes lignes.
     if bavard {

@@ -369,6 +369,10 @@ fn ecrire_dans(
             "dossier d'un autre compte / another account's folder",
         ));
     }
+    // Pendant un autotest, seul son propre événement d'essai s'écrit (`autotest::lecture_seule`).
+    if crate::autotest::lecture_seule::active() && ev.as_ref().is_none_or(|e| !e.essai) {
+        return Err(crate::autotest::lecture_seule::refus());
+    }
     let _verrou = crate::socle::Verrou::prendre_nomme(dossier, VERROU);
     let rep = dossier.join(DOSSIER);
     std::fs::create_dir_all(&rep)?;

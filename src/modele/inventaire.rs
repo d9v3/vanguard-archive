@@ -79,6 +79,11 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     scelle(crate::modele::resultat::FICHIERS[0], "modele::resultat"),
     scelle(crate::modele::resultat::FICHIERS[1], "modele::resultat"),
     scelle(crate::modele::resultat::FICHIERS[2], "modele::resultat"),
+    scelle(crate::modele::resultat::FICHIERS[3], "modele::resultat"),
+    // L'autotest : la date du dernier (scellée, sinon un programme du compte repousserait l'hebdomadaire à jamais) et
+    // ses lectures contredites ; le journal des mesures, non scellé (il ne décide d'aucune alerte).
+    scelle(crate::autotest::DERNIER, "autotest"),
+    local(crate::autotest::mesures::MESURES, "autotest::mesures"),
     // La tête du journal des événements : retirer la fin du journal sans elle se voit.
     scelle(crate::modele::journal::TETE, "modele::journal"),
     local("sceaux.json", "sceau"),

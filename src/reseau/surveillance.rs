@@ -639,6 +639,7 @@ pub async fn surveiller() {
     let exemples = std::thread::spawn(crate::guide::renouveler_exemples);
     passe().await;
     let _ = exemples.join();
+    crate::autotest::attendre_hebdomadaire();
 }
 
 async fn passe() {
@@ -649,6 +650,9 @@ async fn passe() {
     }
     tableau::noter_passe();
     let machine = veiller_machine();
+    // L'autotest de la semaine (au plus une fois tous les 7 jours) reprend le bilan de cette passe, sans le relancer,
+    // dans un fil à part : la passe ne l'attend qu'à la fin.
+    crate::autotest::hebdomadaire_en_fond(&machine.constats);
     if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {
         alerter(
             Genre::Fichiers,

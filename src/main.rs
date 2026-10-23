@@ -8,6 +8,7 @@ mod annulation;
 mod apprentissage;
 mod archives;
 mod audit;
+mod autotest;
 #[cfg(test)]
 mod canaris;
 mod changements;
@@ -415,13 +416,13 @@ enum Commande {
     Conteneurs,
     /// Paramètres : tous les réglages de Vanguard (langue, emojis, travail sans Internet, protection en temps réel,
     /// surveillance, entretien, alertes apprises, blocage, restrictions des extensions, clé abuse.ch, versions des
-    /// logiciels). Sans argument : leur état ; avec un réglage et une valeur : le change, la valeur d'avant montrée
+    /// logiciels, autodiagnostic de la semaine). Sans argument : leur état ; avec un réglage et une valeur : le change, la valeur d'avant montrée
     /// pour revenir. « temps-reel non --pendant 1h|4h » coupe la protection en temps réel de Vanguard pour ce temps
     /// (sans --pendant : jusqu'à reprise), après accord ; jamais Defender, le pare-feu ni l'UAC.
     #[command(visible_alias = "settings")]
     Parametres {
         /// Un réglage (langue, emojis, sans-internet, temps-reel, surveillance, entretien, appris, blocage,
-        /// restrictions, abuse.ch, versions-logiciels) et sa valeur ; temps-reel non prend aussi --pendant 1h ou 4h.
+        /// restrictions, abuse.ch, versions-logiciels, autotest) et sa valeur ; temps-reel non prend aussi --pendant 1h ou 4h.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         quoi: Vec<String>,
     },
@@ -554,6 +555,25 @@ enum Commande {
     /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
     #[command(visible_alias = "rules")]
     Regles,
+    /// Autodiagnostic : Vanguard vérifie ses propres lectures sur cet ordinateur. Chaque règle du bilan sous garde et
+    /// délai, en lecture seule prouvée (empreintes avant et après), et ses lectures comparées à celles des outils du
+    /// système (pacman, systemctl, ss, PowerShell…). Rien n'est changé ; hors ligne sauf --internet ; un écart va au
+    /// journal des erreurs, sans aucune valeur de l'ordinateur. Code de sortie : 0 sain, 1 écart, 2 non vérifié.
+    #[command(visible_alias = "self-test")]
+    Autotest {
+        /// Le rapport en JSON, pour un script (sans aucune valeur lue sur l'ordinateur).
+        #[arg(long, conflicts_with = "detail")]
+        json: bool,
+        /// Laisser les règles qui en ont besoin aller sur Internet (mises à jour, versions des logiciels).
+        #[arg(long)]
+        internet: bool,
+        /// Montrer à l'écran les valeurs qui diffèrent (noms de paquets, d'unités, de comptes), ici seulement.
+        #[arg(long)]
+        detail: bool,
+        /// Les règles une par une, pour des durées sans les voisines (plus lent).
+        #[arg(long = "une-par-une", visible_alias = "one-by-one")]
+        une_par_une: bool,
+    },
     /// Collecter les traces après une infection, avant de nettoyer : processus, connexions, ce qui se lance tout seul,
     /// comptes, journaux des 7 derniers jours, fichiers récents et la chronologie de l'incident, dans un dossier daté
     /// (LISEZMOI, empreintes SHA-256). Lecture seule ; rien ne part sur Internet.
@@ -1951,7 +1971,7 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
     ("parametres", "Settings: all of Vanguard's settings (language, emojis, working without the Internet, real-time \
                     protection, monitoring, monthly check-up, learned alerts, blocking, extension restrictions, \
-                    abuse.ch key, software versions). No argument: their state; with a setting and a value: changes it, showing the \
+                    abuse.ch key, software versions, weekly self-test). No argument: their state; with a setting and a value: changes it, showing the \
                     previous value to go back. “real-time no --for 1h|4h” turns Vanguard's real-time protection off \
                     for that long (without --for: until turned back on), after your consent; never Defender, the \
                     firewall or UAC"),
@@ -2043,6 +2063,11 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("raccourci", "Shortcut on this computer: Vanguard copied here and started with one click (applications menu on \
                    Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
     ("regles", "The check rules declared for this system: stable identifier, subject, hardening references"),
+    ("autotest", "Self-test: Vanguard checks its own readings on this computer. Every check rule under a guard and a \
+                  time limit, read only and proven so (fingerprints before and after), and its readings compared with \
+                  those of the system's tools (pacman, systemctl, ss, PowerShell…). Nothing is changed; offline unless \
+                  --internet; a gap goes to the error log, without any value from the computer. Exit code: 0 sound, \
+                  1 gap, 2 not checked"),
     ("se-mettre-a-jour", "Update Vanguard on this computer: from a newer VANGUARD key, or from the latest version \
                           published on GitHub, signed by the author and checked; always after your consent, never to \
                           an older version"),
@@ -2127,6 +2152,10 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("courriel-suspect", "json", "The result as JSON, for a script: the examination on the computer only (neither \
                                   the online check nor the attachments scan, said not checked)"),
     ("evenements", "incident", "One incident's thread: this event, what caused it and what it caused"),
+    ("autotest", "json", "The report as JSON, for a script (without any value read on the computer)"),
+    ("autotest", "internet", "Let the rules that need it go on the Internet (updates, software versions)"),
+    ("autotest", "detail", "Show on screen the values that differ (package, unit, account names), here only"),
+    ("autotest", "une_par_une", "The rules one by one, for timings without their neighbours (slower)"),
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),
     ("verifier-cle", "dossier", "A folder of the drive or disk (default: chosen among the plugged-in disks)"),
@@ -2139,7 +2168,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
                                          with all your rights); off: back on. The extensions folder must stay yours \
                                          alone"),
     ("parametres", "quoi", "A setting (language, emojis, offline, real-time, monitoring, maintenance, learned, \
-                              blocking, restrictions, abuse.ch, software-versions) and its value; real-time no also \
+                              blocking, restrictions, abuse.ch, software-versions, autotest) and its value; real-time no also \
                               takes --for 1h or 4h"),
     ("blocage", "quoi", "“search”, “undo”, “status”, “auto” or “click” (active protection), or a category (programs, \
                            connections, startup, agents) followed by a mode (off, click, auto)"),
@@ -2415,6 +2444,21 @@ async fn main() {
         Some(Commande::SeMettreAJour) => mise_a_jour::commande(),
         Some(Commande::Desinstaller { liste }) => desinstaller::commande(liste),
         Some(Commande::Regles) => machine::regles::afficher(),
+        Some(Commande::Autotest {
+            json,
+            internet,
+            detail,
+            une_par_une,
+        }) => {
+            let code = autotest::executer(&autotest::Options {
+                json,
+                internet,
+                detail,
+                une_par_une,
+            });
+            // La sortie du processus arrête aussi une règle restée bloquée au-delà de son délai.
+            std::process::exit(code);
+        }
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
         Some(Commande::Proche) => depanner::executer("proche"),
         Some(Commande::Plugin { quoi }) => {
@@ -2663,6 +2707,10 @@ mod tests_menu {
         (
             "traces",
             "dans le menu, un parcours de Dépanner pas à pas (après une infection)",
+        ),
+        (
+            "autotest",
+            "pour vérifier Vanguard lui-même ; le diagnostic dit le dernier, la surveillance le refait chaque semaine",
         ),
     ];
 

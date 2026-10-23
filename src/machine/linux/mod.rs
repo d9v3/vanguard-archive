@@ -13,6 +13,7 @@ use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
 mod algorithmes_ssh;
+mod croisees;
 pub(crate) mod dbus;
 pub(crate) mod dconf;
 pub(crate) mod dissimulation;
@@ -2107,20 +2108,7 @@ mod tests {
     /// Sur cet ordinateur, la racine se dit chiffrée ou non comme lsblk le dit, quand findmnt et lsblk sont là.
     #[test]
     fn racine_chiffree_comme_lsblk() {
-        let Some(chiffree) = natif::racine()
-            .filter(|(s, _)| s.starts_with("/dev/"))
-            .and_then(|(s, _)| natif::chiffre(&s))
-        else {
-            return crate::essais::saute("chiffrement de la racine illisible");
-        };
-        let Some(source) = commande("findmnt", &["-no", "SOURCE", "/"]) else {
-            return crate::essais::saute("findmnt absent");
-        };
-        let peripherique = source.trim().split('[').next().unwrap_or_default().to_string();
-        let Some(chaine) = commande("lsblk", &["-nso", "TYPE", &peripherique]) else {
-            return crate::essais::saute("lsblk absent");
-        };
-        assert_eq!(chiffree, chaine.lines().any(|l| l.trim() == "crypt"));
+        crate::autotest::croisees::essayer("AUT-LNX-008");
     }
 
     #[test]

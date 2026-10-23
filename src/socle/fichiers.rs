@@ -20,6 +20,10 @@ pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: impl AsRef<[u8]
     // Un nom par écriture, pas seulement par processus : deux fils qui écrivent le même fichier en même temps se
     // volaient leur fichier temporaire, et le second renommage échouait (vu dans les tests sous Wine).
     static ECRITURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    // Pendant un autotest, aucune écriture d'état ne passe (une règle y apprendrait son « déjà vu »).
+    if crate::autotest::lecture_seule::refuse_fichier(chemin) {
+        return Err(crate::autotest::lecture_seule::refus());
+    }
     if let Some(d) = chemin.parent() {
         std::fs::create_dir_all(d)?;
     }
@@ -102,6 +106,10 @@ fn trop_gros(max: u64) -> std::io::Error {
 /// XDG_DATA_HOME du compte gardés), root écrivait sinon dans le dossier d'un compte, où un programme de ce compte
 /// prépare d'avance liens et fichiers.
 pub(crate) fn ecriture_sure(dossier: &std::path::Path) -> bool {
+    // Pendant un autotest, rien ne s'écrit (sauf ses propres fichiers, dans le fil qui les écrit).
+    if crate::autotest::lecture_seule::refuse_dossier() {
+        return false;
+    }
     // Les tests écrivent dans leurs dossiers jetables, même lancés en root dans `unshare -r` (verifier.sh), où /tmp
     // paraît à personne : la règle elle-même s'essaie par `ecriture_sure_pour`.
     if cfg!(test) {

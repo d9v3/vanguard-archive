@@ -86,7 +86,7 @@ const IPPROTO_UDP: u8 = 17;
 
 /// Les quatre listes (TCP et UDP, IPv4 et IPv6) ; `None` dès qu'une ne vient pas : mieux vaut alors /proc/net en
 /// entier qu'un mélange. Les groupes sont nommés d'après le dossier de cgroup2 qui porte leur numéro.
-fn par_netlink() -> Option<Vec<Ecoute>> {
+pub(super) fn par_netlink() -> Option<Vec<Ecoute>> {
     let mut prises = Vec::new();
     for (protocole, etat, udp) in [(IPPROTO_TCP, TCP_LISTEN, false), (IPPROTO_UDP, TCP_CLOSE, true)] {
         for famille in [AF_INET, AF_INET6] {
@@ -323,7 +323,7 @@ fn lire_proc_net(texte: &str, udp: bool) -> Vec<Ecoute> {
 /// Les lignes de `ss -H…lnpe` : « LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:* users:(("nom",pid=1,fd=5)) uid:974
 /// ino:11024 sk:3003 cgroup:/system.slice/systemd-resolved.service <-> ». « * » est l'adresse IPv6 nulle ouverte
 /// aussi à IPv4.
-fn lire_ss(sortie: &str, udp: bool) -> Vec<Ecoute> {
+pub(super) fn lire_ss(sortie: &str, udp: bool) -> Vec<Ecoute> {
     sortie
         .lines()
         .filter_map(|ligne| {
@@ -470,29 +470,6 @@ LISTEN 0 4096 [::1]:631 [::]:* ino:15003 sk:4001 cgroup:/system.slice/cups.servi
     /// se trouver dans l'une des deux lectures.
     #[test]
     fn prises_comme_ss() {
-        let Some(avant) = par_netlink() else {
-            return crate::essais::saute("netlink illisible");
-        };
-        let lancer = |o: &str| {
-            crate::commande::lancer(std::process::Command::new("ss").arg(o), 10)
-                .filter(|r| r.code == Some(0))
-                .map(|r| r.sortie)
-        };
-        let (Some(tcp), Some(udp)) = (lancer("-Htlnpe"), lancer("-Hulnpe")) else {
-            return crate::essais::saute("ss absent");
-        };
-        let apres = par_netlink().unwrap_or_default();
-        let natives: HashMap<u64, &Ecoute> = avant.iter().chain(&apres).map(|e| (e.inode, e)).collect();
-        let de_ss: Vec<Ecoute> = lire_ss(&tcp, false).into_iter().chain(lire_ss(&udp, true)).collect();
-        for e in &de_ss {
-            let n = natives
-                .get(&e.inode)
-                .unwrap_or_else(|| panic!("prise de ss absente de netlink : {e:?}"));
-            assert_eq!((n.udp, n.adresse, n.port), (e.udp, e.adresse, e.port), "{e:?}");
-            // Un ss trop ancien (ou un noyau d'avant 5.7) ne donne pas le groupe : rien à comparer.
-            if e.groupe.is_some() {
-                assert_eq!(n.groupe, e.groupe, "{e:?}");
-            }
-        }
+        crate::autotest::croisees::essayer("AUT-LNX-006");
     }
 }

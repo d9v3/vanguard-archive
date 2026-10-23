@@ -148,6 +148,23 @@ if [[ -n $ARBRE_OK ]]; then
   GRAINE=${JOUR//-/}
   etape proptest "$TRAVAIL/proptest.log" env PROPTEST_RNG_SEED="$GRAINE" PROPTEST_CASES=2000 cargo test -q
 
+  # ── 3 bis. L'autodiagnostic de la base sur cet ordinateur (lecture seule, hors ligne) : la première machine à voir un
+  # format changer (mise à jour d'Arch) est celle de l'auteur, la nuit même. Son --json ne porte aucune valeur (il peut
+  # partir à alerte.sh, donc à une IA en ligne) ; jamais --detail ici. 1 : écart, échec de l'étape ; 2 (rien de
+  # fautif, du non vérifié) : sautée, dite. ──
+  autotest_de_nuit() {
+    local code
+    cargo run -q -- autotest --json >"$TRAVAIL/autotest.json"
+    code=$?
+    if ((code == 2)); then
+      echo "autotest : rien de fautif, en partie non vérifié (voir autotest.json)"
+      return 77
+    fi
+    jq -r '.croisees[] | select(.verdict == "different") | "\(.id) \(.genre)"' "$TRAVAIL/autotest.json" 2>/dev/null
+    return "$code"
+  }
+  etape autotest "$TRAVAIL/autotest.log" autotest_de_nuit
+
   # ── 4. Fuzz : chaque cible, le corpus suivi avant et après (il grandit), les plantages comparés à ceux connus. ──
   if [[ -n $SANS_FUZZ ]]; then
     sauter fuzz "--sans-fuzz"
