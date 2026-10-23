@@ -1457,8 +1457,11 @@ fn wifi_public_sans_rien_changer() {
 #[test]
 fn signaler_en_json_sur_un_journal_d_essai() {
     let maison = maison_jetable();
+    // Le dossier de données de chaque système (comme les essais plus haut) : sous macOS, Library/Application Support.
     let donnees = if cfg!(windows) {
         maison.join("local")
+    } else if cfg!(target_os = "macos") {
+        maison.join("Library").join("Application Support")
     } else {
         maison.join("donnees")
     };
