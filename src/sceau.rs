@@ -185,7 +185,14 @@ fn verrou(dossier: &Path) -> Option<std::fs::File> {
     if !f.metadata().ok()?.file_type().is_file() {
         return None;
     }
-    let fin = Instant::now() + Duration::from_secs(2);
+    // Deux secondes pour le programme : deux Vanguard ne se disputent les sceaux que le temps d'une écriture. Les
+    // essais écrivent chaque fichier scellé vingt fois à la fois (sous Wine, chargé, deux secondes ne suffisaient pas).
+    let delai = if cfg!(test) {
+        Duration::from_secs(10)
+    } else {
+        Duration::from_secs(2)
+    };
+    let fin = Instant::now() + delai;
     loop {
         match f.try_lock() {
             Ok(()) => return Some(f),
