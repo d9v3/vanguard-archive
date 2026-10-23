@@ -123,6 +123,11 @@ pub(crate) struct Alerte {
     pub genre: String,
     pub titre: String,
     pub texte: String,
+    /// Ce dont parle l'alerte, stable et jamais traduit (« veilleur|… », « blocage|connexion:203.0.113.7 ») : on
+    /// peut la déclarer normale (`protection::normales`), et les traces d'incident relient par elle l'alerte, la
+    /// preuve et le blocage. Absente des alertes d'avant la 0.86 et de celles qui ne se reconnaissent pas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cle: Option<String>,
 }
 
 fn fichier_journal() -> PathBuf {
@@ -152,12 +157,18 @@ fn tronquer(texte: &str, max: usize) -> String {
 /// Ajoute une alerte au journal, au moment où la surveillance la notifie. Un échec d'écriture ne doit pas empêcher
 /// la notification : il va au journal des erreurs, en silence.
 pub(crate) fn noter_alerte(genre: Genre, titre: &str, texte: &str) {
+    noter_alerte_cle(genre, None, titre, texte);
+}
+
+/// Comme `noter_alerte`, avec la clé de ce dont parle l'alerte.
+pub(crate) fn noter_alerte_cle(genre: Genre, cle: Option<&str>, titre: &str, texte: &str) {
     let maintenant = chrono::Local::now().naive_local();
     let alerte = Alerte {
         date: maintenant.format(FORMAT_DATE).to_string(),
         genre: genre.nom().to_string(),
         titre: tronquer(titre, TITRE_MAX),
         texte: tronquer(texte, TEXTE_MAX),
+        cle: cle.map(|c| tronquer(c, TEXTE_MAX)),
     };
     if let Err(e) = ajouter(&fichier_journal(), alerte, maintenant) {
         crate::journal::erreur("journal des alertes", &e.to_string());
@@ -200,6 +211,12 @@ fn lire_journal(fichier: &Path) -> Vec<Alerte> {
     let Ok(texte) = std::fs::read_to_string(fichier) else {
         return Vec::new();
     };
+    alertes_du_texte(&texte)
+}
+
+/// Les alertes d'un journal déjà lu (les traces d'incident le lisent elles-mêmes, sans suivre de lien ni attendre
+/// sur un tube), textes rendus inoffensifs.
+pub(crate) fn alertes_du_texte(texte: &str) -> Vec<Alerte> {
     texte
         .trim_start_matches('\u{feff}')
         .lines()
@@ -211,6 +228,22 @@ fn lire_journal(fichier: &Path) -> Vec<Alerte> {
             ..a
         })
         .collect()
+}
+
+/// Les alertes du journal, de la plus ancienne à la plus récente, textes rendus inoffensifs : pour les traces
+/// d'incident et pour déclarer une alerte normale.
+pub(crate) fn alertes() -> Vec<Alerte> {
+    lire_journal(&fichier_journal())
+}
+
+/// Le genre d'une alerte du journal, tel qu'il s'affiche (« VEILLEUR », « BOTNET »).
+pub(crate) fn libelle_genre(nom: &str) -> &'static str {
+    Genre::de(nom).libelle()
+}
+
+/// Le nom stable d'un genre, tel que le journal le garde.
+pub(crate) fn nom_genre(g: Genre) -> &'static str {
+    g.nom()
 }
 
 /// Noté au début de chaque passe de la surveillance : le tableau dit quand elle a tourné pour la dernière fois.
@@ -751,6 +784,7 @@ mod tests {
             genre: genre.nom().into(),
             titre: titre.into(),
             texte: texte.into(),
+            cle: None,
         }
     }
 

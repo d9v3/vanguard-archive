@@ -402,6 +402,28 @@ impl Changement {
         })
     }
 
+    /// La valeur notée `v` a-t-elle une forme que ce changement peut écrire ? Elle est remise avec sudo (ou dans le
+    /// compte) : un ensemble fermé, ou une forme stricte, jamais un texte libre venu d'un fichier que tout programme
+    /// du compte peut réécrire.
+    pub fn valeur_admise(&self, v: Option<&str>) -> bool {
+        let Some(v) = v else {
+            // Absente (ligne, préférence, fichier) : se remet en retirant, rien d'autre.
+            return !matches!(self, Changement::Dns { .. });
+        };
+        match self {
+            Changement::Unite { .. } => ETATS_UNITE.contains(&v),
+            Changement::Fichier { .. } => matches!(v, "present" | "autre"),
+            Changement::Gnome { cible, defaut, .. } => v == *cible || v == *defaut || super::gvariant_simple(v),
+            Changement::Option { cible, defaut, .. } => v == *cible || v == *defaut || super::jeton_simple(v),
+            Changement::Dns { connexion, .. } => dns_admis(connexion, v),
+            Changement::Demarrage { entree, .. } => match entree {
+                // Le fichier d'autostart du compte, remis à l'octet près : il s'écrit sans droits, dans le compte.
+                Entree::Autostart(_) => v == "-" || (v.starts_with('+') && v.len() <= 64 << 10 && !v.contains('\0')),
+                Entree::Service(_) => ETATS_UNITE.contains(&v),
+            },
+        }
+    }
+
     /// La commande qui pose la valeur `v` d'un réglage de DNS (mode Wi-Fi public).
     pub fn commande_dns(&self, v: &str) -> Option<String> {
         matches!(self, Changement::Dns { .. })
@@ -552,6 +574,39 @@ impl Changement {
     fn admin(&self) -> bool {
         !matches!(self, Changement::Gnome { .. } | Changement::Demarrage { .. })
     }
+}
+
+/// Ce que `systemctl is-enabled` peut répondre : rien d'autre ne se note pour une unité.
+const ETATS_UNITE: [&str; 14] = [
+    "enabled",
+    "enabled-runtime",
+    "linked",
+    "linked-runtime",
+    "alias",
+    "masked",
+    "masked-runtime",
+    "static",
+    "indirect",
+    "disabled",
+    "generated",
+    "transient",
+    "bad",
+    "not-found",
+];
+
+/// Une valeur de DNS notée : « uuid\ndns4|oui-non|dns6|oui-non », pour cette connexion, des adresses IP seulement.
+fn dns_admis(connexion: &str, v: &str) -> bool {
+    let Some((id, reste)) = v.split_once('\n') else {
+        return false;
+    };
+    let [dns4, ignore4, dns6, ignore6] = reste.split('|').collect::<Vec<_>>()[..] else {
+        return false;
+    };
+    id == connexion
+        && uuid_valide(id)
+        && super::adresses_ip(dns4)
+        && super::adresses_ip(dns6)
+        && [ignore4, ignore6].iter().all(|o| matches!(*o, "yes" | "no" | ""))
 }
 
 fn etat_unite(v: &str) -> &str {
@@ -1060,6 +1115,60 @@ mod tests {
             "{texte}"
         );
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// Les valeurs notées remises avec sudo : seulement des formes fermées ou strictes. Une note réécrite par un
+    /// programme du compte (une commande glissée dans une ligne, un DNS qui n'est pas une adresse, un état inventé)
+    /// est refusée.
+    #[test]
+    fn valeurs_notees_validees() {
+        let option = Changement::Option {
+            fichier: "/etc/default/apport",
+            cle: "enabled",
+            cible: "0",
+            defaut: "1",
+        };
+        for bonne in [None, Some("0"), Some("1"), Some("\"no\""), Some("auto")] {
+            assert!(option.valeur_admise(bonne), "{bonne:?}");
+        }
+        for mauvaise in ["1\nLD_PRELOAD=/tmp/x.so", "$(id)", "1; rm -rf ~", "a b", "\"no"] {
+            assert!(!option.valeur_admise(Some(mauvaise)), "{mauvaise:?}");
+        }
+        let unite = Changement::Unite {
+            nom: "fstrim.timer",
+            cible: "enabled",
+            defaut: "disabled",
+        };
+        assert!(unite.valeur_admise(Some("static")) && unite.valeur_admise(Some("masked")));
+        assert!(!unite.valeur_admise(Some("enabled --now evil.service")));
+        let gnome = Changement::Gnome {
+            schema: "org.gnome.desktop.privacy",
+            cle: "report-technical-problems",
+            cible: "false",
+            defaut: "true",
+        };
+        for bonne in ["true", "uint32 5", "-3", "'default'"] {
+            assert!(gnome.valeur_admise(Some(bonne)), "{bonne}");
+        }
+        assert!(!gnome.valeur_admise(Some("'a' && touch /tmp/x")));
+        let connexion = "6b9a0f0e-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
+        let dns = Changement::Dns {
+            connexion: connexion.into(),
+            cible: None,
+        };
+        assert!(dns.valeur_admise(Some(&format!(
+            "{connexion}\n1.1.1.1,9.9.9.9|yes|2606:4700:4700::1111|yes"
+        ))));
+        assert!(dns.valeur_admise(Some(&format!("{connexion}\n|no||no"))));
+        assert!(!dns.valeur_admise(Some(&format!("{connexion}\nevil.example.com|yes||no"))));
+        assert!(!dns.valeur_admise(Some(&format!("{connexion}\n1.1.1.1|peut-être||no"))));
+        assert!(!dns.valeur_admise(Some("0b8c2f4e-1a2b-4c3d-9e8f-001122334455\n1.1.1.1|yes||no")));
+        assert!(!dns.valeur_admise(None));
+        let service = Changement::Demarrage {
+            entree: Entree::Service("discord.service".into()),
+            cible: None,
+        };
+        assert!(service.valeur_admise(Some("disabled")) && !service.valeur_admise(Some("on")));
     }
 
     #[test]

@@ -176,6 +176,20 @@ impl Changement {
         }
     }
 
+    /// La valeur notée `v` a-t-elle une forme que ce changement peut écrire ? Certaines sont remises avec sudo : un
+    /// ensemble fermé ou une forme stricte (booléen, adresses IP), jamais un texte libre venu d'un fichier que tout
+    /// programme du compte peut réécrire.
+    pub fn valeur_admise(&self, v: Option<&str>) -> bool {
+        match self {
+            Changement::Preference { .. } => v.is_none_or(|v| matches!(v, "0" | "1")),
+            Changement::Dns { service, .. } => v.is_some_and(|v| {
+                v.split_once('\n')
+                    .is_some_and(|(id, liste)| id == service && service_valide(id) && super::adresses_ip(liste))
+            }),
+            Changement::Demarrage { .. } => v.is_none_or(|v| matches!(v, "enabled" | "disabled")),
+        }
+    }
+
     /// Le service réseau d'un réglage de DNS.
     pub fn identite_dns(&self) -> Option<&str> {
         match self {
@@ -215,11 +229,17 @@ impl Changement {
     /// Le réglage de DNS rebâti d'après sa valeur d'avant notée, pour l'annuler.
     pub fn dns_note(avant: &str) -> Option<Changement> {
         let (service, _) = avant.split_once('\n')?;
-        (!service.is_empty()).then(|| Changement::Dns {
+        service_valide(service).then(|| Changement::Dns {
             service: service.to_string(),
             cible: None,
         })
     }
+}
+
+/// Un nom de service réseau (« Wi-Fi », « USB 10/100/1000 LAN ») : il entre, entre guillemets, dans une commande
+/// lancée avec sudo ; rien qui ressemble à autre chose qu'un nom.
+fn service_valide(t: &str) -> bool {
+    !t.is_empty() && t.chars().count() <= 64 && t.chars().all(|c| c.is_alphanumeric() || " -_./()+".contains(c))
 }
 
 /// Le service réseau d'une carte, dans `networksetup -listnetworkserviceorder` : « (1) Wi-Fi » puis

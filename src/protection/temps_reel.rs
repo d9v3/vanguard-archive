@@ -129,6 +129,13 @@ impl Etat {
 }
 
 fn fichier() -> PathBuf {
+    dossier_local_appelant().0.join("temps-reel.json")
+}
+
+/// Le dossier de données du compte qui a lancé Vanguard : sous sudo ou pkexec, celui du compte d'avant (`true`),
+/// sinon `reseau::dossier_local` (`false`). Les traces d'incident, que le LISEZMOI conseille de relancer avec sudo,
+/// lisaient sinon les données de root : aucun geste, aucune alerte, alors qu'un blocage avait eu lieu la nuit.
+pub(crate) fn dossier_local_appelant() -> (PathBuf, bool) {
     #[cfg(unix)]
     if !cfg!(test)
         && let Some(d) = dossier_appelant(
@@ -141,9 +148,9 @@ fn fichier() -> PathBuf {
             dossier_personnel_de,
         )
     {
-        return d.join("temps-reel.json");
+        return (d, true);
     }
-    crate::reseau::dossier_local().join("temps-reel.json")
+    (crate::reseau::dossier_local(), false)
 }
 
 /// Le fichier du rappel : quand la coupure a été notifiée pour la dernière fois.

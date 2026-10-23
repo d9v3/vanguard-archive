@@ -36,6 +36,8 @@ pub(crate) enum Source {
     Demarrage,
     /// Un fichier récent d'un endroit à risque : sa date de modification.
     Fichier,
+    /// Ce que Vanguard a vu et fait : ses alertes, ses blocages, ses quarantaines (07-vanguard.txt).
+    Vanguard,
 }
 
 impl Source {
@@ -45,6 +47,7 @@ impl Source {
             Source::Compte => "compte/account",
             Source::Demarrage => "démarrage/startup",
             Source::Fichier => "fichier/file",
+            Source::Vanguard => "vanguard",
         }
     }
 }
@@ -103,6 +106,9 @@ pub(crate) enum Genre {
     Fichier,
     FichiersGroupes,
     ProgrammesGroupes,
+    // Vanguard lui-même.
+    AlerteDeVanguard,
+    GesteDeVanguard,
 }
 
 impl Genre {
@@ -145,6 +151,11 @@ impl Genre {
                 "Programmes, scripts ou fichiers cachés modifiés en nombre (dossier et sous-dossiers)",
                 "Many programs, scripts or hidden files modified (folder and subfolders)",
             ),
+            Genre::AlerteDeVanguard => ("Alerte de Vanguard", "Vanguard alert"),
+            Genre::GesteDeVanguard => (
+                "Geste de Vanguard (blocage, quarantaine)",
+                "Vanguard action (block, quarantine)",
+            ),
         }
     }
 
@@ -177,7 +188,9 @@ impl Genre {
             | Genre::Lancement
             | Genre::Fichier
             | Genre::FichiersGroupes
-            | Genre::ProgrammesGroupes => return None,
+            | Genre::ProgrammesGroupes
+            | Genre::AlerteDeVanguard
+            | Genre::GesteDeVanguard => return None,
         })
     }
 }
@@ -610,8 +623,8 @@ pub(crate) fn partie(dossier: &Path, parties: &[Partie], apport: Apport, mainten
         NOM,
         &contenu,
         bi!(
-            "la chronologie de l'incident : ce que les autres fichiers ont de daté (journaux : connexions, sudo ou ouvertures de session, comptes créés, services, tâches, journaux effacés, modules du noyau, Defender ; ce qui se lance tout seul ; comptes ; fichiers récents, un par ligne s'il est exécutable, caché ou dans un dossier de démarrage, les autres comptés par dossier et par heure, comme les programmes dépliés par centaines), remis dans l'ordre du temps, du plus ancien au plus récent, sur les {JOURS} derniers jours, {MAX_LIGNES} lignes au plus ; une ligne par événement : heure locale, source, ce qui s'est passé, technique MITRE ATT&CK quand elle est évidente",
-            "the incident timeline: what the other files hold with a date (logs: logins, sudo or logons, accounts created, services, tasks, logs cleared, kernel modules, Defender; what starts by itself; accounts; recent files, one per line if executable, hidden or in a startup folder, the others counted per folder and per hour, like programs unpacked by the hundred), put back in time order, oldest first, over the last {JOURS} days, {MAX_LIGNES} lines at most; one line per event: local time, source, what happened, MITRE ATT&CK technique when obvious"
+            "la chronologie de l'incident : ce que les autres fichiers ont de daté (journaux : connexions, sudo ou ouvertures de session, comptes créés, services, tâches, journaux effacés, modules du noyau, Defender ; ce que Vanguard a vu et fait : alertes, blocages, quarantaines ; ce qui se lance tout seul ; comptes ; fichiers récents, un par ligne s'il est exécutable, caché ou dans un dossier de démarrage, les autres comptés par dossier et par heure, comme les programmes dépliés par centaines), remis dans l'ordre du temps, du plus ancien au plus récent, sur les {JOURS} derniers jours, {MAX_LIGNES} lignes au plus ; une ligne par événement : heure locale, source, ce qui s'est passé, technique MITRE ATT&CK quand elle est évidente",
+            "the incident timeline: what the other files hold with a date (logs: logins, sudo or logons, accounts created, services, tasks, logs cleared, kernel modules, Defender; what Vanguard saw and did: alerts, blocks, quarantines; what starts by itself; accounts; recent files, one per line if executable, hidden or in a startup folder, the others counted per folder and per hour, like programs unpacked by the hundred), put back in time order, oldest first, over the last {JOURS} days, {MAX_LIGNES} lines at most; one line per event: local time, source, what happened, MITRE ATT&CK technique when obvious"
         ),
     ) {
         p.compte = Some(bi!(

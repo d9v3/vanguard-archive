@@ -1,7 +1,8 @@
 //! Les sceaux de l'état de Vanguard : les fichiers qu'il garde sur cet ordinateur et qui décident de ce qu'il dit (les
 //! alertes déclarées normales, la référence des fichiers critiques et les changements déjà signalés, les connexions
 //! à des botnets déjà signalées, la plus haute version signée déjà vue, l'état de la machine au dernier passage de
-//! la surveillance). Un programme qui tourne sous le compte pouvait réécrire l'un d'eux pour faire
+//! la surveillance, les valeurs d'avant des réglages d'Optimiser, les alertes de la surveillance déclarées normales).
+//! Un programme qui tourne sous le compte pouvait réécrire l'un d'eux pour faire
 //! taire sa propre alerte, sans que rien ne le dise. Chaque écriture de Vanguard note donc l'empreinte BLAKE3 du
 //! fichier dans `sceaux.json` ; une lecture qui ne la retrouve pas rend le fichier « falsifié », que chaque lecteur
 //! traite comme s'il ne valait rien (jamais comme un feu vert), et le bilan l'annonce (COM-ETA-001).
@@ -43,7 +44,15 @@ pub(crate) const INTEGRITE_SIGNALE: &str = "integrite-signale.json";
 /// d'administrateur.
 pub(crate) const WIFI_PUBLIC: &str = "wifi-public.json";
 
-const PROTEGES: [&str; 7] = [
+/// Les valeurs d'avant des réglages d'Optimiser (`optimiser`), remises en administrateur pour annuler : un programme
+/// qui y écrirait une valeur à lui la ferait poser avec tous les droits.
+pub(crate) const REGLAGES: &str = "reglages.json";
+
+/// Les alertes du veilleur, de la surveillance et du blocage déclarées normales (`protection::normales`) : un
+/// programme qui s'y ajouterait ferait taire sa propre alerte.
+pub(crate) const NORMALES: &str = "normales.json";
+
+const PROTEGES: [&str; 9] = [
     APPRIS,
     INTEGRITE,
     INTEGRITE_SIGNALE,
@@ -51,7 +60,14 @@ const PROTEGES: [&str; 7] = [
     VERSIONS,
     MACHINE,
     WIFI_PUBLIC,
+    REGLAGES,
+    NORMALES,
 ];
+
+/// Les fichiers protégés après le premier sceau : une version d'avant les écrivait déjà sans sceau, et des sceaux
+/// existants les feraient passer pour falsifiés à la mise à jour. La première fois que des sceaux les rencontrent,
+/// ils sont acceptés tels quels (« adoptés », dit au bilan comme tout premier usage), puis jugés comme les autres.
+const TARDIFS: [&str; 2] = [REGLAGES, NORMALES];
 
 const REGISTRE: &str = "sceaux.json";
 const VERROU: &str = "sceaux.verrou";
@@ -64,6 +80,10 @@ struct Registre {
     fichiers: BTreeMap<String, String>,
     #[serde(default)]
     adoptes: BTreeSet<String>,
+    /// Les fichiers protégés tard (`TARDIFS`) que ces sceaux ont déjà rencontrés : passé ce premier regard, un tel
+    /// fichier posé sans sceau est falsifié, comme les autres.
+    #[serde(default)]
+    vus: BTreeSet<String>,
 }
 
 /// Ce que Vanguard retrouve d'un de ses fichiers.
@@ -150,7 +170,31 @@ fn adopter(dossier: &Path) -> Registre {
             r.adoptes.insert(nom.to_string());
         }
     }
+    r.vus = TARDIFS.iter().map(|n| (*n).to_string()).collect();
     let _ = enregistrer_registre(dossier, &r);
+    r
+}
+
+/// Des sceaux d'une version qui ne protégeait pas encore les fichiers `TARDIFS` : celui qui est déjà là, sans sceau,
+/// est adopté tel quel (il vient de cette version), une fois pour toutes.
+fn rattraper(dossier: &Path, mut r: Registre) -> Registre {
+    let mut change = false;
+    for nom in TARDIFS {
+        if r.vus.contains(nom) {
+            continue;
+        }
+        if !r.fichiers.contains_key(nom)
+            && let Ok(Some(o)) = contenu(&dossier.join(nom))
+        {
+            r.fichiers.insert(nom.to_string(), empreinte(nom, &o));
+            r.adoptes.insert(nom.to_string());
+        }
+        r.vus.insert(nom.to_string());
+        change = true;
+    }
+    if change {
+        let _ = enregistrer_registre(dossier, &r);
+    }
     r
 }
 
@@ -179,10 +223,10 @@ fn juger(nom: &str, lu: Result<Option<Vec<u8>>, String>, sceaux: Option<&Registr
 }
 
 /// Un fichier d'état de `dossier`, jugé d'après ses sceaux.
-fn lire_dans(dossier: &Path, nom: &str) -> Lecture {
+pub(crate) fn lire_dans(dossier: &Path, nom: &str) -> Lecture {
     let _verrou = verrou(dossier);
     let sceaux = match registre(dossier) {
-        Ok(Some(r)) => Some(r),
+        Ok(Some(r)) => Some(rattraper(dossier, r)),
         Ok(None) => Some(adopter(dossier)),
         Err(()) => None,
     };
@@ -191,13 +235,14 @@ fn lire_dans(dossier: &Path, nom: &str) -> Lecture {
 
 /// Écrit un fichier d'état de `dossier` (d'un coup) et son sceau. Des sceaux illisibles repartent de celui-ci : les
 /// autres fichiers restent falsifiés jusqu'à ce que Vanguard les réécrive.
-fn ecrire_dans(dossier: &Path, nom: &str, octets: &[u8]) -> std::io::Result<()> {
+pub(crate) fn ecrire_dans(dossier: &Path, nom: &str, octets: &[u8]) -> std::io::Result<()> {
     let _verrou = verrou(dossier);
     let mut sceaux = match registre(dossier) {
-        Ok(Some(r)) => r,
+        Ok(Some(r)) => rattraper(dossier, r),
         Ok(None) => adopter(dossier),
         Err(()) => Registre {
             depuis: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            vus: TARDIFS.iter().map(|n| (*n).to_string()).collect(),
             ..Registre::default()
         },
     };
@@ -472,6 +517,27 @@ mod tests {
         effacer_dans(&d, BOTNETS).unwrap();
         assert_eq!(falsifies_dans(&d).adoptes, vec![APPRIS]);
         assert!(juger_adoptes(&[], "").is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Une version d'avant écrivait reglages.json sans sceau, à côté de sceaux existants : à la mise à jour, il est
+    /// adopté une fois (pas falsifié) ; ensuite, un fichier protégé tard posé sans sceau est falsifié comme un autre.
+    #[test]
+    fn un_fichier_protege_tard_est_adopte_une_fois() {
+        let d = jetable("tardif");
+        ecrire_dans(&d, APPRIS, b"{}").unwrap();
+        // Les sceaux de cette version d'avant : sans « vus ».
+        let mut r = registre(&d).unwrap().unwrap();
+        r.vus.clear();
+        enregistrer_registre(&d, &r).unwrap();
+        std::fs::write(d.join(REGLAGES), br#"{"reglages":{}}"#).unwrap();
+        assert_eq!(lire_dans(&d, REGLAGES), Lecture::Adopte(br#"{"reglages":{}}"#.to_vec()));
+        assert_eq!(lire_dans(&d, APPRIS), Lecture::Intact(b"{}".to_vec()));
+        ecrire_dans(&d, REGLAGES, b"{}").unwrap();
+        assert_eq!(lire_dans(&d, REGLAGES), Lecture::Intact(b"{}".to_vec()));
+        // Passé ce premier regard : un fichier protégé tard posé sans sceau est falsifié.
+        std::fs::write(d.join(NORMALES), b"{}").unwrap();
+        assert!(matches!(lire_dans(&d, NORMALES), Lecture::Falsifie(Some(_))));
         let _ = std::fs::remove_dir_all(&d);
     }
 

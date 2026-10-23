@@ -9,6 +9,39 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **La preuve avant le geste, et ce que Vanguard a fait dans les traces.** Avant d'arrêter un programme, de mettre un
+  fichier en quarantaine ou de bloquer une adresse, y compris tout seul la nuit, Vanguard relève ce que le geste va
+  effacer : le programme, sa ligne de commande, son parent, son compte, l'empreinte SHA-256 du fichier, les connexions
+  en cours. Ce qui ne se lit pas est noté « impossible (raison) », et le blocage se fait quand même. La preuve est
+  gardée avec le blocage (« Ce que Vanguard a changé » la résume) ; la quarantaine garde l'empreinte de chaque
+  fichier. « vanguard traces » reprend enfin ce que Vanguard a vu et fait (07-vanguard.txt) : ses alertes, ses
+  blocages et quarantaines avec leur preuve, et des fils qui relient l'alerte, la preuve et le geste d'un même
+  programme ou d'une même adresse ; ces repères entrent dans la chronologie, et les fichiers d'état de Vanguard sont
+  recopiés tels quels pour que le MANIFESTE les couvre. Une seule voie mène à la quarantaine : celle de l'antivirus et
+  de YARA est désormais notée et s'annule par « vanguard blocage annuler », comme celle du blocage. Le veilleur juge
+  les programmes par les mêmes sources que le blocage : il reconnaît aussi les empreintes connues de MalwareBazaar
+  (celles des dernières 48 heures, la liste complète ne tenant pas dans sa mémoire). Installer ClamAV ou un outil
+  tiers est noté comme toute correction.
+  **« C'est normal » pour la surveillance, le veilleur et le blocage.** Une alerte qui revient sans raison (un outil
+  de développement lancé depuis /tmp, un appareil connu) se déclare normale pour 90 jours dans Ce que Vanguard a
+  appris, et une menace proposée au blocage par « i ». Le choix porte sur ce dont parle l'alerte (le programme,
+  l'adresse, l'appareil), pas sur son texte, et s'oublie au même endroit. La liste est scellée : changée hors de
+  Vanguard, elle ne fait rien taire.
+  **Les valeurs d'avant d'Optimiser sont scellées et vérifiées.** reglages.json, dont les valeurs sont remises en
+  administrateur pour annuler un réglage, est scellé comme l'état de Vanguard : réécrit par un autre programme, il
+  n'est plus cru (il est mis de côté, intact, et rien n'en est remis). Chaque valeur est aussi vérifiée à la remise :
+  un état de service connu, un booléen, un nombre, des adresses IP, un mot simple ; une valeur d'une autre forme fait
+  revenir celle d'un système neuf, écrite dans le programme.
+  **Relu et resserré avant la sortie.** « C'est normal » ne fait plus taire une menace certaine, et l'alerte de son
+  blocage n'est jamais tue ; il retient la raison et le script d'un programme (déclarer python3 normal pour une
+  commande qui télécharge ne fait plus taire python3 qui lance autre chose) ; une alerte n'est proposée que si son
+  genre est celui de sa clé, et ce qu'elle désigne est montré avant de choisir. Un reglages.json accepté sans sceau
+  n'est plus rescellé à la lecture : le bilan continue de le dire. Le même fichier téléchargé de nouveau après une
+  quarantaine est reproposé au blocage. Un fichier supprimé du menu Quarantaine, ou après une analyse de ClamAV, se lit
+  « supprimé » dans les traces, avec son empreinte relevée. Les traces lancées avec sudo lisent les données du compte
+  qui les a lancées, et un tube nommé ou un lien à la place d'un fichier d'état ne les bloque plus. Le veilleur ne
+  reste plus pris sur un fichier qui ne répond pas (non haché, dit non vérifié) ; sous Windows, le relevé n'attend
+  plus WMI plus de 3 secondes avant l'arrêt ; un numéro de processus repris n'est plus décrit dans la preuve.
 - **Mode Wi-Fi public** (`vanguard wifi-public`, Réseau et Internet › Mode Wi-Fi public). On l'allume en arrivant dans
   un café, un hôtel ou un aéroport, on l'éteint en partant : l'ordinateur n'accepte plus aucune connexion venue de ce
   réseau (une session SSH déjà ouverte reste), le partage de fichiers et l'annonce de son nom sont coupés (sous macOS,

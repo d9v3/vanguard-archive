@@ -12,8 +12,8 @@
 //! sain) ; le programme d'une connexion fermée n'est jamais connu (le noyau ne donne ni le compte ni la prise à ce
 //! moment-là).
 //!
-//! Il observe seulement : rien n'est arrêté ni envoyé. Les programmes sont jugés par les fonctions de COM-PRG-001
-//! (`chasse::juger_programme`), les connexions par les serveurs de commande des listes déjà téléchargées ; ce qui
+//! Il observe seulement : rien n'est arrêté ni envoyé. Les programmes sont jugés par la voie des sources de menaces
+//! (`protection::sources` : les empreintes récentes de MalwareBazaar, puis les fonctions de COM-PRG-001), les connexions par les serveurs de commande des listes déjà téléchargées ; ce qui
 //! est grave va au journal du tableau de bord et en notification, à débit borné. Il ne lit, de chaque processus, que
 //! /proc/<pid>/exe, cmdline et status : jamais les fichiers des agents d'IA (conversations, history.jsonl,
 //! shell-snapshots), ni rien d'autre de leur dossier.
@@ -1145,6 +1145,36 @@ fn juger_lance(l: &Lance) -> Option<Alerte> {
     })
 }
 
+/// Un programme lancé, jugé par la voie unique des sources de menaces (`protection::sources`) : d'abord son empreinte
+/// (MalwareBazaar, les dernières 48 heures : la liste complète ne tient pas dans la mémoire du service), comme le
+/// blocage et le bilan, puis les signes de COM-PRG-001.
+fn juger_lance_avec(l: &Lance, fichiers: &mut crate::protection::sources::Fichiers) -> Option<Alerte> {
+    if !l.de_vanguard
+        && let Lecture::Complet(p) = &l.lecture
+        && let Some(chemin) = p.chemin.as_deref()
+        && fichiers.connu(chemin)
+    {
+        let raison = crate::protection::sources::raison_empreinte();
+        return Some(Alerte {
+            cle: format!("{raison}|{chemin}"),
+            grave: true,
+            genre: Genre::Veilleur,
+            titre: tr!(
+                "Vanguard : logiciel malveillant connu lancé",
+                "Vanguard: known malware started"
+            )
+            .to_string(),
+            texte: trf!(
+                "« {} » (PID {}) : {raison}. Ne rien arrêter à la hâte : vanguard traces garde ses traces, puis Dépanner › Après une infection.",
+                "“{}” (PID {}): {raison}. Do not stop anything in a hurry: vanguard traces keeps its traces, then Troubleshoot › After an infection.",
+                crate::ui::affichable(chemin),
+                l.pid
+            ),
+        });
+    }
+    juger_lance(l)
+}
+
 /// Une connexion fermée, jugée par les serveurs de commande connus : seulement vers Internet.
 fn juger_prise(f: &FinPrise, serveurs: &ServeursDeCommande) -> Option<Alerte> {
     let ip = f.distante.ip().to_canonical();
@@ -1273,6 +1303,8 @@ pub(crate) struct Etat {
     pub noms_seuls: u64,
     pub partis: u64,
     pub non_lus: u64,
+    /// Les programmes qu'on n'a pas pu hacher à temps (un fichier qui ne répond pas) : non vérifiés.
+    pub non_haches: u64,
     pub prises: u64,
     pub perdus: u64,
     pub tus: u64,
@@ -1391,6 +1423,8 @@ fn servir() -> i32 {
     v.lire = !etat.en_pause;
     ecrire_etat(&etat);
     let mut debit = Debit::default();
+    let mut fichiers = crate::protection::sources::Fichiers::recentes();
+    let mut empreintes_relues = Instant::now();
     let (mut minute, mut quart) = (Instant::now(), Instant::now());
     let sortie = loop {
         if ARRET.load(Ordering::SeqCst) {
@@ -1411,7 +1445,7 @@ fn servir() -> i32 {
         // En pause, ce qui arrive est lu puis jeté : rien n'est noté ni notifié.
         if !etat.en_pause {
             for vu in vus {
-                traiter(vu, &mut etat, &mut debit, &serveurs);
+                traiter(vu, &mut etat, &mut debit, &serveurs, &mut fichiers);
             }
             if let Some(n) = debit.resume(maintenant()) {
                 tableau::noter_alerte(
@@ -1432,6 +1466,7 @@ fn servir() -> i32 {
             etat.en_pause = crate::protection::temps_reel::coupure().is_some();
             v.lire = !etat.en_pause;
             etat.battement = maintenant();
+            etat.non_haches += fichiers.prendre_non_haches() as u64;
             ecrire_etat(&etat);
         }
         if quart.elapsed() >= Duration::from_mins(15) {
@@ -1440,16 +1475,29 @@ fn servir() -> i32 {
             serveurs = nouveaux;
             etat.listes = (!absentes.is_empty()).then(|| absentes.join(" ; "));
         }
+        // Les empreintes récentes, rafraîchies chaque jour par la surveillance : relues toutes les 6 heures.
+        if empreintes_relues.elapsed() >= Duration::from_hours(6) {
+            empreintes_relues = Instant::now();
+            etat.non_haches += fichiers.prendre_non_haches() as u64;
+            fichiers = crate::protection::sources::Fichiers::recentes();
+        }
     };
     // Le désabonnement part ici, avant l'état final.
     drop(v);
     etat.battement = maintenant();
+    etat.non_haches += fichiers.prendre_non_haches() as u64;
     ecrire_etat(&etat);
     sortie
 }
 
 /// Un événement vu : compté, puis jugé et noté selon le débit.
-fn traiter(vu: Vu, etat: &mut Etat, debit: &mut Debit, serveurs: &ServeursDeCommande) {
+fn traiter(
+    vu: Vu,
+    etat: &mut Etat,
+    debit: &mut Debit,
+    serveurs: &ServeursDeCommande,
+    fichiers: &mut crate::protection::sources::Fichiers,
+) {
     let alerte = match vu {
         Vu::Perdus(n) => {
             etat.perdus += u64::from(n);
@@ -1478,13 +1526,20 @@ fn traiter(vu: Vu, etat: &mut Etat, debit: &mut Debit, serveurs: &ServeursDeComm
                     etat.derniers_partis.push((l.pid, l.parent));
                 }
             }
-            juger_lance(&l)
+            juger_lance_avec(&l, fichiers)
         }
     };
     let Some(a) = alerte else { return };
+    let cle = crate::protection::normales::cle_veilleur(&a.cle);
+    // Déclarée normale ici (« Ce que Vanguard a appris ») : ni notée ni notifiée, tant que le choix vaut. Lu
+    // seulement quand le débit la laisserait passer : une alerte répétée mille fois ne relit pas mille fois la liste.
+    let normale = || crate::protection::normales::est_normale(&cle);
     match debit.decider(&a.cle, a.grave, maintenant()) {
-        Decision::Noter { notifier: true } => crate::reseau::surveillance::alerter(a.genre, &a.titre, &a.texte),
-        Decision::Noter { notifier: false } => tableau::noter_alerte(a.genre, &a.titre, &a.texte),
+        Decision::Noter { .. } if normale() => {}
+        Decision::Noter { notifier: true } => {
+            crate::reseau::surveillance::alerter_cle(a.genre, &cle, &a.titre, &a.texte);
+        }
+        Decision::Noter { notifier: false } => tableau::noter_alerte_cle(a.genre, Some(&cle), &a.titre, &a.texte),
         Decision::Repete => {}
         Decision::Taire => etat.tus += 1,
     }
@@ -1982,6 +2037,13 @@ fn juger_etat(voulu: bool, activee: Option<bool>, etat: Option<&Etat>, vivant: b
                 texte.push(' ');
                 texte.push_str(&t);
             };
+            if e.non_haches > 0 {
+                ajouter(trf!(
+                    "{} programme(s) non haché(s) à temps (un fichier qui ne répond pas) : leur empreinte n'est pas vérifiée.",
+                    "{} program(s) not hashed in time (a file that does not respond): their fingerprint is not checked.",
+                    e.non_haches
+                ));
+            }
             if e.sans_programme > 0 {
                 ajouter(trf!(
                     "Parmi les lus en entier, {} d'un autre compte jugé(s) sur leur ligne de commande seule : leur programme ne se lit pas sans droits, et le dossier d'où il part n'est pas vérifié.",
@@ -2344,6 +2406,45 @@ mod tests {
             ligne: ligne.map(str::to_string),
             ..EnMarche::default()
         }
+    }
+
+    /// Un programme dont l'empreinte est connue (MalwareBazaar) ressort au veilleur comme au blocage, par la même
+    /// voie ; un programme de Vanguard, jamais ; sans liste, le jugement de COM-PRG-001 seul.
+    #[test]
+    fn empreinte_connue_vue_au_lancement() {
+        let dossier = std::env::temp_dir().join(format!("vanguard-veilleur-empreinte-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        let fichier = dossier.join("facture");
+        std::fs::write(&fichier, b"charge inventee").unwrap();
+        let empreinte = crate::protection::empreintes::sha256(&fichier).unwrap();
+        let mut fichiers = crate::protection::sources::Fichiers::pour_essai(vec![empreinte]);
+        let programme = EnMarche {
+            chemin: Some(fichier.to_string_lossy().into_owned()),
+            ..en_marche(300, "facture", Some("facture"))
+        };
+        let alerte = juger_lance_avec(
+            &lance(Lecture::Complet(programme.clone()), &["bash"], false),
+            &mut fichiers,
+        )
+        .unwrap();
+        assert!(
+            alerte.grave && alerte.cle.ends_with(&*fichier.to_string_lossy()),
+            "{alerte:?}"
+        );
+        assert_eq!(
+            juger_lance_avec(
+                &lance(Lecture::Complet(programme.clone()), &["vanguard"], true),
+                &mut fichiers
+            ),
+            None
+        );
+        let mut vide = crate::protection::sources::Fichiers::pour_essai(Vec::new());
+        assert_eq!(
+            juger_lance_avec(&lance(Lecture::Complet(programme), &["bash"], false), &mut vide),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 
     fn lance(lecture: Lecture, lignee: &[&str], de_vanguard: bool) -> Lance {

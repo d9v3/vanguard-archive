@@ -3,8 +3,6 @@
 //! télécharge jamais un programme lui-même : la distribution, Homebrew ou winget en répondent.
 
 use std::path::PathBuf;
-#[cfg(unix)]
-use std::process::Command;
 
 use crate::ui::*;
 
@@ -100,18 +98,24 @@ pub(crate) fn proposer(e: &Externe) -> Option<PathBuf> {
     if !demander(tr!("  L'installer maintenant ? [o/N] : ", "  Install it now? [y/N]: ")).oui() {
         return None;
     }
-    // Au premier plan : sudo ou winget peuvent poser une question.
+    // Au premier plan : sudo ou winget peuvent poser une question. Par le lanceur des corrections sous Linux et
+    // macOS, noté dans « Ce que Vanguard a changé » ; winget reste hors de la fenêtre administrateur, et se note à part.
     #[cfg(unix)]
-    let fait = Command::new("bash").arg("-c").arg(&commande).status();
+    let fait = crate::machine::appliquer(std::slice::from_ref(&commande));
     #[cfg(windows)]
-    let fait = crate::machine::windows::winget()
-        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
-        .and_then(|w| {
-            std::process::Command::new(w)
-                .args(commande.split_whitespace().skip(1))
-                .status()
-        });
-    if !fait.is_ok_and(|s| s.success()) {
+    let fait = {
+        let ok = crate::machine::windows::winget()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+            .and_then(|w| {
+                std::process::Command::new(w)
+                    .args(commande.split_whitespace().skip(1))
+                    .status()
+            })
+            .is_ok_and(|s| s.success());
+        crate::changements::noter(&[vec![commande.clone()]], &[ok]);
+        ok
+    };
+    if !fait {
         println!(
             "  {}",
             trf!(

@@ -612,16 +612,6 @@ pub(crate) fn examiner(fichier: &std::path::Path) -> Examen {
 // ───────────────────────────── Linux : ClamAV ─────────────────────────────
 
 #[cfg(unix)]
-fn shell(c: &str) -> bool {
-    println!("  {GRIS}$ {}{RESET}", crate::ui::commande_affichable(c));
-    Command::new("bash")
-        .arg("-c")
-        .arg(c)
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
-#[cfg(unix)]
 fn base_presente() -> bool {
     // Homebrew : /opt/homebrew (Apple Silicon) ou /usr/local (Intel).
     [
@@ -710,7 +700,8 @@ fn preparer() -> bool {
         };
         #[cfg(target_os = "macos")]
         let installation = format!("{brew} install clamav");
-        if !shell(&installation) {
+        // Par le lanceur des corrections : l'installation est notée dans « Ce que Vanguard a changé ».
+        if !crate::machine::appliquer(&[installation]) {
             trp!("  Installation impossible.", "  Installation failed.");
             return false;
         }
@@ -722,8 +713,11 @@ fn preparer() -> bool {
         );
         #[cfg(target_os = "linux")]
         // Sur Debian/Ubuntu/Mint, le service tourne déjà et verrouille la base : on l'arrête le temps du premier téléchargement.
-        let ok = shell("sudo systemctl stop clamav-freshclam.service 2>/dev/null; sudo freshclam")
-            && shell("sudo systemctl enable --now clamav-freshclam.service");
+        // Le téléchargement ne change rien à noter ; le service activé pour de bon, si.
+        let ok = crate::machine::appliquer_sans_noter(&[
+            "sudo systemctl stop clamav-freshclam.service 2>/dev/null; sudo freshclam".to_string(),
+        ])
+        .0 && crate::machine::appliquer(&["sudo systemctl enable --now clamav-freshclam.service".to_string()]);
         // Homebrew livre seulement un modèle de configuration (« Example » à retirer) ; pas besoin de sudo.
         #[cfg(target_os = "macos")]
         let ok = {
@@ -733,10 +727,11 @@ fn preparer() -> bool {
                 .and_then(std::path::Path::parent)
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            shell(&format!(
+            // La configuration posée est notée, comme toute correction.
+            crate::machine::appliquer(&[format!(
                 "C='{prefixe}/etc/clamav/freshclam.conf'; [ -f \"$C\" ] || sed '/^Example/d' \"$C.sample\" > \"$C\"; {}",
                 commande_freshclam(&freshclam)
-            ))
+            )])
         };
         if !ok {
             return false;
@@ -924,8 +919,15 @@ fn clamav(portee: &Portee) {
     for (f, detection) in &infectes {
         let chemin = std::path::Path::new(f);
         let resultat = match rep.as_str() {
-            "q" => crate::protection::quarantaine::isoler(chemin, detection).map(|_| ()),
-            "s" | "d" => std::fs::remove_file(chemin),
+            // Le seul chemin vers la quarantaine : relevé d'abord, puis noté dans « Ce que Vanguard a changé ».
+            "q" => crate::protection::quarantaine::isoler(
+                chemin,
+                detection,
+                crate::protection::quarantaine::demande_d_analyse(chemin, detection),
+            )
+            .map(|_| ()),
+            // Relevé et noté aussi : supprimé, le fichier n'a plus d'empreinte à chercher ni à comparer.
+            "s" | "d" => crate::protection::quarantaine::supprimer_apres_analyse(chemin, detection),
             _ => continue,
         };
         let f = affichable(f);

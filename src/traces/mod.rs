@@ -1,11 +1,13 @@
 //! Collecter les traces : après une infection, avant de nettoyer ou de réinstaller, garder ce qu'un spécialiste (ou la
 //! personne elle-même, plus tard) voudra voir, dans l'ordre où cela disparaît : processus, connexions, ce qui se lance
-//! tout seul, comptes, journaux des 7 derniers jours, fichiers récents des endroits à risque. Chaque partie a son
-//! fichier texte ; CHRONOLOGIE.txt remet ce qu'elles ont de daté dans l'ordre du temps (voir `chronologie`) ;
+//! tout seul, comptes, journaux des 7 derniers jours, fichiers récents des endroits à risque, et ce que Vanguard a
+//! lui-même vu et fait (ses alertes, ses blocages et quarantaines avec la preuve relevée avant chaque geste, voir
+//! `vanguard`). Chaque partie a son fichier texte ; CHRONOLOGIE.txt remet ce qu'elles ont de daté dans l'ordre du temps (voir `chronologie`) ;
 //! LISEZMOI.txt dit ce que contient chacun et ce qui n'a pas pu être lu, et pourquoi ; MANIFESTE.txt donne
 //! l'empreinte SHA-256 de chaque fichier, pour prouver plus tard qu'ils n'ont pas changé.
 //!
-//! Lecture seule : aucun processus arrêté, aucun fichier déplacé ; les fichiers récents sont décrits, pas copiés.
+//! Lecture seule : aucun processus arrêté, aucun fichier déplacé ; les fichiers récents sont décrits, pas copiés (seuls
+//! les fichiers d'état de Vanguard le sont, pour que le MANIFESTE les couvre).
 //! Rien ne part sur Internet : le bilan joint est fait sans ses règles de mises à jour, les seules qui interrogent des
 //! serveurs.
 
@@ -16,6 +18,7 @@ mod linux;
 mod macos;
 #[cfg(unix)]
 mod unix;
+mod vanguard;
 #[cfg(windows)]
 mod windows;
 
@@ -1655,6 +1658,8 @@ pub fn collecter(argument: Option<&Path>) -> Option<PathBuf> {
                 })
             }),
             s.spawn(|| chrono(|| fichiers_recents(&dossier))),
+            // Ce que Vanguard a lui-même vu et fait : ses alertes, ses gestes et leur preuve.
+            s.spawn(|| chrono(|| vanguard::partie(&dossier))),
         ];
         fils.map(|f| {
             f.join().unwrap_or_else(|_| {
