@@ -1204,7 +1204,7 @@ fn depots_configures(conf: &str) -> Vec<String> {
 /// de chaque « desc » comme pour la base locale. `None` pour un autre format (xz) ou une archive abîmée.
 fn noms_base_sync(octets: &[u8]) -> Option<Vec<String>> {
     let tar = if octets.starts_with(&[0x1f, 0x8b]) {
-        degzip(octets)?
+        crate::archives::gzip::degzip(octets, 256 << 20)?
     } else if super::zstd::est_zstd(octets) {
         // repo-add écrit en zstd quand on le lui demande (omarchy.db) ; la base d'extra fait 10 Mo décompressée, la
         // borne de degzip vaut ici aussi.
@@ -1217,35 +1217,30 @@ fn noms_base_sync(octets: &[u8]) -> Option<Vec<String>> {
     noms_tar(&tar)
 }
 
-/// Le parcours d'une archive tar : blocs de 512 octets, un en-tête (nom, taille en octal, type) puis le contenu
-/// arrondi au bloc. Seuls les fichiers « …/desc » sont lus ; le nom complet d'un en-tête pax (« path= ») ou GNU
-/// (type L) n'importe pas, puisque le nom du paquet vient du contenu.
+/// Les noms des paquets d'une archive tar de base sync, lus dans le %NAME% de chaque « …/desc » comme pour la base
+/// locale (le nom complet d'un en-tête pax ou GNU n'importe pas, puisque le nom du paquet vient du contenu). `None` :
+/// archive coupée avant ses blocs de fin (bsdtar et repo-add les écrivent toujours) : ce qui a été lu ne dit pas tout,
+/// et un paquet de la partie perdue passerait pour étranger.
 fn noms_tar(tar: &[u8]) -> Option<Vec<String>> {
-    let mut noms = Vec::new();
-    let mut pos = 0usize;
-    while let Some(entete) = tar.get(pos..pos + 512) {
-        // Deux blocs nuls marquent la fin ; le premier suffit à dire qu'il n'y a plus rien à lire.
-        if entete.iter().all(|&o| o == 0) {
-            return Some(noms);
-        }
-        let champ = |de: usize, a: usize| {
-            let c = &entete[de..a];
-            &c[..c.iter().position(|&o| o == 0).unwrap_or(c.len())]
-        };
-        let taille = usize::from_str_radix(std::str::from_utf8(champ(124, 136)).ok()?.trim(), 8).ok()?;
-        let contenu = tar.get(pos + 512..pos + 512 + taille)?;
-        let type_ = entete[156];
-        if matches!(type_, b'0' | 0) && champ(0, 100).ends_with(b"/desc") {
-            let champs = natif::champs_pacman(&String::from_utf8_lossy(contenu));
-            if let Some(nom) = champs.get("NAME").and_then(|v| v.first()) {
-                noms.push(nom.clone());
-            }
-        }
-        pos += 512 + taille.div_ceil(512) * 512;
-    }
-    // Archive coupée avant ses blocs de fin (bsdtar et repo-add les écrivent toujours) : ce qui a été lu ne dit
-    // pas tout, et un paquet de la partie perdue passerait pour étranger.
-    None
+    // La base d'extra a des dizaines de milliers d'entrées (un dossier et un desc par paquet, et leurs en-têtes pax) ;
+    // seuls les desc, de quelques Kio, sont gardés.
+    const BORNES: crate::archives::Bornes = crate::archives::Bornes {
+        entrees: 2_000_000,
+        fichier: 1 << 20,
+        total: 256 << 20,
+    };
+    let lus = crate::archives::tar::fichiers(tar, &BORNES, |nom| nom.ends_with("/desc"))?;
+    Some(
+        lus.fichiers
+            .iter()
+            .filter_map(|(_, contenu)| {
+                natif::champs_pacman(&String::from_utf8_lossy(contenu))
+                    .get("NAME")
+                    .and_then(|v| v.first())
+                    .cloned()
+            })
+            .collect(),
+    )
 }
 
 /// Les bases des dépôts ont-elles été téléchargées ? Sans elles, pacman -Qm prend chaque paquet pour un paquet de
@@ -1391,7 +1386,7 @@ mod tests {
         let tar = base_inventee();
         let attendu = vec!["zorglub".to_string(), "python-3to2".to_string()];
         assert_eq!(noms_base_sync(&tar), Some(attendu.clone()));
-        // Un gzip à la main : en-tête de 10 octets, flux deflate, puis CRC et taille (que degzip ne lit pas).
+        // Un gzip à la main : en-tête de 10 octets, flux deflate, puis CRC et taille (que `degzip` ne lit pas).
         let mut gz = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
         gz.extend(miniz_oxide::deflate::compress_to_vec(&tar, 6));
         gz.extend([0u8; 8]);

@@ -201,6 +201,15 @@ regle!("MAC-MAJ-003", Os::MacOs, 270, ("Homebrew", "Homebrew"), &[], || {
 });
 
 regle!(
+    "MAC-MAJ-004",
+    Os::MacOs,
+    275,
+    ("logiciels pas à jour", "outdated software"),
+    &[],
+    crate::protection::perimes::constats
+);
+
+regle!(
     "MAC-SAV-001",
     Os::MacOs,
     280,

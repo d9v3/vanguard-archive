@@ -1,9 +1,15 @@
 //! Programmes installés, lus dans le registre (winreg) sans PowerShell : les noms du panneau « Applications
 //! installées » (clés Uninstall), ceux des applications du Store et la présence de winget. Mêmes listes que
 //! `Get-ItemProperty …\Uninstall\*`, `Get-AppxPackage` et `Get-Command winget`, en quelques millisecondes.
+//!
+//! `programmes` lit davantage (version, éditeur, emplacement) et pour tous les comptes dont la session est ouverte
+//! (`HKEY_USERS`) ; les profils de `ProfileList` donnent les dossiers des autres. La ruche d'un compte fermé n'est
+//! jamais chargée (RegLoadKey) : Vanguard ne touche pas au registre d'une personne absente.
+
+use std::path::PathBuf;
 
 use winreg::RegKey;
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
 
 const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 const UNINSTALL_32: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -57,6 +63,186 @@ pub(crate) fn nom_du_paquet(complet: &str) -> Option<String> {
     (!nom.is_empty() && !reste.is_empty()).then(|| nom.to_string())
 }
 
+/// Sous-clés lues au plus par clé : une clé Uninstall réelle en a quelques centaines.
+const SOUS_CLES_MAX: usize = 5000;
+/// Une valeur texte plus longue (en octets, UTF-16) n'est pas un nom ni un chemin : ignorée.
+const VALEUR_MAX: usize = 2048;
+/// Profils lus au plus dans ProfileList.
+const PROFILS_MAX: usize = 64;
+const PROFILE_LIST: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
+
+/// Pour qui un programme est installé.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Portee {
+    Machine,
+    /// Le compte de ce processus (HKCU).
+    CompteCourant,
+    /// Un autre compte dont la session est ouverte (`HKEY_USERS\<SID>`).
+    Compte(String),
+}
+
+/// Un programme du panneau « Applications installées » : une clé Uninstall, sans les composants du système ni les
+/// correctifs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Programme {
+    pub nom: String,
+    pub version: String,
+    pub editeur: String,
+    pub emplacement: Option<PathBuf>,
+    pub portee: Portee,
+    /// La clé, pour la nommer quand l'emplacement manque (« HKLM\…\Uninstall\{GUID} »).
+    pub cle: String,
+}
+
+/// Une clé ouverte en lecture dans la vue de registre `vue` (`KEY_WOW64_64KEY` ou `KEY_WOW64_32KEY`) : la vue 32 bits
+/// de `HKLM\SOFTWARE` est celle que Windows redirige vers WOW6432Node, sans écrire ce nom en dur.
+pub(crate) fn ouvrir(racine: &RegKey, chemin: &str, vue: u32) -> Option<RegKey> {
+    racine.open_subkey_with_flags(chemin, KEY_READ | vue).ok()
+}
+
+/// Une valeur texte (REG_SZ ou REG_EXPAND_SZ, non développée), si elle existe et n'est ni vide ni trop longue.
+pub(crate) fn texte(cle: &RegKey, nom: &str) -> Option<String> {
+    use winreg::enums::RegType::{REG_EXPAND_SZ, REG_SZ};
+    use winreg::types::FromRegValue;
+    let brute = cle.get_raw_value(nom).ok()?;
+    if !matches!(brute.vtype, REG_SZ | REG_EXPAND_SZ) || brute.bytes.len() > VALEUR_MAX {
+        return None;
+    }
+    let texte = String::from_reg_value(&brute).ok()?;
+    let texte = texte.trim();
+    (!texte.is_empty()).then(|| texte.to_string())
+}
+
+/// Les noms des sous-clés, bornés.
+pub(crate) fn sous_cles(cle: &RegKey) -> Vec<String> {
+    cle.enum_keys().take(SOUS_CLES_MAX).flatten().collect()
+}
+
+/// Les programmes d'une clé Uninstall déjà ouverte (`nom` la désigne dans `Programme::cle`). Écartés : les
+/// composants du système (`SystemComponent` = 1), les correctifs et mises à jour d'un autre programme
+/// (`ParentKeyName`), les clés sans nom affiché.
+pub(crate) fn programmes_de(cle: &RegKey, nom: &str, vue: u32, portee: &Portee) -> Vec<Programme> {
+    sous_cles(cle)
+        .into_iter()
+        .filter_map(|sous| {
+            let k = ouvrir(cle, &sous, vue)?;
+            if k.get_value::<u32, _>("SystemComponent").is_ok_and(|v| v == 1) || texte(&k, "ParentKeyName").is_some() {
+                return None;
+            }
+            Some(Programme {
+                nom: texte(&k, "DisplayName")?,
+                version: texte(&k, "DisplayVersion").unwrap_or_default(),
+                editeur: texte(&k, "Publisher").unwrap_or_default(),
+                emplacement: texte(&k, "InstallLocation").and_then(|e| emplacement_local(&e)),
+                portee: portee.clone(),
+                cle: format!(r"{nom}\{sous}"),
+            })
+        })
+        .collect()
+}
+
+/// Un `InstallLocation` gardé seulement sur une lettre de lecteur locale (« C:\… »). La valeur peut venir de la
+/// ruche d'un autre compte : un chemin réseau (`\\serveur\p`, `\\?\UNC\…`) ou de périphérique (`\\.\…`)
+/// ferait ouvrir une connexion SMB qui présente l'identité de celui qui lance Vanguard, souvent l'administrateur.
+fn emplacement_local(valeur: &str) -> Option<PathBuf> {
+    let chemin = PathBuf::from(valeur.trim_matches('"'));
+    let sur_disque = matches!(
+        chemin.components().next(),
+        Some(std::path::Component::Prefix(p)) if matches!(p.kind(), std::path::Prefix::Disk(_))
+    );
+    (sur_disque && chemin.is_absolute()).then_some(chemin)
+}
+
+/// Un SID de compte de personne, local ou de domaine (« S-1-5-21-… ») ou Microsoft Entra ID (« S-1-12-1-… », PC
+/// joint à Azure AD) : pas SYSTEM (S-1-5-18), ni les services (19, 20), ni la ruche des classes d'un compte
+/// (« …_Classes »). Un compte écarté ici ne serait ni lu ni compté comme non vérifié.
+pub(crate) fn sid_de_personne(sid: &str) -> bool {
+    sid.strip_prefix("S-1-5-21-")
+        .or_else(|| sid.strip_prefix("S-1-12-1-"))
+        .is_some_and(|r| !r.is_empty() && r.bytes().all(|o| o.is_ascii_digit() || o == b'-'))
+}
+
+/// Les comptes dont la ruche est chargée (session ouverte), sauf celui de ce processus.
+pub(crate) fn ruches_chargees() -> Vec<String> {
+    let moi = super::processus::sid();
+    sous_cles(&RegKey::predef(HKEY_USERS))
+        .into_iter()
+        .filter(|s| sid_de_personne(s) && moi.as_deref() != Some(s))
+        .collect()
+}
+
+/// Les profils des comptes de personnes (SID, dossier), d'après ProfileList : au plus 64. `%SystemDrive%` et les
+/// autres variables d'environnement du chemin sont développées.
+pub(crate) fn profils() -> Vec<(String, PathBuf)> {
+    let Some(liste) = ouvrir(&RegKey::predef(HKEY_LOCAL_MACHINE), PROFILE_LIST, KEY_WOW64_64KEY) else {
+        return Vec::new();
+    };
+    sous_cles(&liste)
+        .into_iter()
+        .filter(|s| sid_de_personne(s))
+        .filter_map(|sid| {
+            let chemin = texte(&ouvrir(&liste, &sid, KEY_WOW64_64KEY)?, "ProfileImagePath")?;
+            let chemin = developper(&chemin, &|v| std::env::var(v).ok())?;
+            Some((sid, PathBuf::from(chemin)))
+        })
+        .take(PROFILS_MAX)
+        .collect()
+}
+
+/// `%NOM%` remplacé par la variable d'environnement `NOM` ; `None` si l'une manque (le chemin ne serait pas le bon).
+pub(crate) fn developper(texte: &str, variable: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    let mut sortie = String::new();
+    let mut reste = texte;
+    while let Some(debut) = reste.find('%') {
+        sortie.push_str(&reste[..debut]);
+        let apres = &reste[debut + 1..];
+        let fin = apres.find('%')?;
+        sortie.push_str(&variable(&apres[..fin])?);
+        reste = &apres[fin + 1..];
+    }
+    sortie.push_str(reste);
+    Some(sortie)
+}
+
+/// Les programmes installés : machine (vues 64 et 32 bits), ce compte, et chaque autre compte dont la session est
+/// ouverte (lisible en administrateur seulement ; sinon rien, et l'inventaire le dit).
+pub(crate) fn programmes() -> Vec<Programme> {
+    const CHEMIN: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+    let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let mut tous = Vec::new();
+    for (vue, nom) in [
+        (
+            KEY_WOW64_64KEY,
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            KEY_WOW64_32KEY,
+            r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+    ] {
+        if let Some(cle) = ouvrir(&machine, UNINSTALL, vue) {
+            tous.extend(programmes_de(&cle, nom, vue, &Portee::Machine));
+        }
+    }
+    // HKCU\Software n'a qu'une vue (partagée entre 32 et 64 bits).
+    if let Some(cle) = ouvrir(&RegKey::predef(HKEY_CURRENT_USER), CHEMIN, KEY_WOW64_64KEY) {
+        tous.extend(programmes_de(
+            &cle,
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+            KEY_WOW64_64KEY,
+            &Portee::CompteCourant,
+        ));
+    }
+    let utilisateurs = RegKey::predef(HKEY_USERS);
+    for sid in ruches_chargees() {
+        if let Some(cle) = ouvrir(&utilisateurs, &format!(r"{sid}\{CHEMIN}"), KEY_WOW64_64KEY) {
+            let nom = format!(r"HKU\{sid}\{CHEMIN}");
+            tous.extend(programmes_de(&cle, &nom, KEY_WOW64_64KEY, &Portee::Compte(sid)));
+        }
+    }
+    tous
+}
+
 /// winget trouvable par son nom, comme `Get-Command winget` : un fichier « winget » + une extension de PATHEXT dans
 /// un dossier du PATH. Celui du Store est un alias d'exécution (point d'analyse) : son entrée se lit sans le suivre.
 pub(crate) fn winget_present() -> bool {
@@ -85,11 +271,110 @@ mod tests {
     }
 
     /// Le vrai registre (Wine ici, la VM ensuite), en lecture seule : la clé Uninstall de la machine s'ouvre et chaque
-    /// nom lu est un vrai nom.
+    /// nom lu est un vrai nom ; les programmes, profils et ruches se lisent sans erreur.
     #[test]
     fn programmes_lus_dans_le_registre() {
         let noms = noms().expect("clé Uninstall de la machine");
         assert!(noms.iter().all(|n| !n.is_empty()), "{noms:?}");
         assert!(paquets_store().iter().all(|p| !p.contains('_')));
+        let programmes = programmes();
+        assert!(
+            programmes
+                .iter()
+                .all(|p| !p.nom.is_empty() && p.cle.contains(r"\Uninstall\"))
+        );
+        assert!(
+            programmes
+                .iter()
+                .all(|p| p.emplacement.as_ref().is_none_or(|e| e.is_absolute()))
+        );
+        assert!(profils().len() <= PROFILS_MAX);
+        assert!(ruches_chargees().iter().all(|s| sid_de_personne(s)));
+    }
+
+    #[test]
+    fn emplacements_locaux_seulement() {
+        assert_eq!(
+            emplacement_local(r#""C:\Program Files\Mozilla Firefox""#),
+            Some(PathBuf::from(r"C:\Program Files\Mozilla Firefox"))
+        );
+        // Un compte qui écrit un chemin réseau dans sa ruche ne doit pas faire sortir de connexion SMB.
+        assert_eq!(emplacement_local(r"\\192.0.2.1\p"), None);
+        assert_eq!(emplacement_local(r"\\?\UNC\192.0.2.1\p"), None);
+        assert_eq!(emplacement_local(r"\\.\pipe\x"), None);
+        assert_eq!(emplacement_local(r"\\?\C:\x"), None);
+        assert_eq!(emplacement_local(r"C:relatif"), None);
+        assert_eq!(emplacement_local(r"\sans-lecteur"), None);
+    }
+
+    #[test]
+    fn sids_et_variables() {
+        assert!(sid_de_personne("S-1-5-21-1-2-3-1001"));
+        assert!(!sid_de_personne("S-1-5-21-1-2-3-1001_Classes"));
+        assert!(!sid_de_personne("S-1-5-18"));
+        assert!(!sid_de_personne("S-1-5-21-"));
+        assert!(sid_de_personne("S-1-12-1-1-2-3-4"));
+        assert!(!sid_de_personne("S-1-12-1-1-2-3-4_Classes"));
+        assert!(!sid_de_personne("S-1-12-1-"));
+        let v = |n: &str| (n == "SystemDrive").then(|| "C:".to_string());
+        assert_eq!(
+            developper(r"%SystemDrive%\Users\alice", &v).as_deref(),
+            Some(r"C:\Users\alice")
+        );
+        assert_eq!(developper(r"C:\Users\alice", &v).as_deref(), Some(r"C:\Users\alice"));
+        assert_eq!(developper(r"%Absente%\x", &v), None);
+        assert_eq!(developper(r"%SystemDrive\x", &v), None);
+    }
+
+    /// Des clés Uninstall inventées sous `HKCU\Software\VanguardTest-<pid>`, effacées ensuite : un programme gardé,
+    /// un composant du système et un correctif écartés, une clé sans nom ignorée, une valeur trop longue oubliée.
+    #[test]
+    fn programmes_d_une_cle_inventee() {
+        let chemin = format!(r"Software\VanguardTest-{}\Uninstall", std::process::id());
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let Ok((cle, _)) = hkcu.create_subkey(&chemin) else {
+            return;
+        };
+        let ecrire = |sous: &str, valeurs: &[(&str, &str)]| {
+            let (k, _) = cle.create_subkey(sous).unwrap();
+            for (n, v) in valeurs {
+                k.set_value(n, &(*v).to_string()).unwrap();
+            }
+            k
+        };
+        ecrire(
+            "{AC76BA86-1033-FFFF-7760-BC15014EA700}",
+            &[
+                ("DisplayName", "Adobe Acrobat (64-bit)"),
+                ("DisplayVersion", "20.005.30774"),
+                ("Publisher", "Adobe Inc."),
+                ("InstallLocation", r"C:\Program Files\Adobe\Acrobat DC\"),
+            ],
+        );
+        ecrire(
+            "Google Chrome",
+            &[("DisplayName", "Google Chrome"), ("DisplayVersion", "156.0.8078.48")],
+        )
+        .set_value("InstallLocation", &"x".repeat(VALEUR_MAX))
+        .unwrap();
+        ecrire("Composant", &[("DisplayName", "Composant")])
+            .set_value("SystemComponent", &1u32)
+            .unwrap();
+        ecrire("KB1", &[("DisplayName", "Correctif"), ("ParentKeyName", "Office")]);
+        ecrire("SansNom", &[("DisplayVersion", "1.0")]);
+        let lus = programmes_de(&cle, "HKCU", KEY_WOW64_64KEY, &Portee::CompteCourant);
+        let _ = hkcu.delete_subkey_all(format!(r"Software\VanguardTest-{}", std::process::id()));
+        let mut noms: Vec<&str> = lus.iter().map(|p| p.nom.as_str()).collect();
+        noms.sort_unstable();
+        assert_eq!(noms, ["Adobe Acrobat (64-bit)", "Google Chrome"]);
+        let acrobat = lus.iter().find(|p| p.editeur == "Adobe Inc.").unwrap();
+        assert_eq!(acrobat.version, "20.005.30774");
+        assert_eq!(
+            acrobat.emplacement.as_deref(),
+            Some(std::path::Path::new(r"C:\Program Files\Adobe\Acrobat DC\"))
+        );
+        assert_eq!(acrobat.cle, r"HKCU\{AC76BA86-1033-FFFF-7760-BC15014EA700}");
+        let chrome = lus.iter().find(|p| p.nom == "Google Chrome").unwrap();
+        assert_eq!(chrome.emplacement, None, "valeur trop longue oubliée");
     }
 }

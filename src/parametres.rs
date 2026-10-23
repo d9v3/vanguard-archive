@@ -7,7 +7,8 @@
 //! par leur interrupteur et son accord), la clé abuse.ch (`protection::abuse_ch`, jamais montrée en entier), la
 //! protection en temps réel (`protection::temps_reel` : coupée d'un coup pour un temps ou jusqu'à reprise, après
 //! accord, sans toucher aux réglages de chacun). Chaque changement est montré avec sa valeur d'avant, et s'annule en
-//! la remettant.
+//! la remettant. Le téléchargement des versions des logiciels (`protection::perimes`) est gardé dans parametres.json
+//! aussi, mais lu à chaque usage : ce n'est pas un réglage du lancement.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -18,7 +19,8 @@ use crate::langue::Reponse;
 use crate::selection::{Ligne, choisir};
 use crate::ui::*;
 
-/// Ce que garde parametres.json : seulement les réglages du lancement.
+/// Ce que garde parametres.json : les réglages du lancement, lus une fois, et celui du téléchargement des versions
+/// des logiciels, lu à chaque usage (`versions_logiciels`).
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq, Eq, Debug)]
 struct Fichier {
     /// « fr » ou « en » ; absente : la langue du système.
@@ -30,6 +32,9 @@ struct Fichier {
     /// Travailler sans Internet, comme VANGUARD_HORS_LIGNE.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     hors_ligne: bool,
+    /// Ne plus télécharger les fichiers des dernières versions des logiciels (oui par défaut).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    sans_versions: bool,
 }
 
 /// Au-delà, ce n'est pas le fichier de Vanguard : il n'est pas lu (le processus élevé de Windows le lit aussi).
@@ -89,6 +94,14 @@ pub(crate) fn hors_ligne() -> bool {
     hors_ligne_voulu(variable.as_deref(), au_demarrage().hors_ligne)
 }
 
+/// Télécharger les fichiers des dernières versions des logiciels ? Oui par défaut ; lu dans le fichier à chaque
+/// usage, pour qu'un changement vaille aussitôt. Un fichier illisible vaut les défauts, comme au lancement. Le travail
+/// sans Internet (`hors_ligne`) coupe aussi ce téléchargement, à part.
+#[cfg(any(windows, target_os = "macos", test))]
+pub(crate) fn versions_logiciels() -> bool {
+    !charger_de(&fichier()).unwrap_or_default().sans_versions
+}
+
 /// La variable d'environnement l'emporte sur le fichier.
 fn priorite(variable: Option<String>, fichier: Option<String>) -> Option<String> {
     variable.or(fichier)
@@ -116,10 +129,11 @@ enum Reglage {
     Blocage,
     Restrictions,
     CleAbuseCh,
+    VersionsLogiciels,
 }
 
 impl Reglage {
-    const TOUS: [Reglage; 10] = [
+    const TOUS: [Reglage; 11] = [
         Reglage::Langue,
         Reglage::Emojis,
         Reglage::HorsLigne,
@@ -130,6 +144,7 @@ impl Reglage {
         Reglage::Blocage,
         Reglage::Restrictions,
         Reglage::CleAbuseCh,
+        Reglage::VersionsLogiciels,
     ];
 
     /// Le mot de la ligne de commande.
@@ -145,6 +160,7 @@ impl Reglage {
             Reglage::Blocage => tr!("blocage", "blocking"),
             Reglage::Restrictions => "restrictions",
             Reglage::CleAbuseCh => "abuse.ch",
+            Reglage::VersionsLogiciels => tr!("versions-logiciels", "software-versions"),
         }
     }
 
@@ -169,6 +185,9 @@ impl Reglage {
             "abuse.ch" | "abuse-ch" | "abusech" | "cle-abuse.ch" | "cle-abuse-ch" | "clé-abuse.ch" | "abuse.ch-key" => {
                 Some(Reglage::CleAbuseCh)
             }
+            "versions-logiciels" | "software-versions" | "versions" | "perimes" | "périmés" | "outdated" => {
+                Some(Reglage::VersionsLogiciels)
+            }
             _ => None,
         }
     }
@@ -185,6 +204,7 @@ impl Reglage {
             Reglage::Blocage => tr!("Blocage des menaces", "Threat blocking"),
             Reglage::Restrictions => tr!("Restrictions des extensions", "Extension restrictions"),
             Reglage::CleAbuseCh => tr!("Clé abuse.ch", "abuse.ch key"),
+            Reglage::VersionsLogiciels => tr!("Versions des logiciels", "Software versions"),
         }
     }
 
@@ -211,6 +231,7 @@ impl Reglage {
             | Reglage::Surveillance
             | Reglage::Entretien
             | Reglage::Restrictions
+            | Reglage::VersionsLogiciels
                 if anglais =>
             {
                 &["yes", "no"]
@@ -219,7 +240,8 @@ impl Reglage {
             | Reglage::TempsReel
             | Reglage::Surveillance
             | Reglage::Entretien
-            | Reglage::Restrictions => &["oui", "non"],
+            | Reglage::Restrictions
+            | Reglage::VersionsLogiciels => &["oui", "non"],
             Reglage::Appris | Reglage::Blocage | Reglage::CleAbuseCh => &[],
         }
     }
@@ -283,6 +305,12 @@ fn changer_dans(f: &mut Fichier, r: Reglage, valeur: &str) -> Result<(String, St
             f.hors_ligne = nouveau;
             Ok((avant, mot_oui_non(f.hors_ligne).to_string()))
         }
+        Reglage::VersionsLogiciels => {
+            let nouveau = oui_non(valeur).ok_or(())?;
+            let avant = mot_oui_non(!f.sans_versions).to_string();
+            f.sans_versions = !nouveau;
+            Ok((avant, mot_oui_non(!f.sans_versions).to_string()))
+        }
         _ => Err(()),
     }
 }
@@ -303,6 +331,7 @@ fn valeur(r: Reglage) -> String {
             .emojis
             .map_or_else(|| tr!("auto", "auto").to_string(), |e| mot_oui_non(e).to_string()),
         Reglage::HorsLigne => mot_oui_non(fichier.hors_ligne).to_string(),
+        Reglage::VersionsLogiciels => mot_oui_non(!fichier.sans_versions).to_string(),
         Reglage::TempsReel => crate::protection::temps_reel::valeur(),
         Reglage::Surveillance => mot_oui_non(crate::reseau::surveillance::active()).to_string(),
         Reglage::Entretien => mot_oui_non(crate::entretien::active()).to_string(),
@@ -560,7 +589,7 @@ fn changer(r: Reglage, saisie: &str) -> bool {
         false
     };
     let (avant, apres) = match r {
-        Reglage::Langue | Reglage::Emojis | Reglage::HorsLigne => {
+        Reglage::Langue | Reglage::Emojis | Reglage::HorsLigne | Reglage::VersionsLogiciels => {
             let chemin = fichier();
             let lu = charger_de(&chemin);
             let mut f = lu.clone().unwrap_or_default();
@@ -694,8 +723,12 @@ fn explication(r: Reglage) -> &'static str {
             "The light bulb and the wrench in front of tips; auto: except in the old Windows console, which draws them badly."
         ),
         Reglage::HorsLigne => tr!(
-            "Ce que Vanguard demande à Internet de lui-même est sauté : adresse vue d'Internet, DNS de l'audit, nouvelle version, empreintes de MalwareBazaar.",
-            "What Vanguard asks the Internet by itself is skipped: address seen from the Internet, the audit's DNS, new version, MalwareBazaar fingerprints."
+            "Ce que Vanguard demande à Internet de lui-même est sauté : adresse vue d'Internet, DNS de l'audit, nouvelle version, empreintes de MalwareBazaar, versions des logiciels.",
+            "What Vanguard asks the Internet by itself is skipped: address seen from the Internet, the audit's DNS, new version, MalwareBazaar fingerprints, software versions."
+        ),
+        Reglage::VersionsLogiciels => tr!(
+            "Oui : Vanguard télécharge une fois par jour, en entier, les fichiers publics des dernières versions (sites des éditeurs, endoflife.date, avis de Mozilla) et le catalogue des failles exploitées de la CISA, les mêmes pour tous : la liste de tes logiciels ne sort jamais. Non : rien n'est téléchargé ; les copies déjà gardées servent encore 30 jours au plus (3 jours pour dire « à jour »), puis les logiciels pas à jour ne sont plus vérifiés, ce qui est dit.",
+            "Yes: once a day, Vanguard downloads the public files of the latest versions in full (publishers' sites, endoflife.date, Mozilla advisories) and CISA's exploited flaws catalog, the same for everyone: the list of your software never leaves. No: nothing is downloaded; the copies already kept still serve for 30 days at most (3 days to say “up to date”), then outdated software is no longer checked, which is said."
         ),
         Reglage::TempsReel => tr!(
             "Coupe d'un coup ce que Vanguard fait tout seul en continu : la surveillance horaire et la protection active du blocage, pendant 1 heure, 4 heures ou jusqu'à ce que tu la remettes. Les réglages de chacun ne changent pas : à la reprise, chacun retrouve son état d'avant. Jamais Defender, le pare-feu ni l'UAC.",
@@ -878,6 +911,7 @@ mod tests {
             langue: Some("en".into()),
             emojis: Some(false),
             hors_ligne: true,
+            sans_versions: true,
         };
         enregistrer_dans(&voulu, &f).unwrap();
         assert_eq!(charger_de(&f).unwrap(), voulu);
@@ -931,6 +965,17 @@ mod tests {
         assert!(changer_dans(&mut f, Reglage::HorsLigne, "oui").is_ok());
         assert!(f.hors_ligne);
         assert_eq!(changer_dans(&mut f, Reglage::HorsLigne, "auto"), Err(()));
+        // Les versions des logiciels : oui par défaut, la valeur d'avant rendue pour revenir.
+        assert!(!f.sans_versions);
+        assert_eq!(
+            changer_dans(&mut f, Reglage::VersionsLogiciels, "non"),
+            Ok((mot_oui_non(true).to_string(), mot_oui_non(false).to_string()))
+        );
+        assert!(f.sans_versions);
+        assert_eq!(changer_dans(&mut f, Reglage::VersionsLogiciels, "auto"), Err(()));
+        assert!(f.sans_versions);
+        assert!(changer_dans(&mut f, Reglage::VersionsLogiciels, "yes").is_ok());
+        assert!(!f.sans_versions);
         // Les réglages qui ont leur propre place ne passent pas par le fichier.
         assert_eq!(changer_dans(&mut f, Reglage::Surveillance, "oui"), Err(()));
         assert_eq!(oui_non("Activée"), Some(true));
@@ -1008,8 +1053,10 @@ mod tests {
                 Reglage::Entretien => ("entretien", "check-up"),
                 Reglage::Appris => ("alertes apprises", "learned alerts"),
                 Reglage::Blocage => ("blocage", "blocking"),
-                Reglage::Restrictions => ("restrictions des extensions", "extension restrictions"),
+                // Onze réglages sur deux lignes de 70 colonnes : les plus longs y sont dits en un mot.
+                Reglage::Restrictions => ("extensions", "extensions"),
                 Reglage::CleAbuseCh => ("clé abuse.ch", "abuse.ch key"),
+                Reglage::VersionsLogiciels => ("versions", "software versions"),
             };
             // Sans tenir compte des majuscules : la phrase du guide commence par l'un d'eux.
             assert!(
@@ -1062,6 +1109,15 @@ mod tests {
         assert_eq!(Reglage::depuis_mot("abuse-ch"), Some(Reglage::CleAbuseCh));
         assert_eq!(Reglage::depuis_mot("Temps-Réel"), Some(Reglage::TempsReel));
         assert_eq!(Reglage::depuis_mot("realtime"), Some(Reglage::TempsReel));
+        for mot in [
+            "versions-logiciels",
+            "software-versions",
+            "versions",
+            "perimes",
+            "outdated",
+        ] {
+            assert_eq!(Reglage::depuis_mot(mot), Some(Reglage::VersionsLogiciels), "{mot}");
+        }
         assert!(est_retirer("Retirer") && est_retirer("remove") && !est_retirer("a1B2c3D4e5F6g7H8i9J0k1L2"));
     }
 }

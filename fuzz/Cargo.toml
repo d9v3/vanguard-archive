@@ -63,3 +63,24 @@ path = "fuzz_targets/courriel_mime.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pe_version"
+path = "fuzz_targets/pe_version.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar"
+path = "fuzz_targets/tar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mfsa"
+path = "fuzz_targets/mfsa.rs"
+test = false
+doc = false
+bench = false

@@ -13,7 +13,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
-CIBLES=(plist http_local dns_client chronologie igd courriel_mime)
+CIBLES=(plist http_local dns_client chronologie igd courriel_mime pe_version tar mfsa)
 QUOI=${1:-tout}
 DUREE=${2:-60}
 FUZZ=${VANGUARD_FUZZ:-$HOME/.cache/vanguard-dev/fuzz}

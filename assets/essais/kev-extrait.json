@@ -1,0 +1,245 @@
+{
+  "title": "CISA Catalog of Known Exploited Vulnerabilities",
+  "catalogVersion": "2026.10.21",
+  "dateReleased": "2026-10-21T14:04:39.8983Z",
+  "count": 15,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2026-87491",
+      "vendorProject": "Google",
+      "product": "Chromium V8",
+      "vulnerabilityName": "Google Chromium V8 Out of Bounds Write Vulnerability",
+      "dateAdded": "2026-09-09",
+      "shortDescription": "Google Chromium V8 contains an out of bounds write vulnerability that allows a remote attacker to execute arbitrary code inside the sandbox via a crafted HTML page. This vulnerability could affect multiple web browsers that utilize Chromium, including, but not limited to, Google Chrome, Microsoft Edge, and Opera.",
+      "requiredAction": "Apply mitigations in accordance with vendor instructions, ensuring compliance with CISA’s BOD 26-04 Prioritizing Security Updates Based on Risk (see URL in Notes) guidance and CISA’s “Forensics Triage Requirements” (see URL in Notes). Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.",
+      "dueDate": "2026-09-23",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://chromereleases.googleblog.com/2026/09/stable-channel-update-for-desktop_0808145027.html ; BOD 26-04: https://www.cisa.gov/news-events/directives/bod-26-04-prioritizing-security-updates-based-risk ; Forensics Triage Requirements: https://www.cisa.gov/news-events/directives/bod-26-04-implementation-guidance-prioritizing-security-updates-based-risk ; https://nvd.nist.gov/vuln/detail/CVE-2026-87491 ",
+      "cwes": [
+        "CWE-787"
+      ]
+    },
+    {
+      "cveID": "CVE-2026-85046",
+      "vendorProject": "Google",
+      "product": "Chromium V8",
+      "vulnerabilityName": "Google Chromium V8 Type Confusion Vulnerability",
+      "dateAdded": "2026-09-04",
+      "shortDescription": "Google Chromium V8 contains a type confusion vulnerability that allows a remote attacker to execute arbitrary code inside the sandbox via a crafted HTML page. This vulnerability could affect multiple web browsers that utilize Chromium, including, but not limited to, Google Chrome, Microsoft Edge, and Opera.",
+      "requiredAction": "Apply mitigations in accordance with vendor instructions, ensuring compliance with CISA’s BOD 26-04 Prioritizing Security Updates Based on Risk (see URL in Notes) guidance and CISA’s “Forensics Triage Requirements” (see URL in Notes). Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.",
+      "dueDate": "2026-09-18",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://chromereleases.googleblog.com/2026/09/stable-channel-update-for-desktop_01882797386.html ; BOD 26-04: https://www.cisa.gov/news-events/directives/bod-26-04-prioritizing-security-updates-based-risk ; Forensics Triage Requirements: https://www.cisa.gov/news-events/directives/bod-26-04-implementation-guidance-prioritizing-security-updates-based-risk ; https://nvd.nist.gov/vuln/detail/CVE-2026-85046",
+      "cwes": [
+        "CWE-843"
+      ]
+    },
+    {
+      "cveID": "CVE-2026-11645",
+      "vendorProject": "Google",
+      "product": "Chromium V8",
+      "vulnerabilityName": "Google Chromium V8 Out-of-Bounds Read and Write Vulnerability",
+      "dateAdded": "2026-06-09",
+      "shortDescription": "Google Chromium V8 out-of-bounds read and write vulnerability that could allow a remote attacker to execute arbitrary code inside a sandbox via a crafted HTML page. This vulnerability could affect multiple web browsers that utilize Chromium, including, but not limited to, Google Chrome, Microsoft Edge, and Opera.",
+      "requiredAction": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "dueDate": "2026-06-23",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://chromereleases.googleblog.com/2026/06/stable-channel-update-for-desktop_0153744567.html ; https://issues.chromium.org/issues/506689381 ; https://nvd.nist.gov/vuln/detail/CVE-2026-11645",
+      "cwes": [
+        "CWE-787",
+        "CWE-125"
+      ]
+    },
+    {
+      "cveID": "CVE-2020-16010",
+      "vendorProject": "Google",
+      "product": "Chrome for Android UI",
+      "vulnerabilityName": "Google Chrome for Android UI Heap Buffer Overflow Vulnerability",
+      "dateAdded": "2021-11-03",
+      "shortDescription": "Google Chrome for Android UI contains a heap buffer overflow vulnerability that allows a remote attacker, who has compromised the renderer process, to potentially perform a sandbox escape via a crafted HTML page.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-05-03",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://nvd.nist.gov/vuln/detail/CVE-2020-16010",
+      "cwes": [
+        "CWE-787"
+      ]
+    },
+    {
+      "cveID": "CVE-2024-9680",
+      "vendorProject": "Mozilla",
+      "product": "Firefox",
+      "vulnerabilityName": "Mozilla Firefox Use-After-Free Vulnerability",
+      "dateAdded": "2024-10-15",
+      "shortDescription": "Mozilla Firefox and Firefox ESR contain a use-after-free vulnerability in Animation timelines that allows for code execution in the content process.",
+      "requiredAction": "Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.",
+      "dueDate": "2024-11-05",
+      "knownRansomwareCampaignUse": "Known",
+      "forensicTriage": "No",
+      "notes": "https://www.mozilla.org/en-US/security/advisories/mfsa2024-51/ ; https://nvd.nist.gov/vuln/detail/CVE-2024-9680",
+      "cwes": [
+        "CWE-416"
+      ]
+    },
+    {
+      "cveID": "CVE-2015-4495",
+      "vendorProject": "Mozilla",
+      "product": "Firefox",
+      "vulnerabilityName": "Mozilla Firefox Security Feature Bypass Vulnerability",
+      "dateAdded": "2022-05-25",
+      "shortDescription": "Moxilla Firefox allows remote attackers to bypass the Same Origin Policy to read arbitrary files or gain privileges.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-06-15",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://nvd.nist.gov/vuln/detail/CVE-2015-4495",
+      "cwes": [
+        "CWE-200"
+      ]
+    },
+    {
+      "cveID": "CVE-2016-9079",
+      "vendorProject": "Mozilla",
+      "product": "Firefox, Firefox ESR, and Thunderbird",
+      "vulnerabilityName": "Mozilla Firefox, Firefox ESR, and Thunderbird Use-After-Free Vulnerability",
+      "dateAdded": "2023-06-22",
+      "shortDescription": "Mozilla Firefox, Firefox ESR, and Thunderbird contain a use-after-free vulnerability in SVG Animation, targeting Firefox and Tor browser users on Windows.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2023-07-13",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://www.mozilla.org/en-US/security/advisories/mfsa2016-92/#CVE-2016-9079; https://nvd.nist.gov/vuln/detail/CVE-2016-9079",
+      "cwes": [
+        "CWE-416"
+      ]
+    },
+    {
+      "cveID": "CVE-2009-0238",
+      "vendorProject": "Microsoft",
+      "product": "Office",
+      "vulnerabilityName": "Microsoft Office Remote Code Execution",
+      "dateAdded": "2026-04-14",
+      "shortDescription": "Microsoft Office Excel contains a remote code execution vulnerability that could allow an attacker to take complete control of an affected system if a user opens a specially crafted Excel file that includes a malformed object.",
+      "requiredAction": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "dueDate": "2026-04-28",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://learn.microsoft.com/en-us/security-updates/securitybulletins/2009/ms09-009 ; https://nvd.nist.gov/vuln/detail/CVE-2009-0238",
+      "cwes": [
+        "CWE-94"
+      ]
+    },
+    {
+      "cveID": "CVE-2023-36761",
+      "vendorProject": "Microsoft",
+      "product": "Word",
+      "vulnerabilityName": "Microsoft Word Information Disclosure Vulnerability",
+      "dateAdded": "2023-09-12",
+      "shortDescription": "Microsoft Word contains an unspecified vulnerability that allows for information disclosure.",
+      "requiredAction": "Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.",
+      "dueDate": "2023-10-03",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://msrc.microsoft.com/update-guide/vulnerability/CVE-2023-36761;  https://nvd.nist.gov/vuln/detail/CVE-2023-36761",
+      "cwes": [
+        "CWE-668"
+      ]
+    },
+    {
+      "cveID": "CVE-2023-36563",
+      "vendorProject": "Microsoft",
+      "product": "WordPad",
+      "vulnerabilityName": "Microsoft WordPad Information Disclosure Vulnerability",
+      "dateAdded": "2023-10-10",
+      "shortDescription": "Microsoft WordPad contains an unspecified vulnerability that allows for information disclosure.",
+      "requiredAction": "Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.",
+      "dueDate": "2023-10-31",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://msrc.microsoft.com/update-guide/en-US/vulnerability/CVE-2023-36563;  https://nvd.nist.gov/vuln/detail/CVE-2023-36563",
+      "cwes": [
+        "CWE-20"
+      ]
+    },
+    {
+      "cveID": "CVE-2017-0037",
+      "vendorProject": "Microsoft",
+      "product": "Edge and Internet Explorer",
+      "vulnerabilityName": "Microsoft Edge and Internet Explorer Type Confusion Vulnerability",
+      "dateAdded": "2022-03-28",
+      "shortDescription": "Microsoft Edge and Internet Explorer have a type confusion vulnerability in mshtml.dll, which allows remote code execution.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-04-18",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://nvd.nist.gov/vuln/detail/CVE-2017-0037",
+      "cwes": [
+        "CWE-704"
+      ]
+    },
+    {
+      "cveID": "CVE-2009-3459",
+      "vendorProject": "Adobe",
+      "product": "Acrobat and Reader",
+      "vulnerabilityName": "Adobe Acrobat and Reader Heap-Based Buffer Overflow Vulnerability",
+      "dateAdded": "2026-05-20",
+      "shortDescription": "Adobe Acrobat and Reader contain a heap-based buffer overflow vulnerability which could allow remote attackers to execute arbitrary code via a crafted PDF file that triggers memory corruption.",
+      "requiredAction": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "dueDate": "2026-06-03",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://www.cisa.gov/news-events/alerts/2009/10/13/adobe-reader-and-acrobat-vulnerabilities ; https://web.archive.org/web/20120324170253/http://www.adobe.com/support/security/bulletins/apsb09-15.html#:~:text=CVE%2D2009%2D3459).-,NOTE%3A,-There%20are%20reports ; https://nvd.nist.gov/vuln/detail/CVE-2009-3459",
+      "cwes": [
+        "CWE-119"
+      ]
+    },
+    {
+      "cveID": "CVE-2011-2462",
+      "vendorProject": "Adobe",
+      "product": "Reader and Acrobat",
+      "vulnerabilityName": "Adobe Reader and Acrobat Universal 3D Memory Corruption Vulnerability",
+      "dateAdded": "2022-06-08",
+      "shortDescription": "The Universal 3D (U3D) component in Adobe Reader and Acrobat contains a memory corruption vulnerability which could allow remote attackers to execute code or cause denial-of-service (DoS).",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-06-22",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://nvd.nist.gov/vuln/detail/CVE-2011-2462",
+      "cwes": [
+        "CWE-787"
+      ]
+    },
+    {
+      "cveID": "CVE-2016-3427",
+      "vendorProject": "Oracle",
+      "product": "Java SE and JRockit",
+      "vulnerabilityName": "Oracle Java SE and JRockit Unspecified Vulnerability",
+      "dateAdded": "2023-05-12",
+      "shortDescription": "Oracle Java SE and JRockit contains an unspecified vulnerability that allows remote attackers to affect confidentiality, integrity, and availability via vectors related to Java Management Extensions (JMX). This vulnerability can be exploited through sandboxed Java Web Start applications and sandboxed Java applets. It can also be exploited by supplying data to APIs in the specified component without using sandboxed Java Web Start applications or sandboxed Java applets, such as through a web service.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2023-06-02",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://www.oracle.com/security-alerts/cpuapr2016v3.html; https://nvd.nist.gov/vuln/detail/CVE-2016-3427",
+      "cwes": []
+    },
+    {
+      "cveID": "CVE-2013-2423",
+      "vendorProject": "Oracle",
+      "product": "Java Runtime Environment (JRE)",
+      "vulnerabilityName": "Oracle JRE Unspecified Vulnerability",
+      "dateAdded": "2022-05-25",
+      "shortDescription": "Unspecified vulnerability in hotspot for Java Runtime Environment (JRE) allows remote attackers to affect integrity.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-06-15",
+      "knownRansomwareCampaignUse": "Unknown",
+      "forensicTriage": "No",
+      "notes": "https://nvd.nist.gov/vuln/detail/CVE-2013-2423",
+      "cwes": []
+    }
+  ]
+}

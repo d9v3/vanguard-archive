@@ -138,10 +138,11 @@ def lire_depot(suivis, web, internes):
     """Les liens web de tous les fichiers suivis par git, et les liens relatifs des pages Markdown."""
     for fichier in sorted(suivis):
         # Les tests du programme (tests/) inventent leurs adresses, comme les modules de tests du code et les graines du
-        # fuzzing (fuzz/graines/), des réponses de box et des plists d'exemple.
+        # fuzzing (fuzz/graines/), des réponses de box et des plists d'exemple ; les copies réduites de fichiers réels
+        # (assets/essais/) en portent des milliers, qui sont des données, pas des liens du projet.
         if (
             fichier in PAS_DES_LIENS
-            or fichier.startswith(("tests/", "fuzz/graines/"))
+            or fichier.startswith(("tests/", "fuzz/graines/", "assets/essais/"))
             or fichier.lower().endswith(BINAIRES)
         ):
             continue

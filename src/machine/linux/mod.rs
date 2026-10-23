@@ -1262,39 +1262,13 @@ fn mtree_pacman(paquet: &str) -> Option<String> {
     };
     let fichier = format!("{PACMAN_LOCAL}/{dossier}/mtree");
     let octets = std::fs::read(&fichier).ok()?;
-    match degzip(&octets) {
+    // Un mtree fait quelques centaines de ko ; au-delà de 256 Mo, ce n'en est pas un. Le repli sur zcat reste ici, propre
+    // à Linux : le lecteur commun (`archives::gzip`) ne lance aucune commande.
+    match crate::archives::gzip::degzip(&octets, 256 << 20) {
         Some(texte) => String::from_utf8(texte).ok(),
         None if octets.starts_with(&[0x1f, 0x8b]) => None,
         None => sortie("zcat", &[&fichier]),
     }
-}
-
-/// Le contenu d'un fichier gzip (RFC 1952) : l'en-tête sauté (nom, commentaire, champ libre et son contrôle s'ils
-/// sont là), puis le flux deflate que miniz_oxide sait lire. `None` si ce n'est pas du gzip ou s'il est abîmé.
-fn degzip(octets: &[u8]) -> Option<Vec<u8>> {
-    const FHCRC: u8 = 2;
-    const FEXTRA: u8 = 4;
-    const FNAME: u8 = 8;
-    const FCOMMENT: u8 = 16;
-    if octets.get(..3)? != [0x1f, 0x8b, 8] {
-        return None;
-    }
-    let drapeaux = *octets.get(3)?;
-    let mut pos = 10usize;
-    if drapeaux & FEXTRA != 0 {
-        let n = u16::from_le_bytes([*octets.get(pos)?, *octets.get(pos + 1)?]);
-        pos += 2 + usize::from(n);
-    }
-    for champ in [FNAME, FCOMMENT] {
-        if drapeaux & champ != 0 {
-            pos += octets.get(pos..)?.iter().position(|&o| o == 0)? + 1;
-        }
-    }
-    if drapeaux & FHCRC != 0 {
-        pos += 2;
-    }
-    // Un mtree fait quelques centaines de ko ; au-delà de 256 Mo, ce n'en est pas un.
-    miniz_oxide::inflate::decompress_to_vec_with_limit(octets.get(pos..)?, 256 << 20).ok()
 }
 
 /// Le système de fichiers racine repose-t-il sur un volume chiffré (LUKS, éventuellement sous LVM) ?
@@ -1984,24 +1958,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn gzip_lu_sans_zcat() {
-        let texte = b"#mtree\n./usr/bin/sudo time=1 sha256digest=00ff\n";
-        let flux = miniz_oxide::deflate::compress_to_vec(texte, 6);
-        // En-tête avec un nom de fichier (FNAME), comme gzip l'écrit ; la fin (CRC, taille) est ignorée.
-        let mut gz = vec![0x1f, 0x8b, 8, 8, 0, 0, 0, 0, 0, 3];
-        gz.extend_from_slice(b".MTREE\0");
-        gz.extend_from_slice(&flux);
-        gz.extend_from_slice(&[0; 8]);
-        assert_eq!(degzip(&gz).as_deref(), Some(&texte[..]));
-        // Champ libre (FEXTRA) et contrôle d'en-tête (FHCRC).
-        let mut gz = vec![0x1f, 0x8b, 8, 4 | 2, 0, 0, 0, 0, 0, 3, 3, 0, 1, 2, 3, 0xaa, 0xbb];
-        gz.extend_from_slice(&flux);
-        assert_eq!(degzip(&gz).as_deref(), Some(&texte[..]));
-        assert!(degzip("#mtree pas compressé".as_bytes()).is_none());
-        assert!(degzip(&[0x1f, 0x8b, 8, 8, 0]).is_none());
-    }
-
     /// Sur cet ordinateur, le mtree d'un paquet pacman se lit comme zcat le lit, quand les deux sont là.
     #[test]
     fn mtree_comme_zcat() {
@@ -2017,7 +1973,8 @@ mod tests {
         let Some(attendu) = commande("zcat", &[&mtree.to_string_lossy()]) else {
             return;
         };
-        let lu = degzip(&std::fs::read(&mtree).unwrap()).map(|o| String::from_utf8(o).unwrap());
+        let lu = crate::archives::gzip::degzip(&std::fs::read(&mtree).unwrap(), 256 << 20)
+            .map(|o| String::from_utf8(o).unwrap());
         assert_eq!(lu.as_deref(), Some(attendu.as_str()), "{}", mtree.display());
     }
 
