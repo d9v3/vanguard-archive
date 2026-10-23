@@ -160,3 +160,12 @@ Pushover, Gmail…) sans accord.
 des réponses, versionnés), `reglages-claude.json` (permissions et bac à sable), `systemd/`, `installer.sh`, `essai.sh`.
 État : `~/.cache/vanguard-dev/veille/` (rapports, `etat/`, `canaris/<jour>/` gardés 7 jours, `nuits/<jour>/` 15
 jours, `ia/`, `journal/`).
+
+## Sur demande
+
+Une relecture ou une correction demandée par l'auteur se fait **tout de suite**, même si celle de la semaine ou de la
+nuit a déjà eu lieu : les limites de budget ne valent que pour les passages automatiques. Les interrupteurs
+(`COUPER-IA`, `COUPER-TOUT`) et la limite d'usage de Claude, eux, valent toujours.
+
+    VANGUARD_VEILLE_DEMANDE=1 ~/.local/share/vanguard-veille/courante/hebdo.sh     # relecture de sécurité maintenant
+    VANGUARD_VEILLE_DEMANDE=1 ~/.local/share/vanguard-veille/courante/nuit.sh      # passage de nuit maintenant

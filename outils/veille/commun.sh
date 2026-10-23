@@ -109,6 +109,10 @@ refus_ia() {
   local genre=$1 attente commun
   commun=$(refus_commun)
   [[ -n $commun ]] && { echo "$commun"; return; }
+  # Lancé à la main par l'auteur (VANGUARD_VEILLE_DEMANDE=1, jamais posé par les minuteries) : sa demande passe
+  # toujours, même si la relecture de la semaine ou la correction de la nuit a déjà eu lieu. Ses interrupteurs et la
+  # limite d'usage de Claude valent encore (refus_commun, plus haut).
+  [[ -n ${VANGUARD_VEILLE_DEMANDE:-} ]] && return
   if [[ $genre == hebdo ]]; then
     (($(lancements_depuis 6 hebdo) == 0)) || echo "relecture hebdomadaire déjà faite cette semaine"
     return
