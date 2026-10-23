@@ -102,128 +102,79 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   refaites depuis l'adresse, le port ou la valeur notés, et un blocage non reconnu est refusé et montré au lieu de
   partir en administrateur. Annuler ne remet qu'une copie de réglages de Claude Code faite par Vanguard, et remettre
   comme avant les réglages pour jouer ne réécrit en root que ce que Vanguard met dans /etc.
-- **Préparer un signalement à un éditeur (`vanguard signaler`, alias `disclose`).** L'assistant trie d'abord : une
-  faille déjà connue (CVE, catalogue de la CISA) se corrige par une mise à jour, un logiciel malveillant, une
-  détection ratée ou un site d'hameçonnage ne sont pas des failles de l'éditeur (où envoyer soi-même est nommé, rien
-  n'est préparé), un contournement d'AppLocker ou de l'accès contrôlé aux dossiers est dit non corrigé par défaut chez
-  Microsoft. Pour un comportement anormal, il prépare un brouillon au format du programme choisi (MSRC, Google,
-  Chrome, Mozilla, Apple, avis GHSA, CERT/CC, CERT-FR, Vanguard), avec le fil de l'incident ou l'examen d'un outil,
-  l'état du journal (falsifié : « non vérifié » ; adopté ou incomplet : « non prouvé »), et ce que seule la personne
-  sait (titré INCOMPLET tant qu'il manque ses étapes, ce qui s'est passé, ou la preuve de concept exigée par MSRC,
-  Apple et Chrome). Ce qui est personnel est retiré en trois couches : rien d'inutile (ni ligne de commande, ni compte
-  d'un proche, ni nom de fichier personnel), tout masqué (chemins, noms, adresses, requêtes des adresses web), puis un
-  contrôle final qui refuse d'écrire si un nom connu survit ; le décompte est montré. Un chemin coupé à gauche par
-  « … » est réduit en entier, un mot avant « : » (« fichier: », « file:// ») n'est plus pris pour un lecteur, et
-  l'examen des logiciels périmés n'emporte que le produit touché par une faille exploitée, jamais la liste des
-  logiciels installés. Un examen sain, non vérifié ou falsifié ne tranche rien, un tri tiré d'un journal non vérifié
-  le dit, et sans CVE citée le catalogue de la CISA est « non vérifié », jamais « absente ». Les valeurs venues de
-  l'extérieur vont dans des blocs de code, le reste est neutralisé (ni mention, ni image, ni lien). Le texte est
-  montré en entier, écrit après accord dans le dossier de cet ordinateur (fichier 0600), noté au journal sans son
-  contenu ; `--effacer` les retire, la désinstallation les compte avant. Rien n'est jamais envoyé : aucun code réseau
-  dans le module (vérifié par une liste fermée des appels), ni presse-papier ni courriel.
-- **Autodiagnostic (`vanguard autotest`).** Vanguard vérifie ses propres lectures là où il travaille vraiment : chaque
-  règle du bilan sous garde et délai, en lecture seule prouvée (un interrupteur refuse toute écriture d'état, même
-  d'une règle restée bloquée au-delà de son délai, et des empreintes BLAKE3 du dossier avant et après nomment ce qui
-  aurait changé ; une passe de la surveillance pendant l'essai rend la preuve non concluante, jamais « changé »), des
-  invariants sur chaque constat, et dix lectures croisées sous Linux (pacman, dpkg, AUR, unités activées et en échec,
-  groupes, ports en écoute, racine chiffrée, version de sshd, DNS de resolved) et quatre sous Windows (pare-feu,
-  Defender, BitLocker en administrateur, comptes locaux, en JSON) comparées aux outils du système ; les tests
-  « comme l'outil » appellent les mêmes fonctions. Hors ligne par défaut (`--internet`), `--json` sans aucune valeur
-  de l'ordinateur, `--detail` montre les valeurs à l'écran seulement ; code de sortie 0, 1 ou 2. La durée de chaque
-  règle va au journal des mesures (8 semaines en résumé par jour) qui signale une règle trois fois plus lente ou
-  proche de son délai. Une fois par semaine, la surveillance refait les lectures croisées sur le bilan de sa passe
-  (réglage « autotest », reporté pendant un jeu sous GameMode) ; une lecture contredite le dit aux constats sains de
-  ses règles ; le diagnostic montre le dernier autotest. Un écart va au journal des erreurs (identifiants, nombres,
-  genre d'écart), et `journal-vers-github.py` réunit les occurrences d'un même envoi en un commentaire, sans plus
-  mêler deux identifiants dans un même ticket. Jamais un faux « sain » : deux lectures ratées de Defender ou de
-  BitLocker, une ligne de `ss` illisible ou les unités du compte non lues donnent « non vérifié », pas « pareil »
-  ni « sans objet » ; une lecture contredite reste annoncée, à sa date, tant qu'un essai ne l'a pas tranchée ;
-  moins de 5 semaines de mesures, non vérifié aussi.
-- **Veilleur anti-rançongiciel.** Le veilleur peut maintenant surveiller en direct tes dossiers personnels : une
-  rafale de chiffrement (des dizaines de fichiers réécrits en quelques secondes, leur contenu qui ne ressemble plus à
-  leur format, une note de rançon, un fichier-piège touché) t'alerte en quelques secondes au lieu d'attendre la
-  vérification horaire. Sans droits d'administrateur et sans nouvelle dépendance (inotify par la crate déjà présente ;
-  « qui » par les compteurs d'écriture des processus). Avec la protection active et un cas quasi certain (piège touché
+- **Signaler une faille à un éditeur** (`vanguard signaler`, alias `disclose` ; menu Antivirus et protection). Un
+  assistant prépare le brouillon d'un rapport de faille, que la personne relit et envoie elle-même. Il trie d'abord :
+  une faille déjà connue (CVE, catalogue de la CISA) se corrige par une mise à jour ; un logiciel malveillant, une
+  détection ratée ou un site d'hameçonnage ne sont pas des failles de l'éditeur (le bon destinataire est nommé, rien
+  n'est préparé) ; un contournement d'AppLocker ou de l'accès contrôlé aux dossiers est dit non corrigé par défaut
+  chez Microsoft. Pour un comportement anormal, le brouillon suit le format du programme choisi (MSRC, Google, Chrome,
+  Mozilla, Apple, avis GHSA, CERT/CC, CERT-FR, Vanguard) et reprend le fil d'un incident ou l'examen d'un outil, avec
+  l'état du journal (falsifié : « non vérifié » ; adopté ou incomplet : « non prouvé ») ; il reste titré INCOMPLET tant
+  qu'il manque ce que seule la personne sait (ses étapes, ce qui s'est passé, la preuve de concept qu'exigent MSRC,
+  Apple et Chrome). Un examen sain, non vérifié ou falsifié ne tranche rien, et sans CVE citée, le catalogue de la
+  CISA est « non vérifié », jamais « absente ». Ce qui est personnel est retiré en trois couches : rien d'inutile (ni
+  ligne de commande, ni compte d'un proche, ni nom de fichier personnel), tout masqué (chemins, noms, adresses,
+  requêtes des adresses web), puis un contrôle final qui refuse d'écrire si un nom connu survit ; le décompte est
+  montré. L'examen des logiciels pas à jour n'emporte que le produit touché par une faille exploitée, jamais la liste
+  des logiciels installés. Les valeurs venues de l'extérieur vont dans des blocs de code, le reste est neutralisé (ni
+  mention, ni image, ni lien). Le texte est montré en entier, écrit après accord dans le dossier de Vanguard de cet
+  ordinateur (fichier 0600) et noté au journal sans son contenu ; `--effacer` retire les brouillons, que la
+  désinstallation compte avant. Rien n'est jamais envoyé : aucun code réseau dans le module (vérifié par une liste
+  fermée des appels), ni presse-papier, ni courriel.
+- **Autodiagnostic** (`vanguard autotest`, alias `self-test`). Vanguard vérifie ses propres lectures sur l'ordinateur
+  où il travaille, sans rien y changer. Chaque règle du bilan tourne sous garde et délai, en lecture seule prouvée : un
+  interrupteur refuse toute écriture d'état, même d'une règle restée bloquée au-delà de son délai, et des empreintes
+  BLAKE3 du dossier de Vanguard, avant et après, nommeraient ce qui a changé (une passe de la surveillance pendant
+  l'essai rend la preuve non concluante, jamais « changé »). Chaque constat passe par des invariants. Dix lectures
+  croisées sous Linux (pacman, dpkg, AUR, unités activées et en échec, groupes, ports en écoute, racine chiffrée,
+  version de sshd, DNS de resolved) et quatre sous Windows (pare-feu, Defender, BitLocker en administrateur, comptes
+  locaux, en JSON) comparent ce que lit Vanguard à ce que disent les outils du système ; les tests « comme l'outil »
+  appellent les mêmes fonctions. Hors ligne par défaut (`--internet` pour les règles qui en ont besoin) ; `--json` ne
+  contient aucune valeur de l'ordinateur, `--detail` montre les valeurs à l'écran seulement ; code de sortie 0, 1 ou
+  2. La durée de chaque règle va au journal des mesures (huit semaines, résumées par jour), qui signale une règle
+  trois fois plus lente que d'habitude ou proche de son délai. Une fois par semaine, la surveillance refait les
+  lectures croisées sur le bilan de sa passe (réglage « autotest », reporté pendant un jeu sous GameMode) ; une
+  lecture contredite est dite à côté des constats sains de ses règles, et le diagnostic montre le dernier
+  autodiagnostic. Un écart va au journal des erreurs (identifiants, nombres, genre d'écart, aucune valeur de
+  l'ordinateur) ; `journal-vers-github.py` réunit les occurrences d'un même envoi en un seul commentaire et ne mêle
+  plus deux identifiants dans un même ticket. Jamais un faux « sain » : deux lectures ratées de Defender ou de
+  BitLocker, une ligne de `ss` illisible ou des unités du compte non lues donnent « non vérifié », ni « pareil » ni
+  « sans objet » ; une lecture contredite reste annoncée, avec sa date, tant qu'un nouvel essai ne l'a pas tranchée ;
+  avant cinq semaines de mesures, la comparaison des durées est dite non vérifiée.
+- **Veilleur anti-rançongiciel** (Linux, `vanguard veilleur rancongiciel on`). Le veilleur peut maintenant surveiller
+  en direct les dossiers personnels (Documents, Images, Bureau, Musique, Vidéos et Téléchargements) : une rafale de
+  chiffrement (des dizaines de fichiers réécrits en quelques secondes, un contenu qui ne ressemble plus à son format,
+  une note de rançon, un fichier-piège touché, des copies de secours effacées) donne une alerte en quelques secondes
+  au lieu d'attendre la vérification horaire des pièges, et « Bloquer » est proposé au bilan suivant. Ni droits
+  d'administrateur ni nouvelle dépendance : inotify, par la crate déjà présente, voit les fichiers changer, et les
+  compteurs d'écriture des processus disent qui écrit. Avec la protection active et un cas quasi certain (piège touché
   et rafale attribuée sans ambiguïté à un programme), Vanguard gèle le programme et sa descendance, relève la preuve,
-  puis l'arrête et le met en quarantaine, avec tous les garde-fous du blocage ; sinon, il alerte seulement. Proposé
-  dans le même accord que « vanguard veilleur on » (ou « vanguard veilleur rancongiciel on »), coupé par défaut ; un
-  programme malveillant de ton compte peut l'éteindre, ta sauvegarde reste la vraie protection. Surveillés : Documents,
-  Images, Bureau, Musique, Vidéos et Téléchargements. Retirer les pièges ne fait pas crier « rançongiciel possible »,
-  et une alerte d'un outil de chiffrement voulu peut se déclarer normale. Limite dite : un programme qui écrit par un
-  lien physique placé hors de ces dossiers échappe à la veille en direct (les pièges restent vérifiés chaque heure).
-- **Bilan post-quantique, en lecture seule.** Un trafic chiffré capté aujourd'hui se garde et se lira le jour où un
+  puis l'arrête et le met en quarantaine, avec tous les garde-fous du blocage ; un programme qu'un garde-fou refuse
+  d'arrêter reste gelé, et c'est dit. Sinon, Vanguard alerte seulement. Proposé dans le même accord que
+  `vanguard veilleur on`, coupé par défaut. Retirer les pièges ne fait pas crier « rançongiciel possible », et l'alerte
+  d'un outil de chiffrement voulu peut se déclarer normale. Limites dites : un programme malveillant du compte peut
+  éteindre la veille, et la sauvegarde reste la vraie protection ; une écriture par un lien physique placé hors de ces
+  dossiers échappe à la veille en direct (les pièges restent vérifiés chaque heure).
+- **Bilan post-quantique, en lecture seule.** Un trafic chiffré capté aujourd'hui peut être gardé et lu le jour où un
   ordinateur quantique existera : le bilan dit où cet ordinateur n'a pas d'échange de clés post-quantique, sans rien
-  changer. Serveur et client SSH (COM-PQC-001, 002) : la liste que sshd et ssh retiennent vraiment, selon la version
-  d'OpenSSH lue sans le lancer (sntrup depuis 8.5, par défaut depuis 9.0, ML-KEM depuis 9.9) et les « + », « - », « ^ »
-  écrits ; le conseil ne nomme jamais un algorithme que la version ne connaît pas, ne place jamais un nom devant un « +
-  », un « - » ou un « ^ » (sshd ne redémarrerait pas), et dit « sshd -t » d'abord ; un réglage pour un seul hôte reste
-  une information, sans son nom. Navigateurs (COM-NAV-004) : X25519MLKEM768 coupé par une préférence de Firefox ou une
-  stratégie (Firefox, et Chrome ou Edge jusqu'à 146 ; au-delà, la stratégie est dite sans effet ; Firefox :
-  policies.json, et sous Windows le registre (la stratégie et ses Preferences) puis distribution\policies.json ; une
-  préférence mise à false seulement par défaut compte tant que le profil n'écrit rien ; security.tls.enable_kyber, que
-  Firefox refuse dans Preferences, ne compte pas) ; sans coupure, la version : Firefox avant 132 et Chrome avant 124 ne
-  le proposent pas par défaut, Chrome de 124 à 130 propose X25519Kyber768, une version illisible (Brave, Vivaldi, Zen…)
-  n'est pas vérifiée. WireGuard (COM-PQC-003) : les pairs sans clé pré-partagée, comptés sans jamais garder une clé
-  (fichiers lus seulement en administrateur ; sans droits, sans fichier ou chiffré pour SYSTEM : non vérifié, raison
-  dite). À l'audit du réseau : l'administration de la box (SSH, HTTPS trouvés ouverts par le scan) qui ne propose rien
-  de post-quantique, en une information regroupée (COM-TLS-004), et le chemin vers Internet qui retirerait l'échange
-  (COM-TLS-005), par une sonde TLS écrite à la main vers le site de référence déjà contacté, sans calculer aucune clé ;
-  un refus n'est conclu que si l'interception se voit déjà au certificat, sinon non vérifié ; un proxy réglé, ou
-  illisible, laisse non vérifié (sous Linux, celui du bureau GNOME ou KDE aussi). Aucune bibliothèque ajoutée.
-- **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
-  carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
-  `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la
-  catégorie Public compte parmi ce qui ferme les entrées : un réseau resté en Privé, d'entreprise ou à la catégorie
-  illisible laisse le mode « allumé, entrées ouvertes », et un réglage qui ne se relit pas s'affiche non vérifié, jamais
-  ✔. Sous Linux, un DNS, un DNS chiffré, mDNS ou LLMNR défait par un programme du compte (NetworkManager le permet sans
-  mot de passe) se voit au bilan (Moyen), sur la ligne du menu et dans son en-tête, avec de quoi le reposer. Le DNS
-  n'est plus gardé « déjà chiffré et filtrant » quand un seul de ses serveurs filtre : il faut qu'ils filtrent tous,
-  sinon le Bouclier est posé ; le bilan ne dit plus non plus qu'un tel DNS bloque les sites dangereux.
-- **Campagne d'attaque n° 2 : huit faiblesses fermées.** « Tout remettre comme avant » ne rejoue plus jamais le
-  texte d'une commande lu dans changements.jsonl (que tout programme du compte peut écrire) : chaque blocage se défait
-  par les commandes refaites depuis ses champs typés, comme une annulation seule, et un blocage non reconnu est refusé
-  et montré, au lieu de partir en administrateur. Le journal des événements se lit borné en tout (mois, octets,
-  événements), les plus récents d'abord, et dit ce qu'il n'a pas lu ; des fichiers posés aux noms de mois à venir
-  (2099…) n'y comptent pas, ne sont plus suivis par l'écriture ni comptés par l'élagage, et ne font plus sortir le
-  vrai mois en cours de la lecture et des traces : ils sont dits. formula.json, cask.json et endoflife.date se
-  lisent en flux, avec un plafond d'entrées : un petit fichier hostile ne fait plus allouer des Gio. Le nom d'une pièce
-  jointe d'un courriel suspect passe filtré (caractères de direction, contrôles) dans le résultat, le journal et le
-  rapport, et tout message écrit d'un constat aussi. L'inventaire des logiciels dont une borne est atteinte (sous-clés,
-  entrées d'un dossier, 20 000 logiciels, clés sans nom en nombre) est non vérifié, jamais tronqué en silence. Les
-  résultats des outils (examens/*.json) sont scellés : un « rien trouvé » réécrit hors de Vanguard se montre non
-  vérifié, jamais vert. La veille de nuit ne dépose plus dans la VM le programme d'une branche écrite par l'IA (à
-  lancer après relecture, `vm-tester.sh --branche`), et ne transmet plus à l'IA qui corrige que le sujet, le fichier
-  et la ligne d'une proposition.
-- **Parité des règles du bilan : SSH et Defender sous Windows, mots de passe, démarrage et persistance sous macOS, une
-  référence par règle, un délai par règle.** Windows gagne le serveur OpenSSH (service, configuration de
-  %ProgramData%\ssh, connexion par mot de passe, droits de administrators_authorized_keys, lus en Rust : registre, WMI,
-  fichiers et leurs droits) et les clés de %USERPROFILE%\.ssh (sans phrase de passe, lisibles par d'autres), WIN-SSH-001
-  et 002 ; le bilan relit les protections de Defender que « durcir » active (règles ASR, protection réseau, PUA,
-  dossiers contrôlés, WIN-ANV-003) : une protection posée par Vanguard puis coupée est une alerte élevée, les blocages
-  de base, la protection réseau et PUA sont proposés, chaque correction annulable. macOS gagne la règle des mots de
-  passe et le blocage des comptes (pwpolicy, MAC-CPT-002), la sécurité du démarrage (bputil ou puce T2, MAC-DEM-001),
-  les éléments d'ouverture et de fond (sfltool, en administrateur, MAC-PRS-002), les crochets de connexion et les
-  extensions d'autorisation (MAC-PRS-003). Les règles fourre-tout sont scindées : le durcissement de Windows en cinq
-  (WIN-DUR-001 à 005), plus Windows Update coupé ou en pause (WIN-MAJ-003) et la session ouverte toute seule
-  (WIN-SES-002) ; les réglages sysctl en trois (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), dont les corrections s'ajoutent
-  au fichier au lieu de se réécrire l'une l'autre. Chaque règle de la machine cite au moins une référence du CIS, de
-  Microsoft ou de l'ANSSI (exigé par un test pour les trois systèmes), donnée aussi dans le JSON du bilan (« reference
-  »). Un inventaire des logiciels, gardé scellé sur l'ordinateur et jamais envoyé, dit pendant une semaine chaque
-  logiciel installé depuis le dernier bilan (COM-LOG-001). Enfin, chaque règle a son délai (10 min, 30 pour les mises à
-  jour) : celle qui le dépasse est dite non vérifiée, les autres continuent. Rien de cela n'a encore tourné sur un vrai
-  Windows ni sur un vrai Mac : tests sous Wine, clippy pour macOS. Ce qui est dit l'est juste : l'inventaire effacé
-  ou changé hors de Vanguard ne tait plus ce qui s'est installé entre-temps (tout est redit), une mise à jour dont le
-  nom affiché porte la version (« Outil 1.3 (x64) ») n'est plus un nouveau logiciel, et une source qui ne se lit pas
-  (Flatpak muet, ~/Applications illisible) rend le bilan non vérifié au lieu de faire oublier ses logiciels, redits
-  « nouveaux » ensuite ; les logiciels des autres sessions Windows ouvertes ne comptent plus. Defender : une
-  protection posée par une correction du bilan puis coupée est élevée comme celle d'Optimiser, rien n'est dit « qui
-  bloque » quand la protection en temps réel est coupée, ni sain quand rien ne bloque. OpenSSH : un serveur désinstallé
-  dont la configuration est restée est sans objet, administrators_authorized_keys ouvert est moyen quand StrictModes
-  (par défaut) le fait refuser, critique sans lui, et ses fichiers sont bornés avant d'être lus. macOS : les réglages
-  de root illisibles sans sudo rendent le crochet de connexion non vérifié, plus jamais « aucun crochet ». Un choix
-  « c'est normal » sur l'ancienne alerte groupée du noyau Linux vaut pour les trois nouvelles ; au premier bilan
-  après la mise à jour, l'historique peut encore la montrer réglée puis nouvelle.
-
+  changer et sans bibliothèque ajoutée. Serveur et client SSH (COM-PQC-001, 002) : la liste que sshd et ssh retiennent
+  vraiment, d'après la version d'OpenSSH lue sans la lancer (sntrup depuis 8.5, par défaut depuis 9.0, ML-KEM depuis
+  9.9) et les « + », « - » ou « ^ » écrits dans la configuration. Le conseil ne nomme jamais un algorithme que cette
+  version ne connaît pas, ne place jamais un nom devant un « + », un « - » ou un « ^ » (sshd ne redémarrerait pas) et
+  dit de passer `sshd -t` d'abord ; un réglage propre à un seul hôte reste une information, sans le nom de l'hôte.
+  Navigateurs (COM-NAV-004) : X25519MLKEM768 coupé par une préférence de Firefox ou par une stratégie (Firefox ;
+  Chrome et Edge jusqu'à 146, au-delà la stratégie est dite sans effet). Pour Firefox, policies.json, puis sous
+  Windows le registre (la stratégie et ses Preferences) et distribution\policies.json ; une préférence mise à false
+  seulement par défaut compte tant que le profil n'écrit rien, et security.tls.enable_kyber, que Firefox refuse dans
+  Preferences, ne compte pas. Sans coupure, la version décide : Firefox avant 132 et Chrome avant 124 ne le proposent
+  pas par défaut, Chrome de 124 à 130 propose X25519Kyber768, et une version illisible (Brave, Vivaldi, Zen…) n'est pas
+  vérifiée. WireGuard (COM-PQC-003) : les pairs sans clé pré-partagée, comptés sans jamais garder une clé ; les
+  fichiers ne se lisent qu'en administrateur, et sans droits, sans fichier ou chiffrés pour SYSTEM, le constat est non
+  vérifié, raison dite. À l'audit du réseau : l'administration du routeur (SSH, HTTPS trouvés ouverts par le scan) qui
+  ne propose rien de post-quantique, en une information regroupée (COM-TLS-004), et le chemin vers Internet qui
+  retirerait l'échange (COM-TLS-005), par une sonde TLS écrite à la main vers le site de référence déjà contacté, sans
+  calculer aucune clé. Un refus n'est conclu que si l'interception se voit déjà au certificat, sinon c'est non
+  vérifié ; un proxy réglé ou illisible laisse aussi non vérifié (sous Linux, celui du bureau GNOME ou KDE compris).
 - **Un journal des événements relié et scellé.** Les alertes, la preuve relevée avant chaque geste, les blocages,
   quarantaines et corrections, leurs annulations, les alertes déclarées normales et les passages de version vont dans
   un seul journal (evenements/AAAA-MM.jsonl, sur cet ordinateur seulement), écrit en ajout seul : chaque ligne porte

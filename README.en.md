@@ -27,26 +27,28 @@
   exploited flaws from CISA's catalog, end of support), outdated software on Windows and macOS and misconfigurations,
   graded from A to F; a six-grade network audit, with every device inventoried and newcomers flagged; live threat
   hunting; spyware planted by someone close; 308 YARA rules and MalwareBazaar hashes (with a free abuse.ch key);
-  Windows event logs and failed SSH login attempts.
+  Windows event logs and failed SSH login attempts; post-quantum key exchange missing from SSH, browsers and
+  WireGuard. The self-test compares Vanguard's readings with those of the system's tools, without changing anything.
 - **Block and respond.** Each threat found can be blocked with one click: program stopped and quarantined, connection
   closed at the firewall, startup entry removed; everything can be undone, except stopping a program. Before each
   action, Vanguard records what it will erase (program, command line, fingerprint, connections), and a sealed event
   log links the alert, this evidence, the action and its undoing. Once enabled, active protection blocks clear-cut
   threats on its own. Real-time protection (hourly monitoring and active protection) can be paused for one hour, four
-  hours or until it is turned back on; the pause remains flagged. After an infection, the evidence is collected before
-  any cleanup, with the incident timeline.
+  hours or until it is turned back on; the pause remains flagged. On Linux, the ransomware watcher spots an encryption
+  burst within seconds and stops an almost-certain ransomware when active protection is on. After an infection, the
+  evidence is collected before any cleanup, with the incident timeline.
 - **Protect against AI agents.** AI servers open to the network, agents that act without asking and poorly secured MCP
   servers are flagged; the first two can be blocked with one click. Defense against emerging threats from AI agents is
   in development.
-- **Report** (in development). Reports on newly discovered vulnerabilities, prepared for vendors and anonymized, which
-  the user reviews and sends personally: Vanguard sends nothing.
+- **Report.** A draft vulnerability report in the format of the vendor's program (Microsoft, Google, Mozilla, Apple,
+  GitHub advisory, CERT…), sorted first and stripped of anything personal, which the user reviews and sends
+  personally: Vanguard sends nothing.
 
-**Where Vanguard is going.** In development: an assistant that prepares vulnerability reports for vendors (Microsoft,
-Google, Mozilla…) without sending anything; a self-test that tries every rule without changing anything; a ransomware
-watcher that judges how programs behave; post-quantum cryptography (first a check of SSH, browsers and WireGuard, then
-releases signed twice). Next: everything an AI agent can run; Windows event logs analyzed with Hayabusa; every fix
-made by Vanguard itself, in Rust, without scripts; live observation on Linux with eBPF; known vulnerabilities of the
-other Linux distributions. Always defensive: Vanguard never attacks any device.
+**Where Vanguard is going.** In progress: everything an AI agent can run; Windows event logs analyzed with Hayabusa;
+every fix made by Vanguard itself, in Rust, without scripts; a test bench on the USB key, started with a double-click
+on a real Windows; a study of a graphical interface. Releases signed twice (Ed25519 and ML-DSA, post-quantum) await a
+decision. Next: live observation on Linux with eBPF; known vulnerabilities of the other Linux distributions. Always
+defensive: Vanguard never attacks any device.
 
 ## Also included
 
@@ -89,11 +91,11 @@ certificate, scams, spyware and other privacy intrusions.
 
 | Threat or area | What Vanguard does |
 |---|---|
-| **The check** | A grade from A to F on everything below, and also: firewall, updates and known vulnerabilities, encryption, accounts, SSH, shares open to everyone, clock, end of support, forgotten accounts, disk health…; outdated software on Windows and macOS (browsers, Office, Java…) and its exploited flaws. Each rule cites its reference (CIS, Microsoft or ANSSI). Each problem is explained, with its fix, applied after consent and undoable. |
+| **The check** | A grade from A to F on everything below, and also: firewall, updates and known vulnerabilities, encryption, accounts, SSH, shares open to everyone, clock, end of support, forgotten accounts, disk health…; outdated software on Windows and macOS (browsers, Office, Java…) and its exploited flaws; post-quantum key exchange (SSH, browsers, WireGuard), read-only. Each rule cites its reference (CIS, Microsoft or ANSSI). Each problem is explained, with its fix, applied after consent and undoable. The self-test checks the check's own readings, without changing anything. |
 | **Exposure to the Internet** | The network audit in six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers); the ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the public Internet address on a blocklist, the router's admin page over HTTP only. |
 | **Intruders on the Wi-Fi** | Every device on the network, its manufacturer, its open ports and its risks; newcomers flagged every hour, with a dashboard in the browser; the Wi-Fi's protection (WEP, WPA2, WPA3), the fake access point copying its name, Bluetooth devices paired recently; public Wi-Fi mode, which closes the computer to the network of a café, a hotel or an airport and puts it back as it was when you leave. |
 | **Connected devices** | The router and the devices on the network (cameras, printers, NAS, TVs, smart home…) recognized, with their default password to change; hidden cameras, in a rental or at someone's place. |
-| **Infected computer** | Antivirus, 308 YARA rules and the fingerprints of known malware from MalwareBazaar (free abuse.ch key), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), threat blocking, with one click or by itself for clear-cut threats (active protection), with the evidence recorded before each action and a sealed event log, decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
+| **Infected computer** | Antivirus, 308 YARA rules and the fingerprints of known malware from MalwareBazaar (free abuse.ch key), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), threat blocking, with one click or by itself for clear-cut threats (active protection), with the evidence recorded before each action and a sealed event log, decoy files and the ransomware watcher (Linux), Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline; a draft report prepared for the vendor when a program misbehaves, never sent. |
 | **Hijacked DNS and certificates** | The DNS really in use (and made-up answers), added root certificates (HTTPS interception), a forced proxy and sites redirected by the hosts file, automatic proxy discovery (WPAD), browser extensions that read every site. |
 | **Scams and remote control** | Tech-support scam (remote control tools), dangerous links checked without opening them, downloaded files checked, leaked passwords and email addresses, hacked account, a sandbox for an unknown program. |
 | **Privacy and secrets** | Spyware planted by someone close (known servers, programs reading the keyboard, monitoring permissions, known monitoring software), privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files left in clear text, secrets forgotten in git project history, key data protected by a passphrase. |
@@ -157,6 +159,23 @@ in full, the same for everyone: the list of your software never leaves the compu
 turn these downloads off). For Firefox and Edge, each exploited flaw in CISA's catalog is checked against the
 installed version: a version older than the fix is critical. What has no reliable source is said not checked.
 Read-only; on Linux, the package manager takes care of it.
+
+**Post-quantum check** (in the check, read-only) — encrypted traffic recorded today can be kept and read once a
+quantum computer exists. The check says where post-quantum key exchange is missing: SSH server and client (from the
+OpenSSH version, read without running it, and the algorithms actually kept; the advice only names an algorithm that
+version knows and goes through `sshd -t`), browsers (X25519MLKEM768 turned off by a preference or a policy, or a
+version too old to offer it), WireGuard peers without a pre-shared key (counted without keeping any key). The network
+audit adds the router administration that offers none, and a path to the Internet that would remove it. Nothing is
+changed, and what could not be read is said not checked.
+
+**Self-test** (`vanguard self-test`) — Vanguard checks its own readings on the computer where it works. Every check
+rule runs under a guard and a time limit, read only and proven so: any state write is refused, and BLAKE3 fingerprints
+of its folder, before and after, would name what changed. Its readings are compared with those of the system's tools:
+ten on Linux (pacman, dpkg, systemd units, listening ports, sshd version, DNS…), four on Windows (firewall, Defender,
+BitLocker, local accounts). Offline by default; `--json` holds no value from the computer; exit code 0 (sound), 1
+(gap) or 2 (not checked). Each rule's duration is measured: a rule three times slower than usual, or close to its
+time limit, is reported. The monitoring runs it again every week; a gap goes to the error log, without any value from
+the computer, and a contradicted reading is stated next to its rules' sound findings.
 
 #### Exposure to the Internet and the local network
 
@@ -272,6 +291,17 @@ everything in time order, oldest first: accepted or refused sign-ins, created ac
 cleared logs, Defender detections, recent files that matter (programs, scripts, hidden files). The traces also
 include what Vanguard saw and did (07-vanguard.txt): its alerts, its blocks with their evidence.
 
+**Report a flaw to a vendor** (Antivirus and protection menu, `vanguard disclose`) — when a program behaves
+abnormally, Vanguard prepares the draft report, which the person reviews and sends personally. It sorts first: an
+already known flaw (CVE, CISA's catalog) is fixed by an update; malware, a missed detection or a phishing site are not
+flaws of the vendor, and the right recipient is named. Otherwise, the draft follows the chosen program's format (MSRC,
+Google, Chrome, Mozilla, Apple, GHSA advisory, CERT/CC, CERT-FR, Vanguard), with the thread of an incident from the
+event log or a tool's last examination; it stays titled INCOMPLETE while what only the person knows is missing (the
+steps, what happened, the required proof of concept). What is personal is removed in three layers (nothing useless;
+paths, names and addresses masked; a final check that refuses to write if a known name survives), and the count is
+shown. The text is shown in full, then written after consent in Vanguard's folder on this computer; `--effacer`
+removes the drafts. Nothing is ever sent: the module holds no network code, no clipboard, no email.
+
 **Live threat hunting** — a successful sign-in from an address that had just failed at least ten passwords (sshd's log
 on Linux, Remote Desktop on Windows): the sign of a guessed password. And suspicious running programs: a known
 offensive tool (mimikatz, xmrig…), a command line that downloads or hides what it runs (encoded PowerShell, mshta,
@@ -280,12 +310,19 @@ certutil, curl piped to a shell), a program started from Downloads, a temporary 
 **The watcher** (Linux 6.6 and later, off by default, `vanguard watcher on`) — between two monitoring runs, each program
 started, even one of a few milliseconds, and each TCP or UDP connection as it closes. Programs are judged as in the
 check, connections against the botnet command servers already downloaded; what is serious goes to the dashboard
-and as a notification. Without root or code loaded into the kernel, it stops nothing. A program gone before it
-could be read is counted as such, never judged safe, and the program of a closed connection is not known (the
-kernel does not give it). When turned on, the watcher also offers to **watch your personal folders against
-ransomware**: an encryption burst alerts you within seconds, and, with active protection, an almost-certain
-ransomware (a decoy file touched and a burst attributed without ambiguity) is frozen, its evidence recorded, then
-stopped and quarantined.
+and as a notification. Without root or code loaded into the kernel, this part stops nothing. A program gone before
+it could be read is counted as such, never judged safe, and the program of a closed connection is not known (the
+kernel does not give it).
+
+**Ransomware watcher** (Linux, offered when the watcher is turned on, or `vanguard watcher ransomware on`, off by
+default) — personal folders (Documents, Pictures, Desktop, Music, Videos, Downloads) watched live, without
+administrator rights. An encryption burst (dozens of files rewritten in seconds, content no longer matching its
+format, a ransom note, a decoy file touched, backup copies erased) raises an alert within seconds, instead of
+waiting for the hourly decoy check, and “Block” is offered at the next check. With active protection and an almost-certain case (a decoy touched and
+a burst attributed without ambiguity to one program), the program and its descendants are frozen, the evidence is
+recorded, then they are stopped and quarantined, with the blocking safeguards; otherwise, Vanguard only alerts. A
+malicious program in the account can switch it off: a backup remains the real protection. Stated limit: a write
+through a hard link placed outside these folders escapes the live watch (decoys are still checked hourly).
 
 **Windows' hidden doors and kernel drivers** — the DLLs Windows loads by itself, often with system rights: LSA
 packages (a password filter receives every new password in clear text), AppCertDlls, print monitors, time providers,
@@ -709,7 +746,7 @@ Each menu entry is also a command.
 | `vanguard update` | updates |
 | `vanguard repair` | repairs and cleaning |
 | `vanguard monitor on\|off` | hourly monitoring |
-| `vanguard watcher [on\|off]` | watcher (Linux 6.6 and later): programs started and connections closed, seen as they happen; also watches folders against ransomware; off by default |
+| `vanguard watcher [on\|off]` | watcher (Linux 6.6 and later): programs started and connections closed, seen as they happen; `ransomware on\|off`: personal folders watched live against ransomware; off by default |
 | `vanguard dashboard [--no-open]` | monitoring dashboard: a local page opened in the browser; `--no-open` only writes it |
 | `vanguard maintenance [on\|off]` | monthly check-up; without an argument: what it would say now |
 | `vanguard name <ip\|mac> <nickname>` | name a device |

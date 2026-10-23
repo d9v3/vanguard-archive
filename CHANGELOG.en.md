@@ -95,120 +95,75 @@ delivered just before it. Only the latest version has its download page; every v
   of the account can write): the commands are rebuilt from the noted address, port or value, and an unrecognized block
   is refused and shown instead of running as administrator. Undoing only puts back a copy of Claude Code settings made
   by Vanguard, and “put back as before” for the gaming settings only rewrites as root what Vanguard puts in /etc.
-- **Prepare a report for a vendor (`vanguard disclose`, French name `signaler`).** The assistant sorts first: an
-  already known flaw (CVE, CISA's catalog) is fixed by an update; malware, a missed detection or a phishing site are
-  not flaws of the vendor (where to send them yourself is named, nothing is prepared); a bypass of AppLocker or
-  controlled folder access is said not fixed by default by Microsoft. For abnormal behavior, it prepares a draft in
-  the chosen program's format (MSRC, Google, Chrome, Mozilla, Apple, GHSA advisory, CERT/CC, CERT-FR, Vanguard), with
-  the incident's thread or a tool's examination, the log's state (tampered: “not verified”; adopted or incomplete:
-  “not proven”), and what only the person knows (titled INCOMPLETE while its steps, what happened, or the proof of
-  concept required by MSRC, Apple and Chrome are missing). What is personal is removed in three layers: nothing
-  useless (no command line, no relative's account, no personal file name), everything masked (paths, names, addresses,
-  query strings of web addresses), then a final check that refuses to write if a known name survives; the count is
-  shown. A path cut on the left by “…” is reduced whole, a word before “:” (“fichier:”, “file://”) is no longer taken
-  for a drive, and the outdated software examination only carries the product hit by an exploited flaw, never the list
-  of installed programs. A healthy, unchecked or tampered examination settles nothing, a triage drawn from an
-  unverified log says so, and with no CVE cited CISA's catalog is “not checked”, never “not in it”. Values from
-  outside go into code blocks, the rest is neutralized (no mention, image or link). The text is shown in full, written
-  after consent in this computer's folder (file 0600), recorded in the log without its content; `--effacer` removes
-  them, uninstalling counts them first. Nothing is ever sent: no network code in the module (checked by a closed list
-  of calls), no clipboard, no email.
-- **Self-test (`vanguard autotest`).** Vanguard checks its own readings where it really works: every check rule under
-  a guard and a time limit, read only and proven so (a switch refuses any state write, even from a rule stuck beyond
-  its time limit, and BLAKE3 fingerprints of the folder before and after name what would have changed; a monitoring
-  pass during the test makes the proof inconclusive, never “changed”), invariants on every finding, and ten
-  cross-checks on Linux (pacman, dpkg, AUR, enabled and failed units, groups, listening ports, encrypted root, sshd
-  version, resolved's DNS) and four on Windows (firewall, Defender, BitLocker as administrator, local accounts, as
-  JSON) compared with the system's tools; the “like the tool” tests call the same functions. Offline by default
-  (`--internet`), `--json` without any value from the computer, `--detail` shows the values on screen only; exit code
-  0, 1 or 2. Each rule's duration goes to the timings log (8 weeks summarized per day), which reports a rule three
-  times slower or close to its time limit. Once a week, the monitoring redoes the cross-checks on its pass's check
-  (“autotest” setting, postponed during a game under GameMode); a contradicted reading says so on its rules' sound
-  findings; the diagnostic shows the last self-test. A gap goes to the error log (identifiers, numbers, kind of gap),
-  and `journal-vers-github.py` gathers the occurrences of one upload into a single comment, no longer mixing two
-  identifiers in one issue. Never a false “sound”: two failed Defender or BitLocker reads, an unreadable `ss`
-  line or unread account units give “not checked”, not “same” nor “not applicable”; a contradicted reading stays
-  announced, with its date, until a run settles it; under 5 weeks of timings, not checked either.
-- **Ransomware watcher.** The watcher can now watch your personal folders live: an encryption burst (dozens of files
-  rewritten in seconds, their content no longer matching their format, a ransom note, a decoy file touched) alerts you
-  within seconds instead of waiting for the hourly check. Without administrator rights and without a new dependency
-  (inotify through the crate already present; "who" through the processes' write counters). With active protection and
-  an almost-certain case (a decoy touched and a burst attributed to one program without ambiguity), Vanguard freezes
-  the program and its descendants, records the evidence, then stops and quarantines it, with all the blocking
-  safeguards; otherwise it only alerts. Offered in the same consent as "vanguard watcher on" (or "vanguard watcher
-  ransomware on"), off by default; a malicious program in your account can switch it off, your backup remains the real
-  protection. Watched: Documents, Pictures, Desktop, Music, Videos and Downloads. Removing the decoys does not raise
-  "possible ransomware", and an alert from an encryption tool you use can be declared normal. Stated limit: a program
-  writing through a hard link placed outside these folders escapes the live watch (decoys are still checked hourly).
+- **Report a flaw to a vendor** (`vanguard disclose`, French name `signaler`; Antivirus and protection menu). An
+  assistant prepares the draft of a vulnerability report, which the person reviews and sends personally. It sorts
+  first: an already known flaw (CVE, CISA's catalog) is fixed by an update; malware, a missed detection or a phishing
+  site are not flaws of the vendor (the right recipient is named, nothing is prepared); a bypass of AppLocker or of
+  controlled folder access is said not fixed by default by Microsoft. For abnormal behavior, the draft follows the
+  chosen program's format (MSRC, Google, Chrome, Mozilla, Apple, GHSA advisory, CERT/CC, CERT-FR, Vanguard) and takes
+  the thread of an incident or a tool's examination, with the log's state (tampered: “not verified”; adopted or
+  incomplete: “not proven”); it stays titled INCOMPLETE while what only the person knows is missing (their steps,
+  what happened, the proof of concept MSRC, Apple and Chrome require). A healthy, unchecked or tampered examination
+  settles nothing, and with no CVE cited, CISA's catalog is “not checked”, never “not in it”. What is personal is
+  removed in three layers: nothing useless (no command line, no relative's account, no personal file name),
+  everything masked (paths, names, addresses, query strings of web addresses), then a final check that refuses to
+  write if a known name survives; the count is shown. The outdated software examination only carries the product hit
+  by an exploited flaw, never the list of installed programs. Values from outside go into code blocks, the rest is
+  neutralized (no mention, image or link). The text is shown in full, written after consent in Vanguard's folder on
+  this computer (file 0600) and recorded in the log without its content; `--effacer` removes the drafts, which
+  uninstalling counts first. Nothing is ever sent: no network code in the module (checked by a closed list of
+  calls), no clipboard, no email.
+- **Self-test** (`vanguard self-test`, French name `autotest`). Vanguard checks its own readings on the computer where
+  it works, without changing anything there. Every check rule runs under a guard and a time limit, read only and
+  proven so: a switch refuses any state write, even from a rule stuck beyond its time limit, and BLAKE3 fingerprints
+  of Vanguard's folder, before and after, would name what changed (a monitoring pass during the test makes the proof
+  inconclusive, never “changed”). Every finding goes through invariants. Ten cross-checks on Linux (pacman, dpkg,
+  AUR, enabled and failed units, groups, listening ports, encrypted root, sshd version, resolved's DNS) and four on
+  Windows (firewall, Defender, BitLocker as administrator, local accounts, as JSON) compare what Vanguard reads with
+  what the system's tools say; the “like the tool” tests call the same functions. Offline by default (`--internet`
+  for the rules that need it); `--json` holds no value from the computer, `--detail` shows the values on screen only;
+  exit code 0, 1 or 2. Each rule's duration goes to the timings log (eight weeks, summarized per day), which reports
+  a rule three times slower than usual or close to its time limit. Once a week, the monitoring redoes the
+  cross-checks on its pass's check (“autotest” setting, postponed during a game under GameMode); a contradicted
+  reading is stated next to its rules' sound findings, and the diagnostic shows the last self-test. A gap goes to the
+  error log (identifiers, numbers, kind of gap, no value from the computer); `journal-vers-github.py` gathers the
+  occurrences of one upload into a single comment and no longer mixes two identifiers in one issue. Never a false
+  “sound”: two failed Defender or BitLocker reads, an unreadable `ss` line or unread account units give “not
+  checked”, neither “same” nor “not applicable”; a contradicted reading stays announced, with its date, until a new
+  run settles it; before five weeks of timings, the duration comparison is said not checked.
+- **Ransomware watcher** (Linux, `vanguard watcher ransomware on`). The watcher can now watch the personal folders
+  live (Documents, Pictures, Desktop, Music, Videos and Downloads): an encryption burst (dozens of files rewritten in
+  seconds, content no longer matching its format, a ransom note, a decoy file touched, backup copies erased) raises
+  an alert within seconds instead of waiting for the hourly decoy check, and “Block” is offered at the next check. No
+  administrator rights and no new dependency: inotify, through the crate already present, sees files change, and the
+  processes' write counters tell who writes. With active protection and an almost-certain case (a decoy touched and a
+  burst attributed without ambiguity to one program), Vanguard freezes the program and its descendants, records the
+  evidence, then stops and quarantines it, with all the blocking safeguards; a program a safeguard refuses to stop
+  stays frozen, and this is said. Otherwise, Vanguard only alerts. Offered in the same consent as
+  `vanguard watcher on`, off by default. Removing the decoys does not raise “possible ransomware”, and an alert from
+  an encryption tool used on purpose can be declared normal. Stated limits: a malicious program in the account can
+  switch the watch off, and a backup remains the real protection; a write through a hard link placed outside these
+  folders escapes the live watch (decoys are still checked hourly).
 - **Read-only post-quantum check.** Encrypted traffic recorded today can be kept and read once a quantum computer
-  exists: the check says where this computer has no post-quantum key exchange, without changing anything. SSH server and
-  client (COM-PQC-001, 002): the list sshd and ssh really keep, from the OpenSSH version read without running it (sntrup
-  since 8.5, by default since 9.0, ML-KEM since 9.9) and the written “+”, “-”, “^”; the advice never names an algorithm
-  the version does not know, never puts a name before a “+”, “-” or “^” (sshd would not restart), and says “sshd -t”
-  first; a setting for one host only stays information, without its name. Browsers (COM-NAV-004): X25519MLKEM768 turned
-  off by a Firefox preference or a policy (Firefox, and Chrome or Edge up to 146; beyond, the policy is said to have no
-  effect; Firefox: policies.json, and on Windows the registry (the policy and its Preferences) then
-  distribution\policies.json; a preference set to false only by default counts as long as the profile writes nothing;
-  security.tls.enable_kyber, which Firefox refuses in Preferences, does not count); without a cut, the version: Firefox
-  before 132 and Chrome before 124 do not offer it by default, Chrome 124 to 130 offers X25519Kyber768, an unreadable
-  version (Brave, Vivaldi, Zen…) is not checked. WireGuard (COM-PQC-003): peers without a pre-shared key, counted
-  without ever keeping a key (files read only as administrator; without rights, without a file or encrypted for SYSTEM:
-  not checked, reason given). In the network audit: the router administration (SSH, HTTPS found open by the scan) that
-  offers nothing post-quantum, as one grouped piece of information (COM-TLS-004), and the path to the Internet that
-  would remove the exchange (COM-TLS-005), through a hand-written TLS probe to the reference site already contacted,
-  computing no key; a refusal is concluded only if interception already shows in the certificate, otherwise not checked;
-  a proxy that is set, or unreadable, leaves it not checked (on Linux, the GNOME or KDE desktop one too). No library
-  added.
-- **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
-  adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
-  can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category
-  counts among what closes incoming connections: a network left Private, a company network or an unreadable category
-  leaves the mode “on, incoming open”, and a setting that cannot be re-read shows as not verified, never ✔. On Linux, a
-  DNS, encrypted DNS, mDNS or LLMNR undone by a program of the account (NetworkManager allows it without a password)
-  shows in the check (Medium), on the menu line and in its header, with a way to put it back. DNS is no longer kept as
-  “already encrypted and filtering” when only one of its servers filters: they must all filter, otherwise the Shield is
-  set; the check no longer says such a DNS blocks dangerous sites either.
-- **Attack campaign no. 2: eight weaknesses closed.** “Put everything back” never replays a command text read from
-  changements.jsonl (which any program of the account can write): each block is undone by the commands rebuilt from
-  its typed fields, like a single undo, and an unrecognized block is refused and shown instead of running as
-  administrator. The event log is read with an overall bound (months, bytes, events), most recent first, and says what
-  it did not read; files placed under the names of future months (2099…) do not count there, are no longer followed
-  by writing nor counted by pruning, and no longer push the real current month out of the read and the traces: they
-  are reported. formula.json, cask.json and endoflife.date are read as a stream, with a cap on entries: a small
-  hostile file no longer makes the program allocate gigabytes. The attachment name of a suspicious email goes filtered
-  (direction marks, control characters) into the result, the log and the report, and so does every written finding
-  message. A software inventory that hits a bound (subkeys, entries in a folder, 20,000 programs, many keys without a
-  name) is not verified, never silently truncated. Tool results (examens/*.json) are sealed: a “nothing found”
-  rewritten outside Vanguard shows as not verified, never green. The nightly watch no longer deposits into the VM the
-  program of a branch written by the AI (to run after review, `vm-tester.sh --branche`), and only passes the subject,
-  file and line of a proposal to the AI that fixes.
-- **Check rule parity: SSH and Defender on Windows, passwords, startup and persistence on macOS, one reference per rule,
-  one time limit per rule.** Windows gains the OpenSSH server (service, %ProgramData%\ssh configuration, password
-  sign-in, administrators_authorized_keys rights, read in Rust: registry, WMI, files and their rights) and the keys in
-  %USERPROFILE%\.ssh (no passphrase, readable by others), WIN-SSH-001 and 002; the check re-reads the Defender
-  protections that “harden” turns on (ASR rules, network protection, PUA, controlled folders, WIN-ANV-003): a protection
-  Vanguard set and that was later turned off is a high alert, the basic blocking, network protection and PUA are
-  offered, each fix can be undone. macOS gains the password policy and account lockout (pwpolicy, MAC-CPT-002), startup
-  security (bputil or T2 chip, MAC-DEM-001), login and background items (sfltool, as administrator, MAC-PRS-002), login
-  hooks and authorization plugins (MAC-PRS-003). Catch-all rules are split: Windows hardening into five (WIN-DUR-001 to
-  005), plus Windows Update off or paused (WIN-MAJ-003) and automatic sign-in (WIN-SES-002); sysctl settings into three
-  (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), whose fixes append to the file instead of overwriting each other. Every
-  machine rule cites at least one CIS, Microsoft or ANSSI reference (required by a test for all three systems), also
-  given in the check's JSON (“reference”). A software inventory, kept sealed on the computer and never sent, tells for a
-  week each program installed since the last check (COM-LOG-001). Finally, each rule has its time limit (10 min, 30 for
-  updates): one that exceeds it is reported as not checked, the others go on. None of this has run on a real Windows or
-  a real Mac yet: tests under Wine, clippy for macOS. What is said is accurate: an inventory erased or changed outside
-  Vanguard no longer hides what was installed meanwhile (everything is reported again), an update whose displayed name
-  carries the version (“Tool 1.3 (x64)”) is no longer new software, and a source that cannot be read (silent Flatpak,
-  unreadable ~/Applications) makes the check not verified instead of forgetting its programs, reported as “new”
-  later; programs of other open Windows sessions no longer count. Defender: a protection set by a check fix and later
-  turned off is high, like one set by Optimize; nothing is said to “block” while real-time protection is off, nor
-  healthy when nothing blocks. OpenSSH: an uninstalled server whose configuration stayed is not applicable,
-  administrators_authorized_keys open to others is medium when StrictModes (the default) makes it refused, critical
-  without it, and its files are bounded before being read. macOS: root's settings unreadable without sudo make the
-  login hook not verified, never “no hook” again. A “this is normal” choice on the old grouped Linux kernel alert
-  applies to the three new ones; at the first check after the update, the history may still show it fixed then new.
-
+  exists: the check says where this computer has no post-quantum key exchange, without changing anything and without
+  any added library. SSH server and client (COM-PQC-001, 002): the list sshd and ssh really keep, from the OpenSSH
+  version read without running it (sntrup since 8.5, by default since 9.0, ML-KEM since 9.9) and the “+”, “-” or “^”
+  written in the configuration. The advice never names an algorithm that version does not know, never puts a name
+  before a “+”, “-” or “^” (sshd would not restart) and says to run `sshd -t` first; a setting for a single host stays
+  information, without the host's name. Browsers (COM-NAV-004): X25519MLKEM768 turned off by a Firefox preference or
+  by a policy (Firefox; Chrome and Edge up to 146, beyond which the policy is said to have no effect). For Firefox,
+  policies.json, then on Windows the registry (the policy and its Preferences) and distribution\policies.json; a
+  preference set to false only by default counts as long as the profile writes nothing, and
+  security.tls.enable_kyber, which Firefox refuses in Preferences, does not count. Without a cut, the version
+  decides: Firefox before 132 and Chrome before 124 do not offer it by default, Chrome 124 to 130 offers
+  X25519Kyber768, and an unreadable version (Brave, Vivaldi, Zen…) is not checked. WireGuard (COM-PQC-003): peers
+  without a pre-shared key, counted without ever keeping a key; the files are read only as administrator, and without
+  rights, without a file or encrypted for SYSTEM, the finding is not checked, reason given. In the network audit: the
+  router administration (SSH, HTTPS found open by the scan) that offers nothing post-quantum, as one grouped piece of
+  information (COM-TLS-004), and the path to the Internet that would remove the exchange (COM-TLS-005), through a
+  hand-written TLS probe to the reference site already contacted, computing no key. A refusal is concluded only if
+  interception already shows in the certificate, otherwise it is not checked; a proxy that is set or unreadable also
+  leaves it not checked (on Linux, the GNOME or KDE desktop one included).
 - **A linked, sealed event log.** Alerts, the evidence recorded before each action, blocks, quarantines and fixes,
   their undoing, alerts declared normal and version changes go into a single log (evenements/YYYY-MM.jsonl, on this
   computer only), append-only: each line carries the fingerprint of the previous one, the head is sealed, and so is

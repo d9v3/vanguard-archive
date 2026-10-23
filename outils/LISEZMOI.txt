@@ -3,8 +3,9 @@ VANGUARD — cyberdéfense portable des postes et des réseaux
 English version: README.txt
 
 Vanguard durcit les ordinateurs, détecte les failles et les intrusions (bilan noté de A à F, audit du réseau,
-chasse aux menaces, analyse YARA, journaux, logiciels espions, logiciels pas à jour), bloque les menaces trouvées
-et collecte les traces d'un incident.
+chasse aux menaces, analyse YARA, journaux, logiciels espions, logiciels pas à jour, échange de clés
+post-quantique), bloque les menaces trouvées, collecte les traces d'un incident et prépare, sans jamais l'envoyer,
+le signalement d'une faille à son éditeur.
 Chaque constat est expliqué ; rien n'est modifié sans accord. En plus : le dépannage, l'optimisation, les
 données et la sauvegarde ; en développement, des images qui démarrent un ordinateur en panne (dossier ISO).
 
@@ -83,7 +84,9 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
          empoisonneur de noms, programme arrivé dans Téléchargements)
        Tableau de bord de la surveillance : alertes jour par jour, nouveaux appareils (page locale)
        Veilleur (Linux) : programmes lancés et connexions fermées vus sur le moment, coupé par défaut
-         (vanguard veilleur on)
+         (vanguard veilleur on) ; et, sur demande, les dossiers personnels surveillés en direct contre les
+         rançongiciels : alerte en quelques secondes, gel puis arrêt d'un cas quasi certain seulement avec la
+         protection active (vanguard veilleur rancongiciel on)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé aux mesures habituelles
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après accord ; vanguard listes-noires)
        Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur le routeur)
@@ -190,7 +193,10 @@ programmes lancés au démarrage, programmes en marche suspects, portes dérobé
 fond sous macOS, pilotes vulnérables, signes de rootkit sous Linux, journaux d'événements de Windows, logiciels
 espions, agents d'IA trop permissifs, DNS, certificats racine ajoutés, extensions de navigateur, Bluetooth, heure,
 fin de support, comptes oubliés, mots de passe du navigateur, fichiers sensibles, sauvegardes, santé des disques
-et de la batterie. Chaque règle cite sa référence (CIS, Microsoft ou ANSSI).
+et de la batterie, échange de clés post-quantique (SSH, navigateurs, WireGuard ; en lecture seule). Chaque règle
+cite sa référence (CIS, Microsoft ou ANSSI). Autodiagnostic : vanguard autotest fait tourner chaque règle sans
+rien changer et compare les lectures de Vanguard à celles des outils du système (pacman, systemctl, ss,
+PowerShell…) ; la surveillance le refait chaque semaine.
 
 Langue : français ou anglais selon le système. Pour forcer le français : menu Paramètres (« s »), ou
   Linux :   VANGUARD_LANG=fr ./vanguard

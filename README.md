@@ -29,28 +29,29 @@
   macOS et les mauvais réglages, notés de A à F ; l'audit du réseau en six notes, chaque appareil inventorié et les
   nouveaux venus signalés ; la chasse aux menaces en direct ; les logiciels espions posés par un proche ; 308 règles
   YARA et les empreintes de MalwareBazaar (avec une clé abuse.ch gratuite) ; les journaux d'événements de Windows et
-  les tentatives de connexion SSH ratées.
+  les tentatives de connexion SSH ratées ; l'échange de clés post-quantique absent de SSH, des navigateurs et de
+  WireGuard. L'autodiagnostic compare les lectures de Vanguard à celles des outils du système, sans rien changer.
 - **Bloquer et répondre.** Chaque menace trouvée se bloque d'un clic : programme arrêté et mis en quarantaine,
   connexion fermée au pare-feu, lancement retiré du démarrage ; tout s'annule, sauf l'arrêt d'un programme. Avant
   chaque geste, Vanguard relève ce qu'il va effacer (programme, ligne de commande, empreinte, connexions), et un
   journal des événements scellé relie l'alerte, cette preuve, le geste et son annulation. Une fois mise en marche, la
   protection active bloque d'elle-même ce qui ne fait aucun doute. La protection en temps réel (surveillance horaire
   et protection active) peut être coupée pour une heure, quatre heures ou jusqu'à sa remise en marche ; la coupure
-  reste signalée. Après une infection, les traces sont collectées avant tout nettoyage, avec la chronologie de
-  l'incident.
+  reste signalée. Sous Linux, le veilleur anti-rançongiciel repère une rafale de chiffrement en quelques secondes et
+  arrête un rançongiciel quasi certain quand la protection active est en marche. Après une infection, les traces sont
+  collectées avant tout nettoyage, avec la chronologie de l'incident.
 - **Protéger contre les agents d'IA.** Les serveurs d'IA ouverts au réseau, les agents qui agissent sans demander et
   les serveurs MCP mal protégés sont signalés ; les deux premiers se bloquent d'un clic. La défense contre les
   nouvelles menaces liées aux agents d'IA est en développement.
-- **Signaler** (en développement). Des rapports sur les failles nouvellement découvertes, préparés pour les éditeurs
-  et anonymisés, que l'utilisateur relit et envoie lui-même : Vanguard n'envoie rien.
+- **Signaler.** Un brouillon de rapport de faille au format du programme de l'éditeur (Microsoft, Google, Mozilla,
+  Apple, avis GitHub, CERT…), trié d'abord et débarrassé de ce qui est personnel, que l'utilisateur relit et envoie
+  lui-même : Vanguard n'envoie rien.
 
-**Où va Vanguard.** En développement : un assistant qui prépare les rapports de failles pour les éditeurs (Microsoft,
-Google, Mozilla…) sans rien envoyer ; un autodiagnostic qui essaie chaque règle sans rien changer ; un veilleur
-anti-rançongiciel qui juge le comportement des programmes ; la cryptographie post-quantique (d'abord un bilan de SSH,
-des navigateurs et de WireGuard, puis des versions signées deux fois). Ensuite : tout ce qu'un agent d'IA peut
-exécuter ; les journaux de Windows analysés par Hayabusa ; toutes les corrections faites par Vanguard lui-même, en
-Rust, sans script ; l'observation en direct sous Linux par eBPF ; les failles connues des autres distributions Linux.
-Toujours défensif : Vanguard n'attaque aucun appareil.
+**Où va Vanguard.** En cours : tout ce qu'un agent d'IA peut exécuter ; les journaux de Windows analysés par
+Hayabusa ; toutes les corrections faites par Vanguard lui-même, en Rust, sans script ; un banc d'essai sur la clé,
+lancé d'un double-clic sur un vrai Windows ; l'étude d'une interface graphique. Les versions signées deux fois (Ed25519
+et ML-DSA, post-quantique) attendent une décision. Ensuite : l'observation en direct sous Linux par eBPF ; les failles
+connues des autres distributions Linux. Toujours défensif : Vanguard n'attaque aucun appareil.
 
 ## En plus
 
@@ -97,11 +98,11 @@ détourné, les arnaques, un logiciel espion et les autres atteintes à la vie p
 
 | Menace ou domaine | Ce que fait Vanguard |
 |---|---|
-| **Le bilan** | Une note de A à F sur tout ce qui suit, et aussi : pare-feu, mises à jour et failles connues, chiffrement, comptes, SSH, partages ouverts à tous, heure, fin de support, comptes oubliés, santé des disques… ; les logiciels pas à jour sous Windows et macOS (navigateurs, Office, Java…) et leurs failles exploitées. Chaque règle cite sa référence (CIS, Microsoft ou ANSSI). Chaque problème est expliqué, avec sa correction, appliquée après accord et annulable. |
+| **Le bilan** | Une note de A à F sur tout ce qui suit, et aussi : pare-feu, mises à jour et failles connues, chiffrement, comptes, SSH, partages ouverts à tous, heure, fin de support, comptes oubliés, santé des disques… ; les logiciels pas à jour sous Windows et macOS (navigateurs, Office, Java…) et leurs failles exploitées ; l'échange de clés post-quantique (SSH, navigateurs, WireGuard), en lecture seule. Chaque règle cite sa référence (CIS, Microsoft ou ANSSI). Chaque problème est expliqué, avec sa correction, appliquée après accord et annulable. L'autodiagnostic vérifie les lectures du bilan elles-mêmes, sans rien changer. |
 | **Exposition vers Internet** | L'audit du réseau en six notes (exposition, Wi-Fi, séparation des appareils, DNS et certificats, objets connectés, ordinateurs) ; les ports que le routeur ouvre vers Internet (UPnP), les ports ouverts et le pare-feu de cet ordinateur, l'adresse Internet publique sur liste noire, la page d'administration du routeur en HTTP seul. |
 | **Intrus sur le Wi-Fi** | Chaque appareil du réseau, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés toutes les heures, avec un tableau de bord dans le navigateur ; la protection du Wi-Fi (WEP, WPA2, WPA3), le faux point d'accès qui copie son nom, les appareils Bluetooth appairés depuis peu ; le mode Wi-Fi public, qui ferme l'ordinateur au réseau d'un café, d'un hôtel ou d'un aéroport et le remet comme avant en partant. |
 | **Objets connectés** | Le routeur et les objets du réseau (caméras, imprimantes, NAS, télés, domotique…) reconnus, avec leur mot de passe d'origine à changer ; les caméras cachées, dans une location ou chez quelqu'un. |
-| **Poste infecté** | Antivirus, 308 règles YARA et les empreintes de logiciels malveillants connus de MalwareBazaar (clé abuse.ch gratuite), la mémoire des programmes qui tournent (à la demande), la chasse aux menaces en direct (mot de passe deviné, programmes en marche suspects), le blocage des menaces, d'un clic ou tout seul pour ce qui ne fait aucun doute (protection active), avec la preuve relevée avant chaque geste et un journal des événements scellé, fichiers-pièges contre les rançongiciels, blocages de Windows Defender, ce qui se lance en cachette, portes dérobées, portes cachées de Windows et pilotes vulnérables, signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, agents d'IA trop permissifs, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer, avec la chronologie de l'incident. |
+| **Poste infecté** | Antivirus, 308 règles YARA et les empreintes de logiciels malveillants connus de MalwareBazaar (clé abuse.ch gratuite), la mémoire des programmes qui tournent (à la demande), la chasse aux menaces en direct (mot de passe deviné, programmes en marche suspects), le blocage des menaces, d'un clic ou tout seul pour ce qui ne fait aucun doute (protection active), avec la preuve relevée avant chaque geste et un journal des événements scellé, fichiers-pièges et veilleur anti-rançongiciel (Linux), blocages de Windows Defender, ce qui se lance en cachette, portes dérobées, portes cachées de Windows et pilotes vulnérables, signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, agents d'IA trop permissifs, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer, avec la chronologie de l'incident ; un brouillon de signalement préparé pour l'éditeur quand un logiciel se comporte mal, jamais envoyé. |
 | **DNS et certificats détournés** | Le DNS réellement utilisé (et les réponses inventées), les certificats racine ajoutés (interception du HTTPS), le proxy imposé et les sites redirigés par le fichier hosts, la recherche automatique du proxy (WPAD), les extensions de navigateur qui lisent tous les sites. |
 | **Arnaques et prise de contrôle** | Faux technicien (logiciels de prise de contrôle à distance), liens dangereux examinés sans les ouvrir, fichiers téléchargés vérifiés, mots de passe et adresses courriel fuités, compte piraté, bac à sable pour un programme inconnu. |
 | **Vie privée et secrets** | Logiciels espions posés par un proche (serveurs connus, programmes qui lisent le clavier, autorisations de surveillance, logiciels de surveillance connus), bilan de confidentialité (qui a accès à la position, aux contacts, à la caméra et au micro), caméra et micro, mots de passe du navigateur sans protection, fichiers sensibles laissés en clair, secrets oubliés dans l'historique des projets git, données de la clé protégées par une phrase. |
@@ -170,6 +171,24 @@ sont téléchargées en entier, les mêmes pour tous : la liste des logiciels ne
 Versions des logiciels pour couper ces téléchargements). Pour Firefox et Edge, chaque faille exploitée du catalogue de
 la CISA est vérifiée contre la version installée : une version antérieure au correctif est critique. Ce qui n'a pas de
 source fiable est dit non vérifié. Lecture seule ; sous Linux, le gestionnaire de paquets s'en charge.
+
+**Bilan post-quantique** (au bilan, en lecture seule) — un trafic chiffré capté aujourd'hui peut être gardé et lu le
+jour où un ordinateur quantique existera. Le bilan dit où l'échange de clés post-quantique manque : serveur et client
+SSH (d'après la version d'OpenSSH, lue sans la lancer, et les algorithmes réellement retenus ; le conseil ne nomme
+qu'un algorithme que cette version connaît et passe par `sshd -t`), navigateurs (X25519MLKEM768 coupé par une
+préférence ou une stratégie, ou version trop ancienne pour le proposer), pairs WireGuard sans clé pré-partagée
+(comptés sans garder aucune clé). L'audit du réseau y ajoute l'administration du routeur qui n'en propose pas et un
+chemin vers Internet qui le retirerait. Rien n'est changé, et ce qui n'a pas pu être lu est dit non vérifié.
+
+**Autodiagnostic** (`vanguard autotest`) — Vanguard vérifie ses propres lectures sur l'ordinateur où il travaille.
+Chaque règle du bilan tourne sous garde et délai, en lecture seule prouvée : toute écriture d'état est refusée, et des
+empreintes BLAKE3 de son dossier, avant et après, nommeraient ce qui aurait changé. Ses lectures sont comparées à
+celles des outils du système : dix sous Linux (pacman, dpkg, unités systemd, ports en écoute, version de sshd, DNS…),
+quatre sous Windows (pare-feu, Defender, BitLocker, comptes locaux). Hors ligne par défaut ; `--json` ne contient
+aucune valeur de l'ordinateur ; code de sortie 0 (sain), 1 (écart) ou 2 (non vérifié). La durée de chaque règle est
+mesurée : une règle trois fois plus lente que d'habitude, ou proche de son délai, est signalée. La surveillance le
+refait chaque semaine ; un écart va au journal des erreurs, sans aucune valeur de l'ordinateur, et une lecture
+contredite est dite à côté des constats sains de ses règles.
 
 #### Exposition vers Internet et réseau local
 
@@ -293,6 +312,18 @@ du plus ancien au plus récent : connexions acceptées ou refusées, comptes cr�
 journaux effacés, détections de Defender, fichiers récents qui parlent (programmes, scripts, fichiers cachés). Les
 traces reprennent aussi ce que Vanguard a vu et fait (07-vanguard.txt) : ses alertes, ses blocages avec leur preuve.
 
+**Signaler une faille à un éditeur** (menu Antivirus et protection, `vanguard signaler`) — quand un logiciel se
+comporte de façon anormale, Vanguard prépare le brouillon du rapport, que la personne relit et envoie elle-même. Il
+trie d'abord : une faille déjà connue (CVE, catalogue de la CISA) se corrige par une mise à jour ; un logiciel
+malveillant, une détection ratée ou un site d'hameçonnage ne sont pas des failles de l'éditeur, et le bon destinataire
+est nommé. Sinon, le brouillon suit le format du programme choisi (MSRC, Google, Chrome, Mozilla, Apple, avis GHSA,
+CERT/CC, CERT-FR, Vanguard), avec le fil d'un incident du journal des événements ou le dernier examen d'un outil ; il
+reste titré INCOMPLET tant qu'il manque ce que seule la personne sait (les étapes, ce qui s'est passé, la preuve de
+concept exigée). Ce qui est personnel est retiré en trois couches (rien d'inutile ; chemins, noms et adresses
+masqués ; un contrôle final qui refuse d'écrire si un nom connu survit), et le décompte est montré. Le texte est
+montré en entier, puis écrit après accord dans le dossier de Vanguard de cet ordinateur ; `--effacer` retire les
+brouillons. Rien n'est jamais envoyé : le module ne contient aucun code réseau, ni presse-papier, ni courriel.
+
 **Chasse aux menaces en direct** — une connexion réussie depuis une adresse qui venait de rater au moins dix mots
 de passe (journal de sshd sous Linux, du Bureau à distance sous Windows) : le signe d'un mot de passe deviné. Et les
 programmes en marche suspects : un outil offensif connu (mimikatz, xmrig…), une ligne de commande qui télécharge ou
@@ -304,10 +335,18 @@ chaque programme lancé, même de quelques millisecondes, et chaque connexion TC
 Les programmes sont jugés comme au bilan, les connexions contre les serveurs de commande de botnets déjà
 téléchargés ; le grave va au tableau de bord et en notification. Sans root ni code chargé dans le noyau, il
 n'arrête rien de ce côté. Un programme parti avant d'être lu est compté tel quel, jamais jugé sain, et le programme
-d'une connexion fermée n'est pas connu (le noyau ne le donne pas). À l'allumage, le veilleur propose aussi de
-**surveiller tes dossiers personnels contre les rançongiciels** : une rafale de chiffrement t'alerte en quelques
-secondes, et, avec la protection active, un rançongiciel quasi certain (fichier-piège touché et rafale attribuée sans
-ambiguïté) est gelé, sa preuve relevée, puis arrêté et mis en quarantaine.
+d'une connexion fermée n'est pas connu (le noyau ne le donne pas).
+
+**Veilleur anti-rançongiciel** (Linux, proposé à l'allumage du veilleur ou `vanguard veilleur rancongiciel on`, coupé
+par défaut) — les dossiers personnels (Documents, Images, Bureau, Musique, Vidéos, Téléchargements) surveillés en
+direct, sans droits d'administrateur. Une rafale de chiffrement (des dizaines de fichiers réécrits en quelques
+secondes, un contenu qui ne ressemble plus à son format, une note de rançon, un fichier-piège touché, des copies de
+secours effacées) donne une alerte en quelques secondes, au lieu d'attendre la vérification horaire des pièges, et
+« Bloquer » est proposé au bilan suivant. Avec la protection active et un cas quasi certain (piège touché et rafale attribuée sans ambiguïté à un
+programme), le programme et sa descendance sont gelés, la preuve est relevée, puis ils sont arrêtés et mis en
+quarantaine, sous les garde-fous du blocage ; sinon, Vanguard alerte seulement. Un programme malveillant du compte
+peut l'éteindre : la sauvegarde reste la vraie protection. Limite dite : une écriture par un lien physique placé hors
+de ces dossiers échappe à la veille en direct (les pièges restent vérifiés chaque heure).
 
 **Portes cachées de Windows et pilotes du noyau** — les DLL que Windows charge lui-même, souvent avec les droits du
 système : paquets de LSA (un filtre de mot de passe reçoit chaque nouveau mot de passe en clair), AppCertDlls,
@@ -750,7 +789,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard maj` | mises à jour |
 | `vanguard reparer` | réparations et nettoyage |
 | `vanguard surveillance on\|off` | surveillance horaire |
-| `vanguard veilleur [on\|off]` | veilleur (Linux 6.6 et plus) : programmes lancés et connexions fermées, vus sur le moment ; surveille aussi les dossiers contre les rançongiciels ; coupé par défaut |
+| `vanguard veilleur [on\|off]` | veilleur (Linux 6.6 et plus) : programmes lancés et connexions fermées, vus sur le moment ; `rancongiciel on\|off` : les dossiers personnels surveillés en direct contre les rançongiciels ; coupé par défaut |
 | `vanguard tableau [--sans-ouvrir]` | tableau de bord de la surveillance : page locale ouverte dans le navigateur ; `--sans-ouvrir` l'écrit seulement |
 | `vanguard entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
 | `vanguard nommer <ip\|mac> <surnom>` | nommer un appareil |

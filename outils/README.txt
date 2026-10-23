@@ -3,10 +3,10 @@ VANGUARD — portable cyber defense for endpoints and networks
 Version française : LISEZMOI.txt
 
 Vanguard hardens computers, detects vulnerabilities and intrusions (check graded from A to F, network audit,
-threat hunting, YARA scan, logs, spyware, outdated software), blocks the threats it finds and collects the
-evidence of an incident. Every
-finding is explained; nothing is changed without consent. Also included: troubleshooting, optimization, data and
-backup; in development, images that start a computer that no longer boots (ISO folder).
+threat hunting, YARA scan, logs, spyware, outdated software, post-quantum key exchange), blocks the threats it
+finds, collects the evidence of an incident and prepares, without ever sending it, the report of a flaw to its
+vendor. Every finding is explained; nothing is changed without consent. Also included: troubleshooting,
+optimization, data and backup; in development, images that start a computer that no longer boots (ISO folder).
 
 This USB key holds the program for Linux, Windows and macOS, its database and its source code.
 
@@ -82,7 +82,9 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
          name poisoner, program landing in Downloads)
        Monitoring dashboard: alerts day by day, new devices (local page)
        Watcher (Linux): programs started and connections closed seen as they happen, off by default
-         (vanguard watcher on)
+         (vanguard watcher on); and, on request, personal folders watched live against ransomware: an alert
+         within seconds, freeze then stop of an almost-certain case only with active protection
+         (vanguard watcher ransomware on)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
        Address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent; vanguard blocklists)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
@@ -184,8 +186,10 @@ after a burst of failures), Wi-Fi (and fake access points copying its name), pro
 running programs, Windows backdoors and hidden doors (LSA packages, print monitors…), Defender protections turned
 off, startup security and background items on macOS, vulnerable drivers, rootkit signs on Linux, Windows event
 logs, spyware, overly permissive AI agents, DNS, added root certificates, browser extensions, Bluetooth, clock,
-end of support, forgotten accounts, browser passwords, sensitive files, backups, disk and battery health. Each
-rule cites its reference (CIS, Microsoft or ANSSI).
+end of support, forgotten accounts, browser passwords, sensitive files, backups, disk and battery health,
+post-quantum key exchange (SSH, browsers, WireGuard; read-only). Each rule cites its reference (CIS, Microsoft or
+ANSSI). Self-test: vanguard self-test runs every rule without changing anything and compares Vanguard's readings
+with those of the system's tools (pacman, systemctl, ss, PowerShell…); the monitoring runs it again every week.
 
 Language: French or English, following the system. To force English: the Settings menu ("s"), or
   Linux:   VANGUARD_LANG=en ./vanguard
