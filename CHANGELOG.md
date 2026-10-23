@@ -7,6 +7,10 @@ une seule publication par jour, qui regroupe le travail de la journée ; le 21 o
 la 0.84 au soir, qui reprend la 0.83 livrée juste avant elle. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## Prochaine version
+
+- **Windows, deux correctifs vus dans un vrai Windows.** Le Wi-Fi d'un ordinateur sans carte Wi-Fi (bureau, machine virtuelle) est « sans objet » au lieu de « non vérifié » quand le service WLAN est arrêté. La liste des programmes à mettre à jour repasse par PowerShell quand winget, lancé directement, répond par une erreur sans tableau : elle disait « non vérifié » dans une machine virtuelle.
+
 ## 23 octobre 2026 : version 0.86
 
 - **Logiciels espions.** `vanguard logiciels-espions` (alias `spyware` ; menu Antivirus et protection, en dernier)

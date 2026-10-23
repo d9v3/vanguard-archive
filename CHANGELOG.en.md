@@ -7,6 +7,10 @@ a day, gathering the day's work; October 21 had two, 0.82 in the morning and 0.8
 delivered just before it. Only the latest version has its download page; every version keeps its tag in the repository
 (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## Next version
+
+- **Windows, two fixes seen on a real Windows.** Wi-Fi on a computer without a Wi-Fi card (desktop, virtual machine) is "not applicable" instead of "not checked" when the WLAN service is stopped. The list of programs to update goes back through PowerShell when winget, run directly, answers with an error and no table: it said "not checked" in a virtual machine.
+
 ## October 23, 2026: version 0.86
 
 - **Spyware.** `vanguard spyware` (or `logiciels-espions`; Antivirus and protection menu, last) looks for signs of
