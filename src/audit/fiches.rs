@@ -84,6 +84,12 @@ pub const FICHES: &[Fiche] = &[
     Fiche { id: "COM-TLS-003", domaine: Domaine::DnsTls,
         sujet: ("racines ajoutées dans les magasins des navigateurs", "roots added to the browsers' stores"),
         references: &["NIST SP 800-52 Rev. 2", "CIS Controls v8 3.10"] },
+    Fiche { id: "COM-TLS-004", domaine: Domaine::DnsTls,
+        sujet: ("administration de la box sans échange post-quantique (SSH, HTTPS)", "router administration without post-quantum key exchange (SSH, HTTPS)"),
+        references: &["RFC 8446 §4.2.8", "IANA TLS Supported Groups 0x11EC (X25519MLKEM768)", "ANSSI, FAQ cryptographie post-quantique"] },
+    Fiche { id: "COM-TLS-005", domaine: Domaine::DnsTls,
+        sujet: ("chemin vers Internet qui retire l'échange post-quantique", "path to the Internet that removes post-quantum key exchange"),
+        references: &["RFC 8446 §4.2.8", "IANA TLS Supported Groups 0x11EC (X25519MLKEM768)", "ANSSI, FAQ cryptographie post-quantique"] },
     // ── Appareils (appareils.rs) ──
     Fiche { id: "COM-APP-001", domaine: Domaine::Appareils,
         sujet: ("objet joignable depuis Internet par une redirection de la box", "device reachable from the Internet through a router forwarding"),

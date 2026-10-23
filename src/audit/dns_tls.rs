@@ -3,19 +3,25 @@
 //! DDR), les réponses du résolveur comparées à celles de deux résolveurs publics sur des noms dont l'adresse ne
 //! change jamais, la validation DNSSEC, le certificat qu'un site connu présente à cet ordinateur (HTTPS intercepté
 //! en acte), les exceptions de certificat que Firefox a gardées, les racines poussées dans les navigateurs.
+//! Post-quantique, en lecture seule : la box propose-t-elle un échange de clés post-quantique sur son
+//! administration (SSH, HTTPS), et quelque chose sur le chemin vers Internet le retire-t-il (`tls_pq`, `ssh_kex`) ?
 //! Observer seulement : les seules sorties sont des questions DNS vers le résolveur de la machine, celui de la box
-//! et deux résolveurs publics, et une demande HTTPS vers un site de référence. Rien vers les appareils du réseau.
+//! et deux résolveurs publics, une demande HTTPS et une sonde TLS vers le même site de référence, et, sur la box
+//! seule, une connexion à chacun des ports d'administration que le scan a trouvés ouverts (fermée aussitôt, sans
+//! authentification). Rien vers les autres appareils du réseau.
 //! Ce qui ne se lit pas, ou pas hors ligne, est dit « non vérifié », jamais compté sain.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::bail::{self, Bail, Configuration};
 use super::dns_client::{self, Donnees, Genre, Reponse};
+use super::tls_pq::ReponsePq;
 use crate::machine::certificats::{Famille, attribut, famille, tlv};
 use crate::machine::dns::service_public;
-use crate::machine::{Constat, alerte, impossible, ok};
+use crate::machine::{Constat, alerte, impossible, ok, sans_objet};
+use crate::modele::{Absence, Echec};
 use crate::risk::Niveau;
 use crate::ui::affichable;
 use crate::{tr, trf};
@@ -67,6 +73,17 @@ const NOM_DDR: &str = "_dns.resolver.arpa";
 /// Site de référence pour le certificat présenté (une page de diagnostic sans contenu personnel).
 const SITE_TLS: &str = "https://1.1.1.1/cdn-cgi/trace";
 const DELAI_TLS: Duration = Duration::from_secs(12);
+/// Le site de référence pour la sonde post-quantique : le même que ci-dessus (Cloudflare accepte X25519MLKEM768).
+/// Un second site, d'un autre opérateur, départagerait le site et le chemin ; il serait contacté en plus : pas sans
+/// l'accord de l'auteur. Sans lui, un refus n'est conclu que si l'interception se voit déjà au certificat.
+const SITE_PQ: (Ipv4Addr, u16) = (Ipv4Addr::new(1, 1, 1, 1), 443);
+const DELAI_PQ: Duration = Duration::from_secs(8);
+/// Les ports d'administration de la box sondés, quand le scan les a trouvés ouverts.
+const PORT_SSH: u16 = 22;
+const PORTS_HTTPS: [u16; 2] = [443, 8443];
+const DELAI_BOX: Duration = Duration::from_secs(5);
+/// Catégorie des constats post-quantiques, regroupés au rapport.
+const CAT_PQ: &str = "Post-quantique";
 
 /// Autorités publiques dont un émetteur de certificat porte le nom : hors de cette liste, l'émetteur accepté par le
 /// système est une autorité ajoutée localement, donc une interception.
@@ -211,6 +228,14 @@ pub struct Entree {
     /// Profils de la famille Firefox trouvés (0 : pas de Firefox).
     pub profils_firefox: usize,
     pub politiques: Vec<Politique>,
+    /// La sonde post-quantique vers le site de référence ; `None` : pas envoyée (hors ligne).
+    pub pq_site: Option<Result<ReponsePq, Echec>>,
+    /// Un proxy du système est réglé (la sonde, en direct, ne suit alors pas le chemin des navigateurs) ; `None` :
+    /// réglage illisible.
+    pub proxy: Option<bool>,
+    /// L'administration de la box : par service sondé (« SSH 22 », « HTTPS 443 »), un échange post-quantique
+    /// proposé ou non ; `None` : la box n'est pas dans le scan.
+    pub routeur: Option<Vec<(String, Result<bool, Echec>)>>,
 }
 
 impl Entree {
@@ -232,6 +257,9 @@ impl Entree {
             exceptions: Vec::new(),
             profils_firefox: 0,
             politiques: Vec::new(),
+            pq_site: None,
+            proxy: Some(false),
+            routeur: None,
         }
     }
 }
@@ -528,10 +556,127 @@ fn certificat_du_site() -> Tls {
     }
 }
 
+/// Un proxy est-il réglé pour HTTPS, là où le client HTTPS de Vanguard ou les navigateurs le prennent : variables
+/// d'environnement partout, le registre sous Windows, les réglages réseau sous macOS, ceux du bureau sous Linux
+/// (GNOME, KDE : Chrome et Firefox les suivent, pas la sonde). `None` : illisible (sous Windows et macOS).
+#[cfg_attr(target_os = "linux", allow(clippy::unnecessary_wraps))]
+fn proxy_du_systeme() -> Option<bool> {
+    let variable = ["https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some_and(|x| !x.is_empty()));
+    if variable {
+        return Some(true);
+    }
+    #[cfg(windows)]
+    {
+        use winreg::RegKey;
+        use winreg::enums::HKEY_CURRENT_USER;
+        let k = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+            .ok()?;
+        let actif = k.get_value::<u32, _>("ProxyEnable").is_ok_and(|v| v != 0);
+        let pac = k
+            .get_value::<String, _>("AutoConfigURL")
+            .is_ok_and(|v| !v.trim().is_empty());
+        Some(actif || pac)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let r = crate::commande::lancer(std::process::Command::new("scutil").arg("--proxy"), 5)?;
+        Some(r.sortie.lines().any(|l| {
+            let l = l.split_whitespace().collect::<String>();
+            l == "HTTPSEnable:1" || l == "ProxyAutoConfigEnable:1"
+        }))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let gnome = crate::commande::lancer(
+            std::process::Command::new("gsettings").args(["get", "org.gnome.system.proxy", "mode"]),
+            5,
+        )
+        .map(|r| r.sortie);
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map_or_else(|| crate::socle::maison().join(".config"), std::path::PathBuf::from);
+        let kde = std::fs::read_to_string(config.join("kioslaverc")).ok();
+        Some(proxy_du_bureau(gnome.as_deref(), kde.as_deref()))
+    }
+}
+
+/// Le bureau Linux règle-t-il un proxy ? `gnome` : la sortie de « gsettings get org.gnome.system.proxy mode »
+/// (« 'manual' », « 'auto' » : un proxy ou un PAC) ; `kde` : kioslaverc, où ProxyType 1 à 4 (à la main, PAC,
+/// détection, variables) en règle un. Rien de lisible : pas de proxy du bureau, la sonde suit les navigateurs.
+#[cfg(any(target_os = "linux", test))]
+fn proxy_du_bureau(gnome: Option<&str>, kde: Option<&str>) -> bool {
+    let gnome = gnome.is_some_and(|m| m.contains("manual") || m.contains("auto"));
+    let kde = kde.is_some_and(|t| {
+        t.lines().any(|l| {
+            l.split_once('=')
+                .is_some_and(|(cle, v)| cle.trim() == "ProxyType" && matches!(v.trim().parse::<u8>(), Ok(1..=4)))
+        })
+    });
+    gnome || kde
+}
+
+/// La sonde post-quantique vers le site de référence.
+fn sonde_du_site() -> Result<ReponsePq, Echec> {
+    // Une adresse, pas un nom : ni SNI (RFC 6066 §3), ni question DNS de plus.
+    super::tls_pq::sonder(SocketAddr::from(SITE_PQ), None, DELAI_PQ)
+}
+
+/// L'administration de la box : les ports que le scan a trouvés ouverts, sondés chacun une fois. `None` : la box
+/// n'est pas dans le scan ou n'a pas d'adresse IPv4 locale.
+fn sonde_de_la_box(passerelle: Option<IpAddr>, ports: Option<&[u16]>) -> Option<Vec<(String, Result<bool, Echec>)>> {
+    let IpAddr::V4(ip) = passerelle? else { return None };
+    let ports = ports?;
+    if !crate::reseau::nmap::locale(ip) || ip.is_loopback() {
+        return None;
+    }
+    let mut services: Vec<(String, Result<bool, Echec>)> = Vec::new();
+    std::thread::scope(|s| {
+        let ssh = ports.contains(&PORT_SSH).then(|| {
+            s.spawn(move || {
+                super::ssh_kex::kexinit(ip, PORT_SSH, DELAI_BOX)
+                    .map(|noms| noms.iter().any(|n| crate::machine::nom_pq(n)))
+            })
+        });
+        let https: Vec<_> = PORTS_HTTPS
+            .into_iter()
+            .filter(|p| ports.contains(p))
+            .map(|p| {
+                (
+                    p,
+                    s.spawn(move || {
+                        let adresse = SocketAddr::from((ip, p));
+                        super::tls_pq::sonder(adresse, None, DELAI_BOX).and_then(|r| match r {
+                            ReponsePq::Accepte => Ok(true),
+                            ReponsePq::Refuse(_) => Ok(false),
+                            ReponsePq::Autre => Err(Echec::new(
+                                "audit/tls-pq",
+                                crate::modele::Raison::Illisible(
+                                    tr!("réponse TLS incomprise", "TLS answer not understood").into(),
+                                ),
+                            )),
+                        })
+                    }),
+                )
+            })
+            .collect();
+        let rate = || Err(Echec::new("audit/pq-box", crate::modele::Raison::Panique));
+        if let Some(f) = ssh {
+            services.push((format!("SSH {PORT_SSH}"), f.join().unwrap_or_else(|_| rate())));
+        }
+        for (p, f) in https {
+            services.push((format!("HTTPS {p}"), f.join().unwrap_or_else(|_| rate())));
+        }
+    });
+    Some(services)
+}
+
 /// Lit et mesure tout ce que le domaine juge. `passerelle` : la box, si l'audit la connaît déjà (sinon la route par
-/// défaut). Hors ligne, rien ne part sur le réseau ; sinon, les questions DNS et la demande HTTPS partent en
-/// parallèle et tout finit en quelques secondes.
-pub fn entree(passerelle: Option<Ipv4Addr>) -> Entree {
+/// défaut) ; `ports_box` : ses ports TCP ouverts d'après le scan (`None` : elle n'y est pas). Hors ligne, rien ne
+/// part vers Internet ; sinon, les questions DNS, la demande HTTPS et les sondes partent en parallèle et tout finit
+/// en quelques secondes.
+pub fn entree(passerelle: Option<Ipv4Addr>, ports_box: Option<&[u16]>) -> Entree {
     let hors_ligne = crate::parametres::hors_ligne();
     let baux = bail::lire();
     let configuration = bail::configuration();
@@ -563,8 +708,14 @@ pub fn entree(passerelle: Option<Ipv4Addr>) -> Entree {
         exceptions: navigateurs.exceptions,
         profils_firefox: navigateurs.profils,
         politiques: navigateurs.politiques,
+        pq_site: None,
+        proxy: proxy_du_systeme(),
+        routeur: None,
     };
+    // La box est sur le réseau local : sondée même hors ligne (rien ne part vers Internet).
+    let passerelle_box = e.passerelle;
     if hors_ligne {
+        e.routeur = sonde_de_la_box(passerelle_box, ports_box);
         return e;
     }
     // Les résolveurs à interroger : celui de la machine, celui du bail s'il diffère, puis deux publics différents.
@@ -594,10 +745,20 @@ pub fn entree(passerelle: Option<Ipv4Addr>) -> Entree {
             cibles.push((Role::Public(nom), IpAddr::V4(ip)));
         }
     }
-    let (mesures, tls) = std::thread::scope(|s| {
+    let (mesures, tls, pq_site, routeur) = std::thread::scope(|s| {
         let tls = s.spawn(certificat_du_site);
-        (mesurer(&cibles, interroger), tls.join().unwrap_or(Tls::Muet))
+        let pq = s.spawn(sonde_du_site);
+        let routeur = s.spawn(move || sonde_de_la_box(passerelle_box, ports_box));
+        (
+            mesurer(&cibles, interroger),
+            tls.join().unwrap_or(Tls::Muet),
+            pq.join()
+                .unwrap_or_else(|_| Err(Echec::new("audit/tls-pq", crate::modele::Raison::Panique))),
+            routeur.join().ok().flatten(),
+        )
     });
+    e.pq_site = Some(pq_site);
+    e.routeur = routeur;
     for m in mesures {
         match m {
             Ok((mesure, dnssec, ddr)) => {
@@ -1548,7 +1709,177 @@ fn constats_racines_navigateurs(e: &Entree) -> Vec<Constat> {
     constats
 }
 
-/// Les constats du domaine, dans l'ordre des règles : DNS-002, 003, 004, 005, TLS-001, 002, 003.
+/// Le certificat du site de référence montre-t-il une interception (antivirus, proxy, outil de test) ?
+fn interception_vue(tls: &Tls) -> bool {
+    matches!(tls, Tls::Presente { noms: Some(noms), .. }
+        if !(famille(noms) == Famille::Autre && autorite_publique(noms)))
+}
+
+/// COM-TLS-004 : l'administration de la box propose-t-elle un échange post-quantique ? Une information regroupée :
+/// presque aucune box grand public n'en propose, le geste est une mise à jour du micrologiciel, et ce trafic reste
+/// sur le réseau local.
+fn constat_box_pq(e: &Entree) -> Constat {
+    const ID: &str = "COM-TLS-004";
+    let Some(services) = &e.routeur else {
+        return regle(
+            impossible(
+                CAT_PQ,
+                tr!(
+                    "box absente du scan : son administration n'a pas été sondée pour l'échange post-quantique",
+                    "router missing from the scan: its administration was not probed for post-quantum key exchange"
+                ),
+            ),
+            ID,
+        );
+    };
+    if services.is_empty() {
+        return regle(
+            sans_objet(
+                CAT_PQ,
+                Absence::Inactif,
+                tr!(
+                    "Administration de la box en SSH ou en HTTPS non trouvée ouverte par le scan : rien à sonder pour l'échange post-quantique.",
+                    "Router administration over SSH or HTTPS not found open by the scan: nothing to probe for post-quantum key exchange."
+                ),
+            ),
+            ID,
+        );
+    }
+    let liste = |garder: &dyn Fn(&Result<bool, Echec>) -> bool| -> Vec<&str> {
+        services
+            .iter()
+            .filter(|(_, r)| garder(r))
+            .map(|(n, _)| n.as_str())
+            .collect()
+    };
+    let sans = liste(&|r| matches!(r, Ok(false)));
+    let avec = liste(&|r| matches!(r, Ok(true)));
+    let inconnus: Vec<String> = services
+        .iter()
+        .filter_map(|(n, r)| r.as_ref().err().map(|x| format!("{n} : {x}")))
+        .collect();
+    let non_verifies = if inconnus.is_empty() {
+        String::new()
+    } else {
+        trf!(
+            " Non vérifié : {}.",
+            " Not checked: {}.",
+            affichable(&inconnus.join(", "))
+        )
+    };
+    let c = if !sans.is_empty() {
+        alerte(
+            CAT_PQ,
+            Niveau::Info,
+            trf!(
+                "Box : son administration ({}) ne propose aucun échange de clés post-quantique.{non_verifies}",
+                "Router: its administration ({}) offers no post-quantum key exchange.{non_verifies}",
+                sans.join(", ")
+            ),
+        )
+        .manuel(
+            tr!(
+                "Vérifier une mise à jour du micrologiciel de la box ; ce trafic reste sur le réseau local, où le risque d'enregistrement est faible",
+                "Check for a router firmware update; this traffic stays on the local network, where the risk of recording is low"
+            ),
+            &[],
+        )
+    } else if !inconnus.is_empty() {
+        impossible(
+            CAT_PQ,
+            &trf!(
+                "administration de la box sondée sans réponse claire : {}",
+                "router administration probed without a clear answer: {}",
+                affichable(&inconnus.join(", "))
+            ),
+        )
+    } else {
+        ok(
+            CAT_PQ,
+            trf!(
+                "Box : son administration ({}) propose un échange de clés post-quantique.",
+                "Router: its administration ({}) offers a post-quantum key exchange.",
+                avec.join(", ")
+            ),
+        )
+    };
+    regle(c, ID)
+}
+
+/// COM-TLS-005 : quelque chose sur le chemin vers Internet retire-t-il l'échange post-quantique ?
+fn constat_chemin_pq(e: &Entree) -> Constat {
+    const ID: &str = "COM-TLS-005";
+    let site = SITE_PQ.0;
+    let c = match (&e.pq_site, e.proxy) {
+        (None, _) => impossible(
+            CAT_PQ,
+            tr!(
+                "hors ligne : sonde post-quantique non envoyée",
+                "offline: post-quantum probe not sent"
+            ),
+        ),
+        (_, Some(true)) => impossible(
+            CAT_PQ,
+            tr!(
+                "un proxy est réglé : la sonde, envoyée en direct, ne suit pas le chemin des navigateurs",
+                "a proxy is set: the probe, sent directly, does not follow the browsers' path"
+            ),
+        ),
+        (_, None) => impossible(
+            CAT_PQ,
+            tr!(
+                "réglage du proxy illisible : la sonde, envoyée en direct, ne suit peut-être pas le chemin des navigateurs",
+                "proxy setting unreadable: the probe, sent directly, may not follow the browsers' path"
+            ),
+        ),
+        (Some(Ok(ReponsePq::Accepte)), _) => ok(
+            CAT_PQ,
+            trf!(
+                "Rien ne retire l'échange de clés post-quantique entre cet ordinateur et {site}, vu depuis Vanguard (un antivirus qui n'inspecte que les navigateurs ne se voit pas d'ici).",
+                "Nothing removes post-quantum key exchange between this computer and {site}, as seen from Vanguard (an antivirus that inspects only browsers cannot be seen from here)."
+            ),
+        ),
+        (Some(Ok(ReponsePq::Refuse(_))), Some(false)) if interception_vue(&e.tls) => alerte(
+            CAT_PQ,
+            Niveau::Info,
+            trf!(
+                "Le HTTPS vers {site} est inspecté (voir le certificat présenté), et ce qui l'inspecte retire l'échange de clés post-quantique : le trafic enregistré sur le chemin serait lisible demain.",
+                "HTTPS to {site} is inspected (see the presented certificate), and what inspects it removes post-quantum key exchange: traffic recorded on the way would be readable tomorrow."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Chercher une mise à jour de l'antivirus ou du filtre qui inspecte le HTTPS, ou couper son inspection du HTTPS",
+                "Look for an update of the antivirus or filter that inspects HTTPS, or turn off its HTTPS inspection"
+            ),
+            &[],
+        ),
+        (Some(Ok(ReponsePq::Refuse(_))), _) => impossible(
+            CAT_PQ,
+            &trf!(
+                "{site} refuse l'échange post-quantique depuis ce réseau, mais un seul site est sondé : le chemin ou le site lui-même, rien n'est conclu",
+                "{site} refuses post-quantum key exchange from this network, but only one site is probed: the path or the site itself, nothing is concluded"
+            ),
+        ),
+        (Some(Ok(ReponsePq::Autre)), _) => impossible(
+            CAT_PQ,
+            &trf!(
+                "réponse TLS de {site} incomprise",
+                "TLS answer from {site} not understood"
+            ),
+        ),
+        (Some(Err(x)), _) => impossible(
+            CAT_PQ,
+            &trf!(
+                "sonde post-quantique vers {site} : {x}",
+                "post-quantum probe to {site}: {x}"
+            ),
+        ),
+    };
+    regle(c, ID)
+}
+
+/// Les constats du domaine, dans l'ordre des règles : DNS-002, 003, 004, 005, TLS-001, 002, 003, 004, 005.
 pub fn constats(e: &Entree) -> Vec<Constat> {
     let mut constats = constats_bail(e);
     constats.push(constat_chiffrement(e));
@@ -1557,6 +1888,8 @@ pub fn constats(e: &Entree) -> Vec<Constat> {
     constats.push(constat_tls(e));
     constats.push(constat_exceptions(e));
     constats.extend(constats_racines_navigateurs(e));
+    constats.push(constat_box_pq(e));
+    constats.push(constat_chemin_pq(e));
     constats
 }
 
@@ -2207,12 +2540,90 @@ xo1zjuQ=";
         assert!(!autorite_publique("Vanguard"));
     }
 
+    #[test]
+    fn post_quantique_de_la_box_et_du_chemin() {
+        use crate::modele::{Etat, Raison};
+        let mut e = maison();
+        // Box absente du scan : non vérifié ; aucun port d'administration : sans objet.
+        let c = constats(&e);
+        assert!(!par_regle(&c, "COM-TLS-004")[0].verifie);
+        e.routeur = Some(Vec::new());
+        assert_eq!(
+            par_regle(&constats(&e), "COM-TLS-004")[0].etat(),
+            Etat::SansObjet(Absence::Inactif)
+        );
+        // Un seul constat regroupé, en information, même avec plusieurs services.
+        e.routeur = Some(vec![
+            ("SSH 22".into(), Ok(false)),
+            ("HTTPS 443".into(), Ok(false)),
+            ("HTTPS 8443".into(), Err(Echec::new("audit/tls-pq", Raison::Delai))),
+        ]);
+        let c = constats(&e);
+        let r = par_regle(&c, "COM-TLS-004");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].probleme, Some(Niveau::Info));
+        assert!(
+            r[0].message.contains("SSH 22, HTTPS 443") && r[0].message.contains("8443"),
+            "{}",
+            r[0].message
+        );
+        assert!(r[0].correctif.as_ref().is_some_and(|k| !k.automatique));
+        e.routeur = Some(vec![("SSH 22".into(), Ok(true))]);
+        assert_eq!(par_regle(&constats(&e), "COM-TLS-004")[0].probleme, None);
+        e.routeur = Some(vec![(
+            "HTTPS 443".into(),
+            Err(Echec::new("audit/tls-pq", Raison::Delai)),
+        )]);
+        assert!(!par_regle(&constats(&e), "COM-TLS-004")[0].verifie);
+        // Le chemin : hors ligne, accepté, refusé sans interception vue (un seul site : non vérifié), refusé
+        // derrière une inspection vue au certificat (information), proxy réglé (non vérifié).
+        let chemin = |e: &Entree| {
+            let c = constats(e);
+            let x = par_regle(&c, "COM-TLS-005")[0].clone();
+            (x.verifie, x.probleme, x.message)
+        };
+        let (verifie, _, _) = chemin(&e);
+        assert!(!verifie, "hors ligne");
+        e.pq_site = Some(Ok(ReponsePq::Accepte));
+        let (verifie, probleme, message) = chemin(&e);
+        assert!(verifie && probleme.is_none());
+        assert!(
+            message.contains("Vanguard"),
+            "jamais « le chemin est sain » : {message}"
+        );
+        // Proxy illisible : la sonde ne suit peut-être pas le chemin des navigateurs, rien n'est conclu.
+        e.proxy = None;
+        assert!(!chemin(&e).0, "proxy illisible");
+        // Le proxy du bureau Linux, que les navigateurs suivent.
+        assert!(proxy_du_bureau(Some("'manual'\n"), None) && proxy_du_bureau(Some("'auto'"), None));
+        assert!(proxy_du_bureau(None, Some("[Proxy Settings]\nProxyType=1\n")));
+        assert!(!proxy_du_bureau(
+            Some("'none'\n"),
+            Some("[Proxy Settings]\nProxyType=0\n")
+        ));
+        assert!(!proxy_du_bureau(None, None) && !proxy_du_bureau(Some(""), Some("ProxyType=abc")));
+        e.proxy = Some(false);
+        e.pq_site = Some(Ok(ReponsePq::Refuse(40)));
+        assert!(!chemin(&e).0, "un seul site sondé : rien n'est conclu");
+        e.tls = presente("Kaspersky Web Anti-Virus Personal Root");
+        let (verifie, probleme, _) = chemin(&e);
+        assert!(verifie && probleme == Some(Niveau::Info));
+        e.proxy = Some(true);
+        assert!(!chemin(&e).0, "proxy réglé");
+        e.proxy = Some(false);
+        e.pq_site = Some(Ok(ReponsePq::Autre));
+        assert!(!chemin(&e).0);
+        e.pq_site = Some(Err(Echec::new("audit/tls-pq", Raison::Delai)));
+        assert!(!chemin(&e).0);
+        assert!(constats(&e).iter().all(|c| !crate::ui::contient_un_piege(&c.message)));
+    }
+
     /// À la demande (`cargo test -- --ignored --nocapture montrer`), pour une passe sur une vraie machine : ce que
     /// le domaine a lu et ce qu'il en conclut, en lecture seule.
     #[test]
     #[ignore = "montre l'état réel de cette machine, à lancer à la main"]
     fn montrer_les_constats_reels() {
-        let e = entree(None);
+        let e = entree(None, None);
         println!("{e:#?}");
         for c in constats(&e) {
             println!("[{}] {:?} vérifié={} : {}", c.regle, c.probleme, c.verifie, c.message);
@@ -2224,14 +2635,14 @@ xo1zjuQ=";
     #[test]
     fn acquisition_reelle_bornee() {
         let debut = std::time::Instant::now();
-        let e = entree(None);
+        let e = entree(None, None);
         let c = constats(&e);
         assert!(debut.elapsed() < Duration::from_secs(45), "{:?}", debut.elapsed());
-        assert!(c.len() >= 7, "{}", c.len());
+        assert!(c.len() >= 9, "{}", c.len());
         assert!(c.iter().all(|c| !c.message.is_empty() && !c.regle.is_empty()));
         if e.hors_ligne {
-            assert!(e.mesures.is_empty() && e.tls == Tls::NonDemande);
-            for id in ["COM-DNS-004", "COM-DNS-005", "COM-TLS-001"] {
+            assert!(e.mesures.is_empty() && e.tls == Tls::NonDemande && e.pq_site.is_none());
+            for id in ["COM-DNS-004", "COM-DNS-005", "COM-TLS-001", "COM-TLS-005"] {
                 assert!(par_regle(&c, id).iter().all(|c| !c.verifie), "{id}");
             }
         }

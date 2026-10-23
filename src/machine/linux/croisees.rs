@@ -340,13 +340,13 @@ pub(super) fn version_sshd() -> Comparaison {
         Ok(s) => s,
         Err(r) => return Comparaison::Saute(r),
     };
-    let Some(attendue) = super::algorithmes_ssh::version_openssh(&texte) else {
+    let Some(attendue) = crate::machine::sshd::version_openssh(&texte) else {
         return Comparaison::inattendue();
     };
     let v = |(a, b): (u32, u32)| format!("{a}.{b}");
     let programme = std::fs::read(sshd)
         .ok()
-        .and_then(|o| super::algorithmes_ssh::version_dans_le_programme(&o));
+        .and_then(|o| crate::machine::sshd::version_dans_le_programme(&o));
     let mut natif = vec![("programme".to_string(), programme.map_or_else(|| "illisible".into(), v))];
     let mut outil = vec![("programme".to_string(), v(attendue))];
     if let Some(p) = super::algorithmes_ssh::version_du_paquet() {

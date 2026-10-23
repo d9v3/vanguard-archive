@@ -28,11 +28,13 @@ pub(crate) mod mots_de_passe;
 mod navigateur;
 mod navigation_detournee;
 mod partages;
+mod post_quantique;
 pub(crate) mod regles;
 mod regles_communes;
 mod sante;
 mod sensibles;
 mod sshd;
+pub(crate) use sshd::nom_pq;
 pub(crate) mod wifi;
 #[cfg(target_os = "linux")]
 use linux as os;

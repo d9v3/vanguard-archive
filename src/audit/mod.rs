@@ -35,6 +35,8 @@ pub mod ipv6;
 pub mod postes;
 pub mod score;
 pub mod segmentation;
+pub mod ssh_kex;
+pub mod tls_pq;
 pub mod wifi;
 
 /// Les six domaines, dans l'ordre de l'affichage et du rapport.
@@ -102,8 +104,8 @@ impl Domaine {
                 "devices and computers on the same network, guest network, DHCP server, IPv6 routers, impersonated router"
             ),
             Domaine::DnsTls => tr!(
-                "DNS distribué par la box, DNS chiffré, réponses divergentes, DNSSEC, HTTPS intercepté",
-                "DNS handed out by the router, encrypted DNS, diverging answers, DNSSEC, intercepted HTTPS"
+                "DNS distribué par la box, DNS chiffré, réponses divergentes, DNSSEC, HTTPS intercepté, post-quantique",
+                "DNS handed out by the router, encrypted DNS, diverging answers, DNSSEC, intercepted HTTPS, post-quantum"
             ),
             Domaine::Appareils => tr!(
                 "objets connectés : joignables d'Internet, administration ouverte, caméras, mots de passe d'origine",
@@ -435,7 +437,16 @@ fn constats_du_domaine(d: Domaine, c: &Contexte) -> Vec<Constat> {
             wifi::constats(&wifi::entree().avec_scan(nouveaux, mac_box))
         }
         Domaine::Segmentation => segmentation::constats(&segmentation::entree(c)),
-        Domaine::DnsTls => dns_tls::constats(&dns_tls::entree(c.passerelle)),
+        Domaine::DnsTls => {
+            // Les ports TCP de la box trouvés ouverts par le scan : seuls ceux-là sont sondés (post-quantique).
+            let ports_box: Option<Vec<u16>> = c
+                .scan
+                .hotes
+                .iter()
+                .find(|h| Some(h.ip) == c.passerelle || h.role == Some("passerelle"))
+                .map(|h| h.ports.iter().filter(|p| !p.udp).map(|p| p.port).collect());
+            dns_tls::constats(&dns_tls::entree(c.passerelle, ports_box.as_deref()))
+        }
         Domaine::Appareils => appareils::constats(&appareils::Entree {
             hotes: &c.scan.hotes,
             carnet: c.carnet,
