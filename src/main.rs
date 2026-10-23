@@ -17,6 +17,7 @@ mod diagnostic;
 mod dns_rapide;
 mod donnees;
 mod entretien;
+mod fenetre;
 mod fiche;
 mod gaming;
 mod guide;

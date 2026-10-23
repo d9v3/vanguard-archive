@@ -597,7 +597,8 @@ fn choisir_ou(lignes: &[Ligne], invite: &str, depart: &str, echap: &str, gauche_
             } else if en_cours + 1 == visibles.len() {
                 haut = usize::MAX;
             }
-            // L'aide et la saisie restent sous le menu.
+            // L'aide et la saisie restent sous le menu ; la fenêtre se fait à sa hauteur.
+            crate::fenetre::epouser(rangees.len() + 2);
             let place = terminal::size().map_or(24, |(_, r)| usize::from(r)).saturating_sub(2);
             for t in fenetre(&rangees, entete_menu, rangee_en_cours, place, &mut haut) {
                 ecran += &t;
@@ -973,6 +974,10 @@ fn cocher_ou_revenir(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
             haut = 0;
         } else if rang_ecran + 1 == montrees.len() {
             haut = usize::MAX;
+        }
+        // La fenêtre se fait à la hauteur de la liste entière ; une recherche, qui la raccourcit, n'y change rien.
+        if recherche.is_none() {
+            crate::fenetre::epouser(rangees.len() + dessous);
         }
         // Pendant une recherche, la saisie prend une ligne de plus sous l'aide.
         let place = terminal::size()
