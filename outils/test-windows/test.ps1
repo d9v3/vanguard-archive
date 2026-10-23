@@ -374,6 +374,15 @@ try {
         $attendus | ForEach-Object { Info "Non vérifié sans droits, comme attendu : $($_.categorie) — $($_.message)" }
         $impossibles = @($impossibles | Where-Object { $_.message -notmatch 'administrat' })
     }
+    # Logiciels pas à jour : pendant le déploiement d'un nouveau Stable d'Edge (3 jours) ou d'Office (7 jours), la
+    # version d'avant n'est ni due ni à jour, non vérifiée par choix (perimes/verdicts.rs, EDGE_DEPLOIEMENT). Attendu
+    # seulement si TOUTES les raisons du constat sont des déploiements : toute autre raison reste un défaut.
+    $enDeploiement = @($impossibles | Where-Object {
+        $_.regle -eq 'WIN-MAJ-002' -and
+        @(($_.message -replace '^(Could not check|Impossible de vérifier) \(', '' -replace '\)\.$', '') -split ' ; ' |
+            Where-Object { $_ -notmatch '^\S.* \((rollout of|déploiement de la) \S+ (in progress|en cours)\)$' }).Count -eq 0 })
+    $enDeploiement | ForEach-Object { Info "Non vérifié, déploiement en cours (attendu) : $($_.categorie) — $($_.message)" }
+    $impossibles = @($impossibles | Where-Object { $enDeploiement -notcontains $_ })
     if ($impossibles.Count) { $impossibles | ForEach-Object { Bug "Vérification impossible : $($_.categorie) — $($_.message)" } }
     else { Ok "Toutes les vérifications ont pu se faire ($(@($audit.constats).Count) constats, note $($audit.score)/100)" }
 } catch { Bug "machine --json illisible : $($_.Exception.Message)" }
@@ -570,7 +579,12 @@ $reglesApres = Regles-Pare-Feu
 if ($reglesAvant -lt 0 -or $reglesApres -lt 0) { Info 'Règles du pare-feu illisibles ici : invite non vérifiée par les règles' }
 elseif ($reglesApres -eq $reglesAvant) { Ok "Aucune règle du pare-feu ajoutée pour Vanguard ($reglesApres) : pas d'invite répondue" }
 else { Bug "Pare-feu : $($reglesApres - $reglesAvant) règle(s) ajoutée(s) pour Vanguard pendant l'audit (une invite s'est ouverte)" }
-Constat 'Aucune fenêtre du pare-feu Windows (« autoriser l''accès ») ne s''est ouverte pendant l''audit du réseau ?'
+# Question positive, dont le « oui » est le défaut : à « Aucune fenêtre… ne s'est ouverte ? », « non » voulait dire
+# « non, aucune » et passait pour un défaut. Sans personne, Question répondrait « n » : ce serait un faux vert.
+$qPareFeu = 'Une fenêtre du pare-feu Windows (« autoriser l''accès ») s''est-elle ouverte pendant l''audit du réseau ?'
+if ($Auto) { Info "$qPareFeu (non vérifié : test sans personne)" }
+elseif (Question $qPareFeu) { Bug 'Une fenêtre du pare-feu Windows (« autoriser l''accès ») s''est ouverte pendant l''audit du réseau' }
+else { Ok 'Aucune fenêtre du pare-feu Windows pendant l''audit du réseau' }
 
 Etape 'Tous les ports de cette machine (127.0.0.1)'
 Lancer 'local-tous' @('reseau', '127.0.0.1', '-p', 'tous')
@@ -1400,10 +1414,17 @@ elseif (Question 'Faire ce test (deux fenêtres UAC à accepter) ?') {
     if ($np -eq $npAutre) { Ok "Protection réseau passée de $npAvant à $npAutre par Vanguard" }
     elseif ((Sortie 'protection-changer') -match "Administrator prompt refused|Demande d'administrateur refusée") { Bug 'Fenêtre UAC refusée : rien changé (le test demande OUI)' }
     else { Bug "Protection réseau PAS changée ($np)" }
-    if ((Sortie 'protection-changer') -match 'not changed|pas changé') { Bug 'Vanguard dit « pas changé » alors que Defender a changé' }
-    LancerAvec 'protection-remettre' @() "6.$numeroDefender`n3`no`n`nq`n"
-    $np = Protection-Reseau-Attendue $npAvant
-    if ($np -eq $npAvant) { Ok 'Protection réseau remise comme avant' } else { Bug "Protection réseau PAS remise ($np au lieu de $npAvant)" }
+    # Ce que Vanguard dit, jugé d'après ce que Defender a vraiment fait.
+    $ditPasChange = (Sortie 'protection-changer') -match 'not changed|pas changé'
+    if ($np -eq $npAutre -and $ditPasChange) { Bug 'Vanguard dit « pas changé » alors que Defender a changé' }
+    elseif ($np -ne $npAutre -and -not $ditPasChange) { Bug 'Vanguard ne dit pas « pas changé » alors que Defender n''a pas changé' }
+    # Rien n'a changé : une « remise » acceptée basculerait la protection au lieu de la remettre.
+    if ($np -ne $npAutre) { Sautee 'Remise sautée : rien n''avait changé' }
+    else {
+        LancerAvec 'protection-remettre' @() "6.$numeroDefender`n3`no`n`nq`n"
+        $np = Protection-Reseau-Attendue $npAvant
+        if ($np -eq $npAvant) { Ok 'Protection réseau remise comme avant' } else { Bug "Protection réseau PAS remise ($np au lieu de $npAvant)" }
+    }
     if ((Etat-Defender) -eq $defAvant) { Ok 'Defender exactement comme avant' } else { Bug "Defender différent d'avant : $(Etat-Defender)" }
 } else { Sautee 'Sautée (il faut accepter les fenêtres UAC).' }
 
@@ -1477,8 +1498,11 @@ if ($k -match 'Start\?|Commencer \?') { Bug 'Vérifier ma clé est allé jusqu''
 
 Etape 'Réglages Windows de la 0.68 à la 0.78 : Vanguard voit-il ce que Windows dit ?'
 # Chaque réglage est relu ici, sans Vanguard ; Vanguard doit le signaler s'il est risqué, et seulement dans ce cas.
+# Un bilan refait maintenant : celui du début précède les corrections acceptées plus haut (WPAD, longueur des mots
+# de passe…), et le registre relu ici les montre déjà faites. Les deux se comparent au même instant (et à la 0.79).
+Lancer 'machine-json-relu' @('machine', '--json')
 try {
-    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    $audit = Sortie 'machine-json-relu' | ConvertFrom-Json
     function Signale($motif) { [bool]@($audit.constats | Where-Object { $_.probleme -and $_.message -match $motif }).Count }
     function Accord($nom, [bool]$risque, $motif) {
         $vu = Signale $motif
@@ -1563,9 +1587,9 @@ try {
 } catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
 
 Etape 'Réglages de la 0.79 : WPAD, règle des mots de passe, portes dérobées, guide'
-# Chaque réglage est relu ici sans Vanguard, et comparé à ce que dit le bilan JSON déjà fait plus haut.
+# Chaque réglage est relu ici sans Vanguard, et comparé au bilan JSON refait après les corrections (étape d'avant).
 try {
-    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    $audit = Sortie 'machine-json-relu' | ConvertFrom-Json
     function Signale79($motif) { [bool]@($audit.constats | Where-Object { $_.probleme -and $_.message -match $motif }).Count }
     function Accord79($nom, [bool]$risque, $motif) {
         $vu = Signale79 $motif

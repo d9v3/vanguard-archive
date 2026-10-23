@@ -134,8 +134,10 @@ delivered just before it. Only the latest version has its download page; every v
   the key) no longer shows “nothing newer” but “not verified”: an old manifest may have been put back. A clock
   running behind no longer makes an old manifest look fresh: “not verified”. Deleting `sceaux.json` no longer makes
   the state files silently accepted as they are: they stay “adopted”, reported by the check (COM-ETA-001), and the
-  integrity reference and the versions already seen are then not trusted. The machine state from the last
-  monitoring pass and the list of changes already reported by integrity monitoring are sealed too.
+  versions already seen are then not trusted; the integrity reference is still used for comparing (a difference
+  with it is still a difference, and moving to a new version does not stop monitoring), never remade without
+  consent. The machine state from the last monitoring pass and the list of changes already reported by integrity
+  monitoring are sealed too.
   `signer-versions.sh --secours` refuses an unencrypted backup key.
 - **CI.** `/dev/root` read by its device number like findmnt, enable links of vanished systemd units left out like
   systemctl, local HTTP client time bound adjusted for Windows; `claude-journal.yml` analysis only.
