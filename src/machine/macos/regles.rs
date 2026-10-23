@@ -19,7 +19,7 @@ regle!(
     100,
     ("mode furtif du pare-feu", "firewall stealth mode"),
     &[],
-    || mode_furtif().into_iter().collect()
+    || vec![mode_furtif()]
 );
 
 regle!(
@@ -251,5 +251,5 @@ regle!(
     320,
     ("session à distance (SSH)", "Remote Login (SSH)"),
     &[],
-    || ssh_serveur().into_iter().collect()
+    || vec![ssh_serveur()]
 );

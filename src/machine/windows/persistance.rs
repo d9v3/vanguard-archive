@@ -581,6 +581,7 @@ fn info_fenetre_cachee(ou: &str, commande: &str) -> Constat {
 }
 
 fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> Vec<Constat> {
+    use crate::modele::Objet;
     let ps_texte = crate::commande::ps_texte;
     // Noms, chemins et commandes sont choisis par le programme qui se fait relancer : les corrections visent le vrai
     // nom, les messages le montrent rendu inoffensif.
@@ -591,6 +592,12 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
         let [chemin_brut, nom_brut, exe_brut, args_brut] = c[..] else {
             continue;
         };
+        // L'objet : la tâche et ce qu'elle lance, tels que Windows les donne (sans casse) ; une autre commande sous le
+        // même nom est un autre objet, jamais tu par un choix d'avant.
+        let objet = Objet::de(
+            "tache",
+            &format!("{chemin_brut}{nom_brut}={exe_brut} {args_brut}").to_lowercase(),
+        );
         if let Some(raison) = lancement_suspect(exe_brut, args_brut) {
             let (chemin, nom, exe, args) = (
                 montre(chemin_brut),
@@ -607,6 +614,7 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                         "Suspicious scheduled task “{chemin}{nom}”: {raison} ({exe} {args})."
                     ),
                 )
+                .avec_objet(objet)
                 .corriger(
                     trf!(
                         "Désactiver la tâche « {nom} » (réactivable)",
@@ -626,11 +634,12 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                 montre(chemin_brut),
                 montre(nom_brut)
             );
-            constats.push(info_fenetre_cachee(&lieu, &montre(&format!("{exe_brut} {args_brut}"))));
+            constats.push(info_fenetre_cachee(&lieu, &montre(&format!("{exe_brut} {args_brut}"))).avec_objet(objet));
         }
     }
     for r in run {
         let (exe, args) = decouper_commande(&r.valeur);
+        let objet = Objet::de("run", &format!("{}\\{}={}", r.cle, r.nom, r.valeur).to_lowercase());
         if let Some(raison) = lancement_suspect(&exe, &args) {
             let nom = if r.nom.is_empty() { "(default)" } else { &r.nom };
             let (cle, nom, valeur) = (montre(r.cle), montre(nom), montre(&r.valeur));
@@ -641,7 +650,8 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                     "Lancement automatique suspect « {nom} » ({cle}) : {raison} ({valeur}).",
                     "Suspicious autostart “{nom}” ({cle}): {raison} ({valeur})."
                 ),
-            );
+            )
+            .avec_objet(objet);
             constats.push(match retrait_run(r) {
                 Some(retrait) => constat.corriger(
                     trf!("Retirer « {nom} » du démarrage", "Remove “{nom}” from startup"),
@@ -657,7 +667,7 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                 montre(nom),
                 montre(r.cle)
             );
-            constats.push(info_fenetre_cachee(&lieu, &montre(&r.valeur)));
+            constats.push(info_fenetre_cachee(&lieu, &montre(&r.valeur)).avec_objet(objet));
         }
     }
     for d in demarrage {
@@ -665,6 +675,14 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
             continue;
         };
         let (exe, args) = decouper_commande(cible_brute);
+        let objet = Objet::de(
+            "demarrage",
+            &format!(
+                "{}={}",
+                crate::modele::id::chemin(fichier_brut),
+                cible_brute.to_lowercase()
+            ),
+        );
         if let Some(raison) = lancement_suspect(&exe, &args) {
             let (fichier, cible) = (montre(fichier_brut), montre(cible_brute));
             constats.push(
@@ -676,6 +694,7 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                         "Suspicious shortcut in the Startup folder “{fichier}”: {raison} ({cible})."
                     ),
                 )
+                .avec_objet(objet)
                 .corriger(
                     trf!("Supprimer « {fichier} »", "Delete “{fichier}”"),
                     &[&format!("Remove-Item -LiteralPath '{}'", ps_texte(fichier_brut))],
@@ -687,7 +706,7 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                 "Startup folder shortcut “{}”",
                 montre(fichier_brut)
             );
-            constats.push(info_fenetre_cachee(&lieu, &montre(cible_brute)));
+            constats.push(info_fenetre_cachee(&lieu, &montre(cible_brute)).avec_objet(objet));
         }
     }
     if constats.is_empty() {
@@ -1085,5 +1104,23 @@ mod tests {
             assert!(!crate::ui::contient_un_piege(&k.action), "{}", k.action);
             assert!(k.commandes[0].contains(piege), "{}", k.commandes[0]);
         }
+    }
+
+    /// T4 : un lancement suspect se reconnaît à sa clé de registre et à sa commande, dans les deux langues.
+    #[test]
+    fn cles_sans_langue() {
+        let run = [ValeurRun {
+            cle: "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            nom: "Maj".into(),
+            mots: None,
+            valeur: "powershell.exe -enc SQBFAFgA".into(),
+        }];
+        let taches = ["\\|Nettoyage|C:\\Users\\Public\\x.exe|"];
+        let cles = crate::machine::controler_regle("WIN-PRS-001", || juger_persistance(&taches, &run, &[]));
+        assert_eq!(cles.len(), 2, "{cles:?}");
+        assert!(cles.contains(
+            &"WIN-PRS-001|run:hkcu:\\software\\microsoft\\windows\\currentversion\\run\\maj=powershell.exe -enc sqbfafga"
+                .to_string()
+        ));
     }
 }

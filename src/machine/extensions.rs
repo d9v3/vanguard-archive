@@ -183,24 +183,30 @@ fn sans_doublons(mut extensions: Vec<Extension>) -> Vec<Extension> {
 
 /// Constats pour les extensions d'un profil.
 fn juger(navigateur: &str, extensions: &[Extension]) -> Vec<Constat> {
+    use crate::modele::Objet;
     let mut constats = Vec::new();
     for e in extensions {
         if let Some(raison) = e.origine_suspecte {
             let niveau = if e.partout { Niveau::Eleve } else { Niveau::Moyen };
-            constats.push(alerte(
-                CAT,
-                niveau,
-                trf!(
-                    "{navigateur} : extension « {} » {raison}{}. Retire-la si tu ne l'as pas installée toi-même.",
-                    "{navigateur}: extension “{}” {raison}{}. Remove it if you did not install it yourself.",
-                    e.nom,
-                    if e.partout {
-                        tr!(", avec accès à tous les sites", ", with access to every site")
-                    } else {
-                        ""
-                    }
-                ),
-            ));
+            constats.push(
+                alerte(
+                    CAT,
+                    niveau,
+                    trf!(
+                        "{navigateur} : extension « {} » {raison}{}. Retire-la si tu ne l'as pas installée toi-même.",
+                        "{navigateur}: extension “{}” {raison}{}. Remove it if you did not install it yourself.",
+                        e.nom,
+                        if e.partout {
+                            tr!(", avec accès à tous les sites", ", with access to every site")
+                        } else {
+                            ""
+                        }
+                    ),
+                )
+                // L'identifiant de l'extension, pas son nom (qu'elle choisit, et traduit) : une autre extension au même
+                // nom reste un autre objet.
+                .avec_objet(Objet::de("extension", &format!("{navigateur}/{}", e.id))),
+            );
         }
     }
     let partout: Vec<&Extension> = extensions.iter().filter(|e| e.partout).collect();
@@ -226,6 +232,8 @@ fn juger(navigateur: &str, extensions: &[Extension]) -> Vec<Constat> {
         })
         .collect::<Vec<_>>()
         .join(", ");
+    let mut ids: Vec<&str> = partout.iter().map(|e| e.id.as_str()).collect();
+    ids.sort_unstable();
     constats.push(alerte(
         CAT,
         Niveau::Info,
@@ -235,7 +243,8 @@ fn juger(navigateur: &str, extensions: &[Extension]) -> Vec<Constat> {
             extensions.len(),
             partout.len()
         ),
-    ));
+    )
+    .avec_objet(Objet::de("partout", &format!("{navigateur}/{}", ids.join(",")))));
     constats
 }
 
@@ -490,5 +499,26 @@ mod tests {
         assert_eq!(profils[0].0, "ab12.P�]0;t�rofil�");
         assert_eq!(profils[0].1, profil);
         std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    /// T4 : les mêmes clés en français et en anglais, une par extension suspecte et une pour l'accès partout.
+    #[test]
+    fn cles_sans_langue() {
+        let json = r#"{"addons":[
+            {"id":"x@y","type":"extension","location":"app-profile","active":true,"signedState":2,
+             "defaultLocale":{"name":"Espion"},"userPermissions":{"permissions":["nativeMessaging"],"origins":["*://*/*"]},
+             "installTelemetryInfo":{"source":"app-profile","method":"sideload"}},
+            {"id":"uBlock0@raymondhill.net","type":"extension","location":"app-profile","active":true,"signedState":2,
+             "defaultLocale":{"name":"uBlock Origin"},"userPermissions":{"permissions":["storage"],"origins":["<all_urls>"]},
+             "installTelemetryInfo":{"source":"amo"}}
+        ]}"#;
+        let cles = crate::machine::controler_regle("COM-NAV-001", || juger("Zen", &lire_firefox(json)));
+        assert_eq!(
+            cles,
+            [
+                "COM-NAV-001|extension:Zen/x@y",
+                "COM-NAV-001|partout:Zen/uBlock0@raymondhill.net,x@y"
+            ]
+        );
     }
 }

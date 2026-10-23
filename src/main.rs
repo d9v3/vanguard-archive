@@ -31,6 +31,7 @@ mod logiciels;
 mod machine;
 mod maj;
 mod mise_a_jour;
+mod modele;
 mod nettoyer;
 mod optimiser;
 mod ordinateurs;

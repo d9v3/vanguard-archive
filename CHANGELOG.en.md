@@ -9,6 +9,30 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **A problem recognized by its rule and its object, no longer by its translated text.** Open ports, suspicious
+  autostarts, browser extensions, forgotten accounts or new administrators, stalkerware, remote control tools,
+  outdated software and the VANGUARD key's record now carry a key (“LNX-RES-001|port:8080/tcp:python3”): switching
+  language no longer brings back an alert marked as normal, no longer shows “new” problems in the history and
+  re-notifies nothing in the monitoring. Earlier choices are found by their text, then completed with their key; a
+  choice only covers its object (another program on the same port, another outdated version come back). On macOS, a
+  launch agent is recognized by its file and what it launches, on Linux each suspicious autostart line by its
+  fingerprint: a rewritten command or a line added to an already reported file is never silenced by an earlier choice.
+  One choice per key, the most recent. Monitoring re-notifies an alert that gets worse without changing key (an
+  extension that gains access to all sites); the history no longer shows “fixed” then “new” for software whose version
+  changes while still out of date. The inventory of state files gains the device record, its locks, the takeover of an
+  earlier version and the traces folder, and its test also reads the data folder's variables. The history keeps its
+  first checksum unchanged and gains a second one, covering the keys and the network audit grades: a key is never
+  outside a checksum, and a check without it is called not checked, compared on its text. The check's JSON gains
+  `objet`, `cle` and `etat` (healthy, not applicable, not checked with its reason, problem).
+- **A rule that returns nothing says “not checked”, never a silence read as healthy** (outside a list of tolerated
+  rules that can only shrink). Wi-Fi is no longer silent when NetworkManager is missing (iwd, systemd-networkd):
+  without a card, “nothing to judge”; with a card, not checked. On Windows, a network that netsh hides for lack of
+  location access is called not checked; on macOS, unreadable stealth mode and Remote Login too. Only reading the
+  firewall itself decides whether the grade holds: unreadable stealth mode no longer removes it on its own. Without
+  NetworkManager, an unreadable network card list (/sys/class/net) gives “not checked”, never “no Wi-Fi card”. A “not
+  applicable” finding no longer counts among the checks for the grade's reliability. `vanguard rules` also shows the
+  network audit rules and the tools: a single registry of identifiers, checked by the tests, with the inventory of
+  state files from which the seals take the list to protect.
 - **Public Wi-Fi mode** (`vanguard public-wifi`, Network and Internet › Public Wi-Fi mode). Turn it on when arriving
   at a café, a hotel or an airport, turn it off when leaving: the computer no longer accepts any connection from that
   network (an SSH session already open stays), file sharing and the announcement of its name are off (on macOS, the

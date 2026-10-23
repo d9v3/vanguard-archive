@@ -593,6 +593,9 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 .as_deref()
                 .unwrap_or(tr!("programme inconnu (root ?)", "unknown program (root?)"));
             let (niveau, constat) = super::port_expose(port, proto, &i, programme, pare_feu_actif);
+            // Le nom donné par le système, jamais « programme inconnu » traduit : la clé ne dépend pas de la langue.
+            let objet = crate::modele::Objet::port(port, proto, nomme.as_deref());
+            let constat = constat.avec_objet(objet.clone());
             let cle = format!("{port}/{proto}");
             if ufw && bloques.contains(&cle) {
                 constats.push(alerte(
@@ -602,11 +605,11 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                         "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que Vanguard a ajoutée (vérifier : sudo ufw status).", "{cle} ({}) opened by “{programme}”, blocked inbound by the ufw rule Vanguard added (check: sudo ufw status).",
                         i.service
                     ),
-                ));
+                ).avec_objet(objet));
                 continue;
             }
             constats.push(match programme {
-                p if proto == "udp" && port == 631 && p.starts_with("cups-browsed") => cups_browsed_expose(),
+                p if proto == "udp" && port == 631 && p.starts_with("cups-browsed") => cups_browsed_expose().avec_objet(objet),
                 "ollama" => constat.corriger(
                     tr!("Faire écouter Ollama uniquement en local (127.0.0.1)", "Make Ollama listen locally only (127.0.0.1)"),
                     &[
@@ -1386,11 +1389,18 @@ fn wifi(passerelle: Option<String>) -> Vec<Constat> {
     )
     .filter(|r| r.code == Some(0))
     .map(|r| r.sortie) else {
-        return Vec::new();
+        return vec![wifi_sans_nmcli(cartes_wifi(Path::new("/sys/class/net")))];
     };
     let visibles = super::wifi::lire_nmcli(&s);
     let Some(actif) = visibles.iter().find(|v| v.actif) else {
-        return Vec::new();
+        return vec![super::sans_objet(
+            "Wi-Fi",
+            crate::modele::Absence::Inactif,
+            tr!(
+                "Aucun réseau Wi-Fi connecté : rien à juger.",
+                "No Wi-Fi network connected: nothing to judge."
+            ),
+        )];
     };
     let admin = format!(
         "xdg-open https://{}",
@@ -1400,6 +1410,54 @@ fn wifi(passerelle: Option<String>) -> Vec<Constat> {
     constats.extend(super::wifi::jumeau(&visibles));
     constats.extend(wifi_ouverts_automatiques());
     constats
+}
+
+/// Combien de cartes Wi-Fi le noyau connaît : une interface réseau qui a un dossier « wireless » ou « phy80211 »
+/// dans sysfs. Lu sans aucun outil, pour savoir si un bilan sans nmcli n'a rien à juger ou ne voit pas. `Err` (le
+/// pourquoi du système) : sysfs ne se lit pas (conteneur, droits), et l'absence de carte n'est alors pas prouvée.
+fn cartes_wifi(sys_net: &Path) -> std::io::Result<usize> {
+    std::fs::read_dir(sys_net).map(|d| {
+        d.flatten()
+            .filter(|e| e.path().join("wireless").exists() || e.path().join("phy80211").exists())
+            .count()
+    })
+}
+
+/// nmcli absent ou en échec (NetworkManager arrêté, ou un autre gestionnaire comme iwd ou systemd-networkd, celui
+/// d'Omarchy) : sans carte Wi-Fi, rien à juger ; avec, le bilan ne voit pas le réseau, et le dit. Les cartes pas
+/// comptées (sysfs illisible) : non vérifié aussi, jamais « pas de carte ».
+fn wifi_sans_nmcli(cartes: std::io::Result<usize>) -> Constat {
+    let cartes = match cartes {
+        Ok(n) => n,
+        Err(pourquoi) => {
+            return super::impossible_par(
+                "Wi-Fi",
+                crate::modele::Raison::Illisible(pourquoi.to_string()),
+                tr!(
+                    "Impossible de vérifier le Wi-Fi : NetworkManager (nmcli) est absent ou arrêté, et la liste des cartes réseau (/sys/class/net) ne se lit pas.",
+                    "Could not check Wi-Fi: NetworkManager (nmcli) is missing or stopped, and the network card list (/sys/class/net) cannot be read."
+                ),
+            );
+        }
+    };
+    if cartes == 0 {
+        return super::sans_objet(
+            "Wi-Fi",
+            crate::modele::Absence::Materiel,
+            tr!(
+                "Pas de carte Wi-Fi sur cet ordinateur.",
+                "No Wi-Fi card on this computer."
+            ),
+        );
+    }
+    super::impossible_par(
+        "Wi-Fi",
+        crate::modele::Raison::Absente("nmcli".into()),
+        tr!(
+            "Impossible de vérifier le Wi-Fi : NetworkManager (nmcli) est absent ou arrêté, le Wi-Fi est géré par un autre outil (iwd, systemd-networkd). L'audit du réseau le lit, lui.",
+            "Could not check Wi-Fi: NetworkManager (nmcli) is missing or stopped, Wi-Fi is managed by another tool (iwd, systemd-networkd). The network audit reads it."
+        ),
+    )
 }
 
 /// Connexions Wi-Fi de NetworkManager qui se reconnectent toutes seules : (UUID, nom). Le nom vient en dernier, sans
@@ -1851,6 +1909,33 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sans nmcli (iwd, systemd-networkd, celui d'Omarchy), la règle du Wi-Fi ne disparaît plus : sans carte, rien à
+    /// juger ; avec une carte, non vérifié, jamais un silence.
+    #[test]
+    fn wifi_sans_nmcli_jamais_muet() {
+        use crate::modele::{Absence, Etat, Raison};
+        let d = std::env::temp_dir().join(format!("vanguard-sys-net-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("lo")).unwrap();
+        std::fs::create_dir_all(d.join("enp3s0")).unwrap();
+        assert_eq!(cartes_wifi(&d).ok(), Some(0));
+        assert_eq!(wifi_sans_nmcli(Ok(0)).etat(), Etat::SansObjet(Absence::Materiel));
+        std::fs::create_dir_all(d.join("wlan0/wireless")).unwrap();
+        std::fs::create_dir_all(d.join("wlp2s0/phy80211")).unwrap();
+        assert_eq!(cartes_wifi(&d).ok(), Some(2));
+        let c = wifi_sans_nmcli(Ok(2));
+        assert_eq!(c.etat(), Etat::NonVerifie(Raison::Absente("nmcli".into())));
+        assert_eq!(c.categorie, "Wi-Fi");
+        // sysfs illisible : non vérifié, jamais « pas de carte ».
+        let illisible = cartes_wifi(&d.join("absent"));
+        assert!(illisible.is_err());
+        assert!(matches!(
+            wifi_sans_nmcli(illisible).etat(),
+            Etat::NonVerifie(Raison::Illisible(_))
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn paquets_de_plusieurs_fichiers() {

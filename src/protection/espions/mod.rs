@@ -67,6 +67,9 @@ pub(super) struct Trouvaille {
     pub quoi: String,
     /// Où (« en cours : spyrix.exe (pid 12) ») ; une trouvaille vue à plusieurs endroits les garde tous.
     pub ou: Vec<String>,
+    /// Ce qui a été trouvé, sans langue ni numéro de processus (« programme:Spyrix », « module:kl ») : l'objet du
+    /// constat, qui le reconnaît d'un bilan à l'autre.
+    pub objet: String,
 }
 
 /// Tout ce que le relevé a vu.
@@ -125,7 +128,7 @@ pub(super) fn texte_echap(entree: &str) -> String {
 impl Releve {
     /// Une trouvaille ; vue déjà ailleurs (même section, même texte), elle gagne un lieu et garde le niveau le plus
     /// haut.
-    pub(super) fn signe(&mut self, section: Section, niveau: Niveau, quoi: &str, ou: String) {
+    pub(super) fn signe(&mut self, section: Section, niveau: Niveau, objet: &str, quoi: &str, ou: String) {
         if let Some(t) = self
             .trouvailles
             .iter_mut()
@@ -142,6 +145,7 @@ impl Releve {
             section,
             quoi: quoi.to_string(),
             ou: vec![ou],
+            objet: objet.to_string(),
         });
     }
 
@@ -170,10 +174,22 @@ impl Releve {
             } else {
                 Niveau::Moyen
             };
-            self.signe(Section::Programmes, niveau, &texte_genre(s), ou);
+            self.signe(
+                Section::Programmes,
+                niveau,
+                &format!("programme:{}", s.nom),
+                &texte_genre(s),
+                ou,
+            );
         } else if let Some(entree) = ind.and_then(|i| i.produit(nom)) {
             let niveau = if actif { Niveau::Eleve } else { Niveau::Moyen };
-            self.signe(Section::Programmes, niveau, &texte_echap(entree), ou);
+            self.signe(
+                Section::Programmes,
+                niveau,
+                &format!("echap:{entree}"),
+                &texte_echap(entree),
+                ou,
+            );
         }
     }
 }
@@ -241,9 +257,14 @@ fn connexions_espions(r: &mut Releve, ind: &Indicateurs, connexions: &[Connexion
             (Some(p), false) => (Niveau::Eleve, p.clone()),
         };
         let pid = c.pid.map(|p| format!(" (pid {p})")).unwrap_or_default();
+        let objet = match genre {
+            Genre::Serveur => format!("connexion-serveur:{entree}"),
+            Genre::Site => format!("connexion-site:{entree}"),
+        };
         r.signe(
             Section::Indicateurs,
             niveau,
+            &objet,
             &quoi,
             format!("{programme}{pid} → {adresse}"),
         );
@@ -266,9 +287,14 @@ fn memoire_espions(r: &mut Releve, ind: &Indicateurs, noms: &[String]) {
                 "sales site or dashboard of {entree} visited: someone may have used it to watch a phone from this computer, or to install it"
             ),
         };
+        let objet = match genre {
+            Genre::Serveur => format!("nom-serveur:{entree}"),
+            Genre::Site => format!("nom-site:{entree}"),
+        };
         r.signe(
             Section::Indicateurs,
             Niveau::Moyen,
+            &objet,
             &quoi,
             trf!("nom demandé : {}", "name asked: {}", affichable(n)),
         );
@@ -317,7 +343,7 @@ fn relever_linux(r: &mut Releve, ind: Option<&Indicateurs>) {
                     "{} reads the keyboard — {raison}",
                     l.programme
                 );
-                r.signe(Section::Systeme, niveau, &quoi, ou);
+                r.signe(Section::Systeme, niveau, &format!("clavier:{}", l.programme), &quoi, ou);
             }
         }
     }
@@ -333,6 +359,7 @@ fn relever_linux(r: &mut Releve, ind: Option<&Indicateurs>) {
                 r.signe(
                     Section::Systeme,
                     Niveau::Eleve,
+                    &format!("module:{m}"),
                     &trf!(
                         "module du noyau enregistreur de frappes : {m}",
                         "kernel module that records keystrokes: {m}"
@@ -691,7 +718,15 @@ fn constats_de(r: &Releve) -> Vec<Constat> {
     }
     r.trouvailles
         .iter()
-        .map(|t| alerte(CAT, t.niveau, format!("{} ({})", t.quoi, resume(&t.ou, 2, " ; "))))
+        .map(|t| {
+            let objet = t
+                .objet
+                .split_once(':')
+                .map_or(crate::modele::Objet::NonMigre, |(genre, valeur)| {
+                    crate::modele::Objet::de(genre, valeur)
+                });
+            alerte(CAT, t.niveau, format!("{} ({})", t.quoi, resume(&t.ou, 2, " ; "))).avec_objet(objet)
+        })
         .collect()
 }
 
@@ -739,10 +774,22 @@ mod tests {
         r.non_verifie("liste d'Échap non vérifiée : hors ligne");
         assert!(juger(&r).1.contains("(1 point(s) non vérifié(s))"));
         assert!(!juger(&r).1.to_lowercase().contains("aucun logiciel espion"));
-        r.signe(Section::Programmes, Niveau::Moyen, "Qustodio", "installé".into());
+        r.signe(
+            Section::Programmes,
+            Niveau::Moyen,
+            "programme:Qustodio",
+            "Qustodio",
+            "installé".into(),
+        );
         assert_eq!(juger(&r).0, Some(Niveau::Moyen));
         assert!(juger(&r).1.starts_with("À regarder"));
-        r.signe(Section::Programmes, Niveau::Eleve, "Qustodio", "en cours".into());
+        r.signe(
+            Section::Programmes,
+            Niveau::Eleve,
+            "programme:Qustodio",
+            "Qustodio",
+            "en cours".into(),
+        );
         assert_eq!(r.trouvailles.len(), 1);
         assert_eq!(r.trouvailles[0].ou, ["installé", "en cours"]);
         assert_eq!(
@@ -887,5 +934,29 @@ mod tests {
         ] {
             assert!(largeur_affichee(t) + 2 <= LARGEUR, "{t}");
         }
+    }
+
+    /// T4 : une trouvaille se reconnaît à ce qui a été trouvé (produit, entrée de la liste), jamais à sa phrase ni au
+    /// numéro du processus.
+    #[test]
+    fn cles_sans_langue() {
+        let ind = indicateurs();
+        let releve = || {
+            let mut r = Releve::default();
+            r.programme("spyrix.exe", "en cours".into(), true, Some(&ind));
+            r.programme("exactspy.exe", "en cours".into(), true, Some(&ind));
+            connexions_espions(&mut r, &ind, &[connexion(Some("outil"), "203.0.113.7")]);
+            memoire_espions(&mut r, &ind, &["www.vendeur.example".into()]);
+            constats_de(&r)
+        };
+        let cles = crate::machine::controler_regle("COM-ESP-001", releve);
+        assert_eq!(cles.len(), 4, "{cles:?}");
+        assert!(cles.iter().all(|c| c.starts_with("COM-ESP-001|")));
+        assert!(
+            cles.iter().any(|c| c == "COM-ESP-001|connexion-serveur:TheTruthSpy"),
+            "{cles:?}"
+        );
+        assert!(cles.iter().any(|c| c == "COM-ESP-001|nom-site:TheTruthSpy"), "{cles:?}");
+        assert!(cles.iter().any(|c| c == "COM-ESP-001|echap:TheTruthSpy"), "{cles:?}");
     }
 }

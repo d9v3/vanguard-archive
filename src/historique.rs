@@ -7,6 +7,12 @@
 //! au premier bilan qui a une empreinte (les anciens n'en ont pas) ; le premier bilan gardé peut pointer vers un bilan
 //! que la rotation a retiré, ce n'est pas une falsification. Barrière, pas coffre : qui réécrit tout le fichier peut
 //! aussi retirer toutes les empreintes.
+//!
+//! Deux empreintes par bilan depuis les clés des problèmes (`Constat::cle`) : la première, calculée exactement comme
+//! avant, qu'une version plus ancienne de Vanguard sait encore vérifier ; la seconde (`empreinte_v2`) couvre en plus
+//! les clés et les notes de l'audit du réseau, et se chaîne à part. Une clé hors de toute empreinte permettrait de
+//! masquer un problème en réécrivant historique.json sans rompre la chaîne : une clé n'est donc crue que si la
+//! seconde empreinte de son bilan colle ; sinon la comparaison retombe sur le texte.
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -45,6 +51,17 @@ pub struct Bilan {
     pub empreinte: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precedent: Option<String>,
+    /// La clé de chaque problème (`Constat::cle`), dans l'ordre de `problemes` ; `None` pour une règle qui ne pose
+    /// pas encore d'objet. Vide pour les bilans d'avant les clés. Couvertes par `empreinte_v2`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cles: Vec<Option<String>>,
+    /// La seconde empreinte (`empreinte_v2_de`), et celle du bilan précédent : la seconde chaîne. Une version plus
+    /// ancienne, qui réécrit tout le fichier, les retire de tous les bilans d'un coup : la chaîne repart alors au
+    /// bilan suivant, et les clés retirées avec elles ne servent plus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empreinte_v2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precedent_v2: Option<String>,
 }
 
 impl Bilan {
@@ -65,6 +82,38 @@ fn empreinte_de(b: &Bilan) -> String {
     blake3::hash(canon.as_bytes()).to_hex().to_string()
 }
 
+/// La seconde empreinte d'un bilan : tout ce que couvre la première, plus les clés des problèmes, les notes de
+/// l'audit du réseau et la seconde empreinte du précédent. Une autre clé de dérivation que les sceaux : une empreinte
+/// ne vaut jamais pour un autre usage.
+fn empreinte_v2_de(b: &Bilan) -> String {
+    let canon = serde_json::to_string(&(
+        &b.date,
+        b.machine,
+        b.reseau,
+        &b.nom_reseau,
+        &b.problemes,
+        &b.precedent,
+        &b.cles,
+        &b.audit,
+        &b.precedent_v2,
+    ))
+    .unwrap_or_default();
+    let mut h = blake3::Hasher::new_derive_key("vanguard bilan 2");
+    h.update(canon.as_bytes());
+    h.finalize().to_hex().to_string()
+}
+
+impl Bilan {
+    /// La clé du problème `i`, seulement si la seconde empreinte du bilan la couvre : une clé ajoutée ou changée à
+    /// la main ne fait jamais taire un problème.
+    fn cle_crue(&self, i: usize) -> Option<&str> {
+        if self.empreinte_v2.as_deref() != Some(empreinte_v2_de(self).as_str()) {
+            return None;
+        }
+        self.cles.get(i)?.as_deref()
+    }
+}
+
 /// L'état de la chaîne des bilans.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Chaine {
@@ -72,6 +121,10 @@ pub enum Chaine {
     Intacte { chaines: usize },
     /// Le bilan `indice` ne colle pas : son contenu ne correspond plus à son empreinte, ou il ne suit plus le précédent.
     Rompue { indice: usize, date: String, contenu: bool },
+    /// La première chaîne tient, mais le bilan `indice` n'a pas la seconde empreinte alors qu'un bilan d'avant
+    /// l'avait (ou porte des clés sans elle) : écrit par une version plus ancienne, ou à la main. Ni sain ni
+    /// falsifié : non vérifié, et ses clés ne servent pas.
+    NonVerifiee { indice: usize, date: String },
 }
 
 pub fn verifier_chaine(tous: &[Bilan]) -> Chaine {
@@ -103,13 +156,54 @@ pub fn verifier_chaine(tous: &[Bilan]) -> Chaine {
         }
         precedent = Some(b);
     }
-    Chaine::Intacte { chaines }
+    verifier_v2(tous).unwrap_or(Chaine::Intacte { chaines })
+}
+
+/// La seconde chaîne, une fois la première tenue : `None` si elle tient aussi.
+fn verifier_v2(tous: &[Bilan]) -> Option<Chaine> {
+    let mut non_verifiee = None;
+    let mut deja_v2 = false;
+    for (indice, b) in tous.iter().enumerate() {
+        let date = || b.date.clone();
+        let Some(e) = &b.empreinte_v2 else {
+            if (deja_v2 || !b.cles.is_empty()) && non_verifiee.is_none() {
+                non_verifiee = Some(Chaine::NonVerifiee { indice, date: date() });
+            }
+            continue;
+        };
+        if *e != empreinte_v2_de(b) {
+            return Some(Chaine::Rompue {
+                indice,
+                date: date(),
+                contenu: true,
+            });
+        }
+        // Le premier bilan gardé peut pointer vers un bilan retiré par la rotation ; après lui, la seconde chaîne
+        // suit celle du précédent, ou repart (aucune) si le précédent n'en avait pas.
+        if indice > 0 && b.precedent_v2 != tous[indice - 1].empreinte_v2 {
+            return Some(Chaine::Rompue {
+                indice,
+                date: date(),
+                contenu: false,
+            });
+        }
+        deja_v2 = true;
+    }
+    non_verifiee
 }
 
 /// Au bilan : rien tant que la chaîne tient.
 pub fn constat() -> Option<crate::machine::Constat> {
     match verifier_chaine(&charger()) {
         Chaine::Intacte { .. } => None,
+        Chaine::NonVerifiee { date, .. } => Some(crate::machine::impossible_par(
+            "Historique",
+            crate::modele::Raison::VersionAncienne,
+            trf!(
+                "Le bilan du {date} n'a pas la seconde empreinte de l'historique : écrit par une version plus ancienne de Vanguard, ou à la main. Ses clés ne sont pas crues ; il est comparé sur son texte.",
+                "The check of {date} lacks the history's second checksum: written by an older version of Vanguard, or by hand. Its keys are not trusted; it is compared on its text."
+            ),
+        )),
         Chaine::Rompue { date, contenu, .. } => Some(
             crate::machine::alerte(
                 "Historique",
@@ -149,6 +243,10 @@ pub fn etat_chaine() -> Option<String> {
             "⚠ Historique modifié après coup : le bilan du {date} ne colle plus à la chaîne.",
             "⚠ History modified afterwards: the check of {date} no longer fits the chain."
         )),
+        Chaine::NonVerifiee { date, .. } => Some(trf!(
+            "Historique non vérifié : le bilan du {date} n'a pas la seconde empreinte (version plus ancienne, ou à la main).",
+            "History not checked: the check of {date} lacks the second checksum (older version, or by hand)."
+        )),
     }
 }
 
@@ -176,23 +274,32 @@ fn lire_de(chemin: &std::path::Path) -> Result<Vec<Bilan>, String> {
 }
 
 fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Option<&AuditReseau>) -> Bilan {
+    let graves: Vec<&crate::machine::Constat> = audit
+        .map(|a| {
+            a.constats
+                .iter()
+                .filter(|c| c.probleme.is_some_and(|n| n >= Niveau::Moyen))
+                .collect()
+        })
+        .unwrap_or_default();
+    let cles: Vec<Option<String>> = graves.iter().map(|c| c.cle().map(|k| k.to_string())).collect();
     Bilan {
         date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         machine: audit.filter(|a| a.fiable()).map(|a| a.score),
         reseau: reseau.map(|r| r.score_global),
         nom_reseau: reseau.map(|r| r.reseau.clone()),
-        problemes: audit
-            .map(|a| {
-                a.constats
-                    .iter()
-                    .filter(|c| c.probleme.is_some_and(|n| n >= Niveau::Moyen))
-                    .map(|c| format!("{} : {}", c.categorie, c.message))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        problemes: graves
+            .iter()
+            .map(|c| format!("{} : {}", c.categorie, c.message))
+            .collect(),
         audit: audit_reseau.map(AuditReseau::notes),
-        empreinte: None,
-        precedent: None,
+        // Aucune clé : rien à écrire, le bilan garde la forme d'avant.
+        cles: if cles.iter().all(Option::is_none) {
+            Vec::new()
+        } else {
+            cles
+        },
+        ..Bilan::default()
     }
 }
 
@@ -231,6 +338,8 @@ fn enregistrer_dans(chemin: &std::path::Path, mut nouveau: Bilan) -> (Option<Bil
     let precedent = tous.last().cloned();
     nouveau.precedent = precedent.as_ref().and_then(|p| p.empreinte.clone());
     nouveau.empreinte = Some(empreinte_de(&nouveau));
+    nouveau.precedent_v2 = precedent.as_ref().and_then(|p| p.empreinte_v2.clone());
+    nouveau.empreinte_v2 = Some(empreinte_v2_de(&nouveau));
     tous.push(nouveau.clone());
     let surplus = tous.len().saturating_sub(GARDES);
     tous.drain(..surplus);
@@ -254,23 +363,35 @@ fn cle(probleme: &str) -> String {
         .collect()
 }
 
+/// Deux problèmes sont-ils le même ? Par leur clé quand les deux en ont une crue (changer de langue ou de tournure ne
+/// fait rien), sinon par leur texte, l'une comme l'autre sans ses nombres : un bilan d'avant les clés se compare
+/// encore au suivant, sans faire de tout un « nouveau » ; un logiciel dont la version change sans être à jour
+/// (« perimes:chrome@150.0.1.2 » puis « @150.0.1.9 ») reste le même problème, pas un « réglé » suivi d'un
+/// « nouveau ». L'apprentissage, lui, garde la clé exacte : déclarer normale une version ne tait pas la suivante.
+fn meme_probleme(a: (&str, Option<&str>), b: (&str, Option<&str>)) -> bool {
+    match (a.1, b.1) {
+        (Some(x), Some(y)) => cle(x) == cle(y),
+        _ => cle(a.0) == cle(b.0),
+    }
+}
+
 /// (nouveaux, réglés) entre deux bilans.
 fn differences<'a>(avant: &'a Bilan, apres: &'a Bilan) -> (Vec<&'a str>, Vec<&'a str>) {
-    let cles_avant: Vec<String> = avant.problemes.iter().map(|p| cle(p)).collect();
-    let cles_apres: Vec<String> = apres.problemes.iter().map(|p| cle(p)).collect();
-    let nouveaux = apres
-        .problemes
-        .iter()
-        .filter(|p| !cles_avant.contains(&cle(p)))
-        .map(String::as_str)
-        .collect();
-    let regles = avant
-        .problemes
-        .iter()
-        .filter(|p| !cles_apres.contains(&cle(p)))
-        .map(String::as_str)
-        .collect();
-    (nouveaux, regles)
+    let lus = |b: &'a Bilan| -> Vec<(&'a str, Option<&'a str>)> {
+        b.problemes
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.as_str(), b.cle_crue(i)))
+            .collect()
+    };
+    let (av, ap) = (lus(avant), lus(apres));
+    let absents = |de: &[(&'a str, Option<&'a str>)], dans: &[(&'a str, Option<&'a str>)]| -> Vec<&'a str> {
+        de.iter()
+            .filter(|p| !dans.iter().any(|q| meme_probleme(**p, *q)))
+            .map(|p| p.0)
+            .collect()
+    };
+    (absents(&ap, &av), absents(&av, &ap))
 }
 
 fn evolution(nom: &str, avant: Option<u32>, apres: Option<u32>) {
@@ -445,9 +566,7 @@ mod tests {
             reseau: Some(80),
             nom_reseau: Some("10.0.0.0/24".into()),
             problemes: problemes.iter().map(ToString::to_string).collect(),
-            audit: None,
-            empreinte: None,
-            precedent: None,
+            ..Bilan::default()
         }
     }
 
@@ -585,5 +704,152 @@ mod tests {
         assert_eq!(verifier_chaine(&roule), Chaine::Intacte { chaines: 2 });
         assert_eq!(verifier_chaine(&tous[..2]), Chaine::Intacte { chaines: 0 });
         let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Un historique écrit par la 0.85 (une chaîne d'empreintes v1, sans clés) : relu intact, puis prolongé par un
+    /// bilan à clés sans que rien ne devienne « nouveau » ni « rompu ».
+    #[test]
+    fn historique_de_la_085_relu_puis_prolonge() {
+        let dossier = std::env::temp_dir().join(format!("vanguard-historique-085-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let chemin = dossier.join("historique.json");
+        std::fs::write(&chemin, include_str!("../tests/donnees/historique-0.85.json")).unwrap();
+        let anciens = lire_de(&chemin).unwrap();
+        assert_eq!(anciens.len(), 4);
+        assert!(anciens.iter().all(|b| b.empreinte_v2.is_none() && b.cles.is_empty()));
+        assert_eq!(verifier_chaine(&anciens), Chaine::Intacte { chaines: 3 });
+        let mut nouveau = b(91, &[]);
+        nouveau.problemes = vec![
+            "Ports en écoute : 8080/tcp (HTTP) ouvert sur le réseau par « python3 ». Un service web de développement."
+                .into(),
+        ];
+        nouveau.cles = vec![Some("LNX-RES-001|port:8080/tcp:python3".into())];
+        let (precedent, nouveau) = enregistrer_dans(&chemin, nouveau);
+        let precedent = precedent.unwrap();
+        assert!(nouveau.empreinte_v2.is_some() && nouveau.precedent_v2.is_none());
+        let tous = lire_de(&chemin).unwrap();
+        assert_eq!(verifier_chaine(&tous), Chaine::Intacte { chaines: 4 });
+        // Le bilan d'avant n'a pas de clé : on retombe sur le texte, le port n'est pas « nouveau ».
+        assert_eq!(differences(&tous[2], &tous[4]), (vec![], vec![]));
+        assert_eq!(precedent.date, "2026-10-22 09:05");
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Deux bilans à clés, chaînés par leurs deux empreintes.
+    fn deux_bilans_a_cles() -> Vec<Bilan> {
+        let dossier = std::env::temp_dir().join(format!(
+            "vanguard-historique-cles-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let chemin = dossier.join("historique.json");
+        let _ = std::fs::remove_file(&chemin);
+        for (date, texte) in [
+            ("2026-10-22 10:00", "Ports en écoute : 8080/tcp ouvert par « python3 »."),
+            ("2026-10-23 10:00", "Listening ports: 8080/tcp open by “python3”."),
+        ] {
+            let mut x = b(90, &[texte]);
+            x.date = date.into();
+            x.cles = vec![Some("LNX-RES-001|port:8080/tcp:python3".into())];
+            x.audit = Some(BTreeMap::from([("Appareils".to_string(), 95)]));
+            enregistrer_dans(&chemin, x);
+        }
+        let tous = lire_de(&chemin).unwrap();
+        let _ = std::fs::remove_dir_all(&dossier);
+        tous
+    }
+
+    /// Les clés et les notes de l'audit d'un bilan ne sont jamais hors d'une empreinte : changées à la main, la
+    /// seconde chaîne rompt ; retirées avec la seconde empreinte, le bilan est « non vérifié » et ses clés ne
+    /// servent plus ; retirées partout (une version plus ancienne réécrit le fichier), la première chaîne tient.
+    #[test]
+    fn cles_jamais_hors_empreinte() {
+        let tous = deux_bilans_a_cles();
+        assert_eq!(verifier_chaine(&tous), Chaine::Intacte { chaines: 2 });
+        assert_eq!(tous[1].precedent_v2, tous[0].empreinte_v2);
+        assert!(tous[1].cle_crue(0).is_some());
+
+        let mut cle_changee = tous.clone();
+        cle_changee[1].cles = vec![Some("LNX-RES-001|port:9999/tcp:autre".into())];
+        assert!(matches!(
+            verifier_chaine(&cle_changee),
+            Chaine::Rompue {
+                indice: 1,
+                contenu: true,
+                ..
+            }
+        ));
+        assert_eq!(cle_changee[1].cle_crue(0), None);
+
+        let mut audit_change = tous.clone();
+        audit_change[0].audit = Some(BTreeMap::from([("Appareils".to_string(), 100)]));
+        assert!(matches!(
+            verifier_chaine(&audit_change),
+            Chaine::Rompue {
+                indice: 0,
+                contenu: true,
+                ..
+            }
+        ));
+
+        let mut seconde_retiree = tous.clone();
+        seconde_retiree[1].empreinte_v2 = None;
+        seconde_retiree[1].precedent_v2 = None;
+        assert!(matches!(
+            verifier_chaine(&seconde_retiree),
+            Chaine::NonVerifiee { indice: 1, .. }
+        ));
+        assert_eq!(seconde_retiree[1].cle_crue(0), None);
+
+        let mut suite_coupee = tous.clone();
+        suite_coupee[1].precedent_v2 = None;
+        suite_coupee[1].empreinte_v2 = Some(empreinte_v2_de(&suite_coupee[1]));
+        assert!(matches!(
+            verifier_chaine(&suite_coupee),
+            Chaine::Rompue {
+                indice: 1,
+                contenu: false,
+                ..
+            }
+        ));
+
+        // Une version plus ancienne relit et réécrit tout : ce qu'elle ne connaît pas disparaît partout.
+        let reecrit: Vec<Bilan> = tous
+            .iter()
+            .map(|x| Bilan {
+                cles: Vec::new(),
+                empreinte_v2: None,
+                precedent_v2: None,
+                ..x.clone()
+            })
+            .collect();
+        assert_eq!(verifier_chaine(&reecrit), Chaine::Intacte { chaines: 2 });
+    }
+
+    /// Changer de langue ne fait apparaître aucun « nouveau » problème quand les clés sont là ; un autre objet, si.
+    #[test]
+    fn comparaison_par_cle_puis_par_texte() {
+        let tous = deux_bilans_a_cles();
+        assert_eq!(differences(&tous[0], &tous[1]), (vec![], vec![]));
+        assert!(meme_probleme(
+            ("a : 3 x", None),
+            ("a : 4 x", Some("LNX-RES-001|port:22/tcp"))
+        ));
+        assert!(!meme_probleme(
+            ("Ports en écoute : 22/tcp", Some("LNX-RES-001|port:22/tcp")),
+            ("Ports en écoute : 22/tcp", Some("LNX-RES-001|port:22/tcp:sshd"))
+        ));
+        // Une version qui change sans être à jour : le même problème, ni « réglé » ni « nouveau ». Un autre
+        // logiciel reste un autre problème.
+        let perime = |cle| ("Logiciels : 1 logiciel(s) pas à jour.", Some(cle));
+        assert!(meme_probleme(
+            perime("WIN-MAJ-002|perimes:chrome@150.0.1.2"),
+            perime("WIN-MAJ-002|perimes:chrome@150.0.1.9")
+        ));
+        assert!(!meme_probleme(
+            perime("WIN-MAJ-002|perimes:chrome@150.0.1.2"),
+            perime("WIN-MAJ-002|perimes:firefox@150.0.1.2")
+        ));
     }
 }

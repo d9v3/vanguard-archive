@@ -182,24 +182,30 @@ fn pare_feu() -> Constat {
 }
 
 /// Mode furtif : le Mac ne répond pas aux sondes (ping…) du réseau. Utile sur les Wi-Fi publics.
-fn mode_furtif() -> Option<Constat> {
-    let texte = sortie(PARE_FEU, &["--getstealthmode"])?;
-    if texte.contains("enabled") || texte.contains("is on") {
-        return Some(ok("Pare-feu", tr!("Mode furtif actif.", "Stealth mode on.")));
-    }
-    Some(
-        alerte(
+fn mode_furtif() -> Constat {
+    let Some(texte) = sortie(PARE_FEU, &["--getstealthmode"]) else {
+        return impossible(
             "Pare-feu",
-            Niveau::Info,
             tr!(
-                "Mode furtif désactivé : ce Mac répond aux sondes du réseau, ce qui le rend visible sur un Wi-Fi public.",
-                "Stealth mode off: this Mac answers network probes, which makes it visible on public Wi-Fi."
+                "mode furtif illisible (socketfilterfw)",
+                "stealth mode unreadable (socketfilterfw)"
             ),
-        )
-        .corriger(
-            tr!("Activer le mode furtif", "Turn on stealth mode"),
-            &[format!("sudo {PARE_FEU} --setstealthmode on")],
+        );
+    };
+    if texte.contains("enabled") || texte.contains("is on") {
+        return ok("Pare-feu", tr!("Mode furtif actif.", "Stealth mode on."));
+    }
+    alerte(
+        "Pare-feu",
+        Niveau::Info,
+        tr!(
+            "Mode furtif désactivé : ce Mac répond aux sondes du réseau, ce qui le rend visible sur un Wi-Fi public.",
+            "Stealth mode off: this Mac answers network probes, which makes it visible on public Wi-Fi."
         ),
+    )
+    .corriger(
+        tr!("Activer le mode furtif", "Turn on stealth mode"),
+        &[format!("sudo {PARE_FEU} --setstealthmode on")],
     )
 }
 
@@ -219,15 +225,38 @@ fn partage(port: u16) -> Option<&'static str> {
 }
 
 /// Serveur SSH (Remote Login) : jugé seulement s'il écoute le réseau sur le port 22.
-fn ssh_serveur() -> Option<Constat> {
-    let netstat = sortie("netstat", &["-an", "-p", "tcp"])?;
+fn ssh_serveur() -> Constat {
+    let Some(netstat) = sortie("netstat", &["-an", "-p", "tcp"]) else {
+        return impossible("SSH", tr!("netstat indisponible", "netstat unavailable"));
+    };
     let ecoute = super::unix::lire_netstat(&netstat, true)
         .iter()
         .any(|(adresse, port)| *port == 22 && !(adresse.starts_with("127.") || adresse == "::1"));
     if !ecoute {
-        return None;
+        return super::sans_objet(
+            "SSH",
+            crate::modele::Absence::Inactif,
+            tr!(
+                "Session à distance (SSH) fermée au réseau : rien à juger.",
+                "Remote Login (SSH) closed to the network: nothing to judge."
+            ),
+        );
     }
-    super::unix::juger_sshd_mac(&super::unix::configuration_sshd()?)
+    let Some(conf) = super::unix::configuration_sshd() else {
+        return impossible(
+            "SSH",
+            tr!("configuration de sshd illisible", "sshd configuration unreadable"),
+        );
+    };
+    super::unix::juger_sshd_mac(&conf).unwrap_or_else(|| {
+        ok(
+            "SSH",
+            tr!(
+                "Session à distance ouverte au réseau, sans compte sans mot de passe ni connexion en root.",
+                "Remote Login open to the network, without passwordless accounts or root logins."
+            ),
+        )
+    })
 }
 
 fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
@@ -256,6 +285,12 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
                 .get(&port)
                 .map_or(tr!("programme du système", "system program"), String::as_str);
             let (_, constat) = super::port_expose(port, proto, &i, programme, pare_feu_actif);
+            // Le nom lu par lsof, jamais « programme du système » traduit : la clé ne dépend pas de la langue.
+            let constat = constat.avec_objet(crate::modele::Objet::port(
+                port,
+                proto,
+                programmes.get(&port).map(String::as_str),
+            ));
             constats.push(match partage(port) {
                 Some(service) => constat.manuel(
                     trf!(
@@ -848,11 +883,18 @@ fn wifi() -> Vec<Constat> {
         std::process::Command::new("system_profiler").arg("SPAirPortDataType"),
         40,
     ) else {
-        return Vec::new();
+        return vec![super::impossible_par(
+            "Wi-Fi",
+            crate::modele::Raison::Absente("system_profiler".into()),
+            tr!(
+                "Impossible de vérifier le Wi-Fi (system_profiler n'a pas répondu).",
+                "Could not check Wi-Fi (system_profiler did not answer)."
+            ),
+        )];
     };
     let visibles = super::wifi::lire_system_profiler(&r.sortie);
     let Some(actif) = visibles.iter().find(|v| v.actif) else {
-        return Vec::new();
+        return vec![wifi_sans_connexion(&r.sortie)];
     };
     let nom = if actif.ssid == super::wifi::CACHE {
         tr!("nom caché par macOS", "name hidden by macOS")
@@ -864,6 +906,34 @@ fn wifi() -> Vec<Constat> {
     let mut constats = vec![super::wifi::securite(nom, &actif.securite, &admin)];
     constats.extend(super::wifi::jumeau(&visibles));
     constats
+}
+
+/// Aucun réseau connecté dans `system_profiler SPAirPortDataType` : sans objet seulement quand il le dit (aucune
+/// carte listée, ou Wi-Fi éteint), non vérifié sinon. Ses mots sont en anglais quelle que soit la langue du Mac.
+fn wifi_sans_connexion(sortie: &str) -> Constat {
+    use crate::modele::{Absence, Raison};
+    if !sortie.trim().is_empty() && !sortie.contains("Interfaces:") {
+        return super::sans_objet(
+            "Wi-Fi",
+            Absence::Materiel,
+            tr!("Pas de carte Wi-Fi sur ce Mac.", "No Wi-Fi card on this Mac."),
+        );
+    }
+    if sortie.lines().any(|l| l.trim() == "Status: Off") {
+        return super::sans_objet(
+            "Wi-Fi",
+            Absence::Inactif,
+            tr!("Wi-Fi éteint : rien à juger.", "Wi-Fi off: nothing to judge."),
+        );
+    }
+    super::impossible_par(
+        "Wi-Fi",
+        Raison::Illisible("system_profiler".into()),
+        tr!(
+            "Impossible de vérifier le Wi-Fi : system_profiler ne nomme aucun réseau connecté.",
+            "Could not check Wi-Fi: system_profiler names no connected network."
+        ),
+    )
 }
 
 pub fn auditer() -> Audit {

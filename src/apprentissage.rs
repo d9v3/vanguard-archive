@@ -30,6 +30,12 @@ struct Acceptee {
     niveau: Niveau,
     /// AAAA-MM-JJ.
     le: String,
+    /// Sa clé (`Constat::cle`, « LNX-RES-001|port:8080/tcp:python3 ») quand sa règle en pose une : c'est elle qui
+    /// la reconnaît, quelle que soit la langue. Absente des choix d'avant les clés, retrouvés par leur texte puis
+    /// complétés d'elle (écriture scellée). Une version plus ancienne l'ignore et la retire en réécrivant la liste :
+    /// le choix est alors retrouvé par son texte, comme avant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cle: Option<String>,
 }
 
 fn fichier() -> std::path::PathBuf {
@@ -71,7 +77,7 @@ fn enregistrer(appris: &Appris) -> std::io::Result<()> {
 /// réglé vers 10.0.0.5 ne doit jamais faire taire un DNS détourné vers une autre adresse ; un port non plus. Un
 /// nombre collé à un nom (« maj2.desktop », « S-1-5-21-… », « id_ed25519 ») en fait partie et reste aussi :
 /// accepter un programme ne fait pas taire son voisin au numéro près. Le message est dans la langue de l'interface :
-/// changer de langue fait revenir les alertes acceptées, du bon côté.
+/// changer de langue fait revenir les alertes acceptées, du bon côté, sauf celles qui ont une clé (`Acceptee::cle`).
 fn signature(categorie: &str, message: &str) -> String {
     if categorie == "Ports en écoute" {
         return format!("{categorie} : {message}");
@@ -148,15 +154,7 @@ pub fn accepter(c: &Constat) {
             return;
         }
     };
-    appris.acceptees.insert(
-        signature(c.categorie, &c.message),
-        Acceptee {
-            categorie: c.categorie.to_string(),
-            message: c.message.clone(),
-            niveau,
-            le: aujourd_hui().format("%Y-%m-%d").to_string(),
-        },
-    );
+    retenir(&mut appris, c, niveau, aujourd_hui());
     match enregistrer(&appris) {
         Ok(()) => trp!(
             "    {GRIS}retenu pour {DUREE_JOURS} jours, sauf si elle s'aggrave{RESET}",
@@ -166,29 +164,106 @@ pub fn accepter(c: &Constat) {
     }
 }
 
+/// Ajoute le choix d'une alerte à la liste. Un seul choix par clé : l'ancien, écrit dans une autre langue ou une
+/// autre tournure (donc sous une autre signature), resterait à côté et pourrait masquer celui-ci dans `choix_pour`.
+fn retenir(appris: &mut Appris, c: &Constat, niveau: Niveau, jour: NaiveDate) {
+    let cle = c.cle().map(|k| k.to_string());
+    if let Some(k) = &cle {
+        appris.acceptees.retain(|_, a| a.cle.as_ref() != Some(k));
+    }
+    appris.acceptees.insert(
+        signature(c.categorie, &c.message),
+        Acceptee {
+            categorie: c.categorie.to_string(),
+            message: c.message.clone(),
+            niveau,
+            le: jour.format("%Y-%m-%d").to_string(),
+            cle,
+        },
+    );
+}
+
 /// Combien d'alertes sont déclarées normales ici (`None` : la liste ne se lit plus), pour le menu Paramètres.
 pub fn nombre() -> Option<usize> {
     charger().ok().map(|a| a.acceptees.len())
 }
 
 /// Applique tes choix au bilan : une alerte acceptée passe au niveau info, avec la date du choix, sans correction
-/// proposée. Rend le nombre d'alertes concernées.
+/// proposée. Rend le nombre d'alertes concernées. Un choix d'avant les clés, retrouvé par son texte, reçoit la clé
+/// de son alerte : le prochain bilan le retrouvera même dans l'autre langue.
 pub fn appliquer(constats: &mut [Constat]) -> usize {
-    charger().map_or(0, |appris| appliquer_le(&appris, constats, aujourd_hui()))
+    let Ok(mut appris) = charger() else {
+        return 0;
+    };
+    let mut cles = Vec::new();
+    let n = appliquer_avec(&appris, constats, aujourd_hui(), &mut cles);
+    // Pas sur une liste adoptée au premier usage des sceaux : la réécrire la scellerait sans ton accord (le menu le
+    // demande).
+    if completer(&mut appris, cles) && !crate::sceau::adopte(crate::sceau::APPRIS) {
+        let _ = enregistrer(&appris);
+    }
+    n
 }
 
+#[cfg(test)]
 fn appliquer_le(appris: &Appris, constats: &mut [Constat], jour: NaiveDate) -> usize {
+    appliquer_avec(appris, constats, jour, &mut Vec::new())
+}
+
+/// Le choix qui vaut pour une alerte : par sa clé quand elle en a une ; sinon, ou si aucun choix n'a cette clé, par
+/// son texte, mais seulement un choix sans clé (un choix à clé ne vaut que pour son objet, jamais pour un autre au
+/// même texte). Rend aussi la signature du choix trouvé par le texte, à compléter de la clé.
+fn choix_pour<'a>(appris: &'a Appris, c: &Constat) -> Option<(&'a Acceptee, Option<(String, String)>)> {
+    let signature = signature(c.categorie, &c.message);
+    let Some(cle) = c.cle().map(|k| k.to_string()) else {
+        return appris.acceptees.get(&signature).map(|a| (a, None));
+    };
+    // Une liste écrite avant `retenir` peut garder deux choix de la même clé : le plus récent l'emporte, jamais un
+    // choix périmé qui ferait revenir l'alerte malgré celui du jour.
+    if let Some(a) = appris
+        .acceptees
+        .values()
+        .filter(|a| a.cle.as_deref() == Some(cle.as_str()))
+        .max_by(|x, y| x.le.cmp(&y.le))
+    {
+        return Some((a, None));
+    }
+    let a = appris.acceptees.get(&signature).filter(|a| a.cle.is_none())?;
+    Some((a, Some((signature, cle))))
+}
+
+/// Complète les choix retrouvés par leur texte de la clé de leur alerte ; `true` s'il y a lieu de réécrire la liste.
+fn completer(appris: &mut Appris, cles: Vec<(String, String)>) -> bool {
+    let mut change = false;
+    for (signature, cle) in cles {
+        if let Some(a) = appris.acceptees.get_mut(&signature)
+            && a.cle.is_none()
+        {
+            a.cle = Some(cle);
+            change = true;
+        }
+    }
+    change
+}
+
+fn appliquer_avec(
+    appris: &Appris,
+    constats: &mut [Constat],
+    jour: NaiveDate,
+    a_completer: &mut Vec<(String, String)>,
+) -> usize {
     let mut n = 0;
     for c in constats.iter_mut() {
         let Some(niveau) = c.probleme else {
             continue;
         };
-        let Some(choix) = appris.acceptees.get(&signature(c.categorie, &c.message)) else {
+        let Some((choix, completer)) = choix_pour(appris, c) else {
             continue;
         };
         if !en_vigueur(choix, niveau, jour) {
             continue;
         }
+        a_completer.extend(completer);
         let le = date(&choix.le).map(affichee).unwrap_or_default();
         c.probleme = Some(Niveau::Info);
         c.correctif = None;
@@ -402,6 +477,8 @@ mod tests {
             }),
             verifie: true,
             regle: "",
+            objet: crate::modele::Objet::NonMigre,
+            precision: crate::modele::Precision::Aucune,
         }
     }
 
@@ -414,6 +491,7 @@ mod tests {
                 message: message.into(),
                 niveau,
                 le: le.into(),
+                cle: None,
             },
         );
         a
@@ -516,5 +594,171 @@ mod tests {
         let a = appris("Ports en écoute", "8080/tcp ouvert.", Niveau::Moyen, "2026-10-18");
         let mut c = [constat("Ports en écoute", Niveau::Moyen, "8081/tcp ouvert.")];
         assert_eq!(appliquer_le(&a, &mut c, jour("2026-10-20")), 0);
+    }
+
+    /// Une alerte des ports avec sa clé, dans une langue ou l'autre.
+    fn port(message: &str, programme: &str) -> Constat {
+        let mut c = constat("Ports en écoute", Niveau::Moyen, message).avec_objet(crate::modele::Objet::port(
+            8080,
+            "tcp",
+            Some(programme),
+        ));
+        c.regle = "LNX-RES-001";
+        c
+    }
+
+    const FR: &str = "8080/tcp (HTTP) ouvert sur le réseau par « python3 ». Un service web de développement.";
+
+    /// La liste de la 0.85 (sans clés) se relit ; un choix y est retrouvé par son texte, puis complété de la clé de
+    /// son alerte : il vaut ensuite dans l'autre langue.
+    #[test]
+    fn choix_de_la_085_retrouves_puis_completes() {
+        let mut a: Appris = serde_json::from_str(include_str!("../tests/donnees/appris-0.85.json")).unwrap();
+        assert_eq!(a.acceptees.len(), 2);
+        assert!(a.acceptees.values().all(|c| c.cle.is_none()));
+        let jour = jour("2026-10-23");
+        let mut cles = Vec::new();
+        let mut c = [port(FR, "python3")];
+        assert_eq!(appliquer_avec(&a, &mut c, jour, &mut cles), 1);
+        assert_eq!(cles.len(), 1);
+        assert!(completer(&mut a, cles));
+        assert!(!completer(&mut a, vec![]), "rien à réécrire");
+        let ecrit = serde_json::to_string(&a).unwrap();
+        assert!(ecrit.contains("\"cle\":\"LNX-RES-001|port:8080/tcp:python3\""));
+        // Dans l'autre langue, même clé : toujours accepté, sans rien de plus à compléter.
+        let mut cles = Vec::new();
+        let mut en = [port(
+            "8080/tcp (HTTP) open to the network by “python3”. A development web server.",
+            "python3",
+        )];
+        assert_eq!(appliquer_avec(&a, &mut en, jour, &mut cles), 1);
+        assert_eq!(cles, Vec::<(String, String)>::new());
+        assert_eq!(en[0].probleme, Some(Niveau::Info));
+        // Le choix sans clé d'une règle pas encore migrée vaut toujours par son texte.
+        let mut g = [constat("Groupes", Niveau::Moyen, "Tu es dans le groupe docker.")];
+        assert_eq!(appliquer_le(&a, &mut g, jour), 1);
+    }
+
+    /// Un choix à clé ne vaut que pour son objet : même texte, autre programme sur le port, l'alerte reste.
+    #[test]
+    fn un_choix_a_cle_ne_tait_que_son_objet() {
+        let mut a = appris("Ports en écoute", FR, Niveau::Moyen, "2026-10-22");
+        for c in a.acceptees.values_mut() {
+            c.cle = Some("LNX-RES-001|port:8080/tcp:python3".into());
+        }
+        let mut autre = [port(FR, "intrus")];
+        assert_eq!(appliquer_le(&a, &mut autre, jour("2026-10-23")), 0);
+        assert_eq!(autre[0].probleme, Some(Niveau::Moyen));
+        // Plus grave qu'au moment du choix : il revient, clé ou pas.
+        let mut pire = [port(FR, "python3")];
+        pire[0].probleme = Some(Niveau::Eleve);
+        assert_eq!(appliquer_le(&a, &mut pire, jour("2026-10-23")), 0);
+    }
+
+    /// Accepté en anglais, périmé, puis accepté de nouveau en français : un seul choix reste pour la clé, et il vaut
+    /// (avant, l'ancien choix anglais, rangé le premier, masquait celui du jour).
+    #[test]
+    fn un_seul_choix_par_cle() {
+        let en = "8080/tcp (HTTP) open to the network by “python3”. A development web server.";
+        let mut a = Appris::default();
+        retenir(&mut a, &port(en, "python3"), Niveau::Moyen, jour("2026-07-01"));
+        let mut c = [port(FR, "python3")];
+        assert_eq!(appliquer_le(&a, &mut c, jour("2026-09-30")), 0, "périmé au 91e jour");
+        retenir(&mut a, &port(FR, "python3"), Niveau::Moyen, jour("2026-09-30"));
+        assert_eq!(a.acceptees.len(), 1);
+        for message in [FR, en] {
+            let mut c = [port(message, "python3")];
+            assert_eq!(appliquer_le(&a, &mut c, jour("2026-09-30")), 1, "{message}");
+        }
+        // Une liste déjà en double (écrite avant) : le choix le plus récent l'emporte, dans un ordre ou l'autre.
+        for (vieux, recent) in [(en, FR), (FR, en)] {
+            let mut double = Appris::default();
+            retenir(&mut double, &port(vieux, "python3"), Niveau::Moyen, jour("2026-07-01"));
+            let mut b = Appris::default();
+            retenir(&mut b, &port(recent, "python3"), Niveau::Moyen, jour("2026-09-30"));
+            double.acceptees.extend(b.acceptees);
+            assert_eq!(double.acceptees.len(), 2);
+            let mut c = [port(FR, "python3")];
+            assert_eq!(appliquer_le(&double, &mut c, jour("2026-09-30")), 1);
+        }
+    }
+
+    /// macOS : accepter un agent de démarrage ne fait taire ni un autre programme lancé par le même fichier, ni ce
+    /// fichier devenu illisible.
+    #[test]
+    fn agent_accepte_puis_reecrit() {
+        let plist = "/Users/alice/Library/LaunchAgents/com.exemple.aide.plist";
+        let agent = |lance: Option<&str>| {
+            let mut c = constat(
+                "Persistance",
+                Niveau::Eleve,
+                "« com.exemple.aide » se relance à chaque démarrage.",
+            )
+            .avec_objet(crate::modele::Objet::agent(plist, lance));
+            c.regle = "MAC-PRS-001";
+            c
+        };
+        let mut a = Appris::default();
+        retenir(
+            &mut a,
+            &agent(Some("/opt/exemple/aide ")),
+            Niveau::Eleve,
+            jour("2026-10-22"),
+        );
+        let mut meme = [agent(Some("/opt/exemple/aide "))];
+        assert_eq!(appliquer_le(&a, &mut meme, jour("2026-10-23")), 1);
+        for autre in [Some("/tmp/x "), None] {
+            let mut c = [agent(autre)];
+            assert_eq!(appliquer_le(&a, &mut c, jour("2026-10-23")), 0);
+            assert_eq!(c[0].probleme, Some(Niveau::Eleve));
+        }
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        /// T9 : appliquer ne touche que les alertes dont la clé est acceptée (ou, sans clé, le texte d'un choix sans
+        /// clé) : jamais un autre objet ni une autre règle.
+        #[test]
+        fn appliquer_ne_touche_que_les_cles_acceptees(
+            acceptes in prop::collection::btree_set((0u16..6, 0u8..2), 0..6),
+            alertes in prop::collection::vec((0u16..6, 0u8..2, any::<bool>()), 0..12),
+        ) {
+            let regles = ["LNX-RES-001", "COM-NAV-001"];
+            let message = |p: u16| format!("{p}/tcp ouvert.");
+            let mut a = Appris::default();
+            for (p, r) in &acceptes {
+                a.acceptees.insert(
+                    format!("{}|{}", regles[usize::from(*r)], p),
+                    Acceptee {
+                        categorie: "Ports en écoute".into(),
+                        message: message(*p),
+                        niveau: Niveau::Eleve,
+                        le: "2026-10-22".into(),
+                        cle: Some(format!("{}|port:{p}/tcp", regles[usize::from(*r)])),
+                    },
+                );
+            }
+            let mut c: Vec<Constat> = alertes
+                .iter()
+                .map(|(p, r, migre)| {
+                    let mut x = constat("Ports en écoute", Niveau::Moyen, &message(*p));
+                    x.regle = regles[usize::from(*r)];
+                    if *migre {
+                        x.objet = crate::modele::Objet::port(*p, "tcp", None);
+                    }
+                    x
+                })
+                .collect();
+            appliquer_le(&a, &mut c, jour("2026-10-23"));
+            for (x, (p, r, migre)) in c.iter().zip(&alertes) {
+                let touche = x.probleme == Some(Niveau::Info);
+                let par_cle = *migre && acceptes.contains(&(*p, *r));
+                // Sans clé, le texte ne retrouve qu'un choix sans clé : ici tous en ont une, donc jamais.
+                prop_assert_eq!(touche, par_cle, "{} {} {}", p, r, migre);
+            }
+        }
     }
 }

@@ -244,7 +244,8 @@ pub(super) fn relever(r: &mut super::Releve, ind: Option<&Indicateurs>) {
                         }
                         Jugement::ADistance => r.renvoyer(&a.client),
                         Jugement::Signe(niveau, quoi) => {
-                            r.signe(super::Section::Systeme, niveau, &format!("{} — {quoi}", a.client), ou);
+                            let objet = format!("tcc:{}/{}", SERVICES[a.service].0, a.client);
+                            r.signe(super::Section::Systeme, niveau, &objet, &format!("{} — {quoi}", a.client), ou);
                         }
                     }
                 }

@@ -275,6 +275,11 @@ pub fn constats() -> Vec<Constat> {
 
 fn constat_refus(refus: Refus) -> Constat {
     let pourquoi = refus.texte();
+    // L'objet : le refus lui-même, sans langue ; accepter un carnet modifié ne tait pas une protection retirée.
+    let objet = match refus {
+        Refus::ProtectionRetiree => "protection-retiree",
+        Refus::CarnetModifie => "carnet-modifie",
+    };
     alerte(
         CAT,
         Niveau::Eleve,
@@ -283,6 +288,7 @@ fn constat_refus(refus: Refus) -> Constat {
             "VANGUARD key: {pourquoi}. Its record is neither read nor rewritten, and the report stays on this computer: a prepared record would make an intruder look like a regular of the network."
         ),
     )
+    .avec_objet(crate::modele::Objet::de("refus", objet))
     .manuel(
         tr!(
             "Si c'est voulu (copie restaurée, protection retirée ailleurs) : vanguard manifeste --accepter ; sinon, regarde ce qui a touché la clé avant de t'en resservir",
