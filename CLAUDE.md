@@ -114,6 +114,8 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   Un script PowerShell à faire tourner dans la VM : `outils/vm-script.sh --attendre <script.ps1>` (sans droits
   administrateur ; seulement si le menu des tests a accepté les scripts de Linux, choix 7). Les touches envoyées
   d'ici (wtype, raccourcis de Hyprland) n'arrivent pas à Windows.
+  Essai sans clic (test.ps1 en administrateur + menus dans une vraie console, résultat ici) : `outils/vm-tester.sh
+  [--branche B | --exe chemin]` ; une fois dans la VM : INSTALLER-ESSAIS-AUTO.bat (`--installer` l'y pose).
 - Tout seul au déploiement : la page de la version quand il en faut une (`outils/publier-version.sh` ; aperçu de
   ses notes : `--notes`) et celle du dépôt (`outils/github.py` applique `.github/depot.json` : description et
   dernière version publiée, lien du journal, sujets, options). Si les fonctions changent, réécrire la description

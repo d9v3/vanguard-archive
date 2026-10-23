@@ -44,9 +44,16 @@ function Tests-Lances {
         Where-Object { $_.CommandLine -like '*test.ps1*' })
 }
 
+# Un travail de la file d'essais (surveillant-essais.ps1) tourne en administrateur : sa ligne de commande est
+# illisible d'ici et ce menu ne peut pas l'arrêter, mais il rafraîchit file-essais\en-cours.txt toutes les 30 s.
+function Essai-De-La-File {
+    (Get-Item -LiteralPath (Join-Path $racine 'file-essais\en-cours.txt') -Force -ErrorAction SilentlyContinue).LastWriteTime -gt (Get-Date).AddMinutes(-3)
+}
+
 function Test-En-Cours {
     $temoin = Get-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
     if (-not $temoin) { return $false }
+    if (Essai-De-La-File) { return $true }
     if (((Get-Date) - $temoin.LastWriteTime).TotalHours -lt 3 -and (Tests-Lances).Count) { return $true }
     Remove-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
     return $false
@@ -57,6 +64,12 @@ function Test-En-Cours {
 # fonction et ne s'afficherait pas.
 function Lancer-Test([string[]]$options) {
     if (Test-En-Cours) {
+        if (Essai-De-La-File) {
+            # Rien ne l'arrêterait d'ici : retirer le témoin lancerait une seconde passe en même temps que la sienne.
+            Write-Host '  Un essai déposé depuis Linux (file d''essais, en administrateur) tourne : il ne peut pas être arrêté d''ici.' -ForegroundColor Yellow
+            Write-Host '  Attendre sa fin (file-essais\historique.txt), ou DESINSTALLER-ESSAIS-AUTO.bat pour l''arrêter.' -ForegroundColor Yellow
+            return $false
+        }
         # Le test automatique tourne en arrière-plan, sans fenêtre : bloqué, il ne pourrait pas être fermé autrement.
         $debut = (Get-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue).LastWriteTime
         Write-Host "  Un test tourne déjà depuis $('{0:HH:mm}' -f $debut) (peut-être le test automatique, sans fenêtre)." -ForegroundColor Yellow

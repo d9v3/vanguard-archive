@@ -21,12 +21,63 @@ sans droits administrateur ; sa sortie va dans resultats\. Le dossier partagé
 s'écrit depuis Linux : à n'accepter que dans une machine virtuelle de test.
 L'accord est gardé dans ce Windows, pas dans le dossier partagé.
 
+ESSAIS SANS CLIC (file d'essais)
+--------------------------------
+Une seule fois : double-clic sur INSTALLER-ESSAIS-AUTO.bat, « Oui » à la
+fenêtre UAC, puis « o ». Une tâche planifiée, Vanguard-File-Essais, tourne
+ensuite toute seule tant que la session est ouverte. Depuis Linux,
+outils/vm-tester.sh dépose un essai dans file-essais\<id>\ : la tâche vérifie
+l'empreinte de chaque fichier, lance test.ps1 (automatique, en administrateur),
+puis essaie les menus de Vanguard dans une vraie console (conhost, et Windows
+Terminal s'il est là, en français et en anglais), et écrit fini.txt. Plus
+aucun double-clic ni UAC par essai.
+
+Pendant ces essais, des fenêtres de Vanguard s'ouvrent environ une minute :
+ne pas taper dedans (les vraies touches se mêleraient aux essais).
+Un seul test à la fois : la tâche attend tant qu'une passe du menu tourne
+(témoin resultats\.test-en-cours.txt), et le choix 6 attend la fin d'un essai.
+Le menu ne peut pas arrêter un essai de la file (il tourne en administrateur) :
+il le dit et attend ; DESINSTALLER-ESSAIS-AUTO.bat l'arrête. Un essai coupé en
+route (VM redémarrée, session fermée, réinstallation) finit en erreur au tour
+suivant, et la file repart.
+
+Essais de console : un OK exige le texte vu à l'écran et l'effet mesuré. Sous
+Windows Terminal, un écran illisible est « sauté » avec la raison ; sous
+conhost, c'est un problème (Vanguard bloqué ou arrêté). Une partie demandée
+sans un seul OK n'est jamais un essai réussi.
+
+SÉCURITÉ. Ce qui est déposé dans file-essais s'exécute EN ADMINISTRATEUR dans
+cette VM, sans clic. Le dossier partagé s'écrit depuis Linux : tout programme
+du compte Linux peut donc devenir administrateur de la VM. À n'installer que
+dans la VM de test, jamais sur un vrai PC : l'installateur et la tâche ne font
+rien sans \\host.lan\Data. L'empreinte SHA-256 est vérifiée sur la copie
+locale, juste avant le lancement : elle protège d'une copie partielle ou d'un
+fichier remplacé en route, ce n'est pas une signature. Seuls les fichiers
+nommés dans travail.txt (vanguard.exe, test.ps1, essais-console.ps1, le
+lanceur de la clé) sont copiés. Un lien symbolique de Linux, Samba le suit
+sans que Windows le voie : outils/vm-tester.sh refuse d'en déposer.
+Le surveillant et les travaux vivent dans %ProgramData%\Vanguard-File-Essais
+(créé par l'installation, modifiable seulement par un administrateur ; un
+dossier déjà là sans ces droits est écarté, et la tâche ne lance rien si ses
+droits ont changé). Tout ce qui tourne en administrateur est lancé de là
+(test.ps1 -SurPlace), jamais d'un dossier où un programme sans droits écrit ;
+Windows Terminal est pris dans le dossier de son paquet, pas par le PATH. Le
+surveillant ne se met jamais à jour lui-même : réinstaller (une UAC) le met à
+jour. Rien n'est envoyé ailleurs.
+
+Pour tout retirer : double-clic sur DESINSTALLER-ESSAIS-AUTO.bat (une UAC).
+Les résultats restent.
+
 CE QU'IL Y A ICI
 ----------------
 programme\    vanguard.exe et les scripts de test. Remplacé à chaque mise à
               jour de Vanguard (outils/deployer.sh, côté Linux) : ne rien y
               mettre.
 a-lancer\     les scripts déposés depuis Linux qui attendent (choix 7).
+file-essais\  les essais sans clic : un dossier par essai (travail.txt,
+              fini.txt, resultats\ avec le rapport et les écrans de la
+              console), historique.txt, battement.txt (la tâche est en vie).
+              Gardés 14 jours.
 resultats\    une passe par dossier, nommée AAAA-MM-JJ_HH-MM-SS_vX.Y.Z (date et
               version testée), avec son rapport (rapport-test.html) et la
               sortie de chaque commande.
