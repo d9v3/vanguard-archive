@@ -6,7 +6,7 @@
 
 pub(crate) mod annulables;
 #[cfg(windows)]
-mod defender;
+pub(crate) mod defender;
 mod demarrage;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
@@ -152,6 +152,28 @@ fn charger_dans(dossier: &std::path::Path) -> Historique {
             h
         }
         None => Historique::default(),
+    }
+}
+
+/// Les réglages dont Vanguard garde la note (posés par lui, pas encore défaits), lus sans rien écrire ni rien dire :
+/// les id du catalogue et les gestes des autres notes. Le bilan s'en sert pour voir une protection coupée après
+/// coup : une correction du bilan est notée « bilan:<id> », seul son geste (« defender|np ») dit ce qu'elle a posé.
+/// Des notes falsifiées ou illisibles ne comptent pas : COM-ETA-001 le dit déjà.
+#[cfg(windows)]
+pub(crate) fn reglages_poses() -> Vec<String> {
+    use crate::sceau::Lecture;
+    match crate::sceau::lire_dans(&crate::reseau::dossier_local(), crate::sceau::REGLAGES) {
+        Lecture::Intact(o) | Lecture::Adopte(o) => {
+            serde_json::from_str::<Historique>(String::from_utf8_lossy(&o).trim_start_matches('\u{feff}'))
+                .map(|h| {
+                    h.reglages
+                        .into_iter()
+                        .flat_map(|(id, a)| std::iter::once(id).chain(a.gestes))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
     }
 }
 

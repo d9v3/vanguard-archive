@@ -24,7 +24,7 @@ regle!(
         "connexion réussie après une rafale d'échecs",
         "successful sign-in after a burst of failures"
     ),
-    &["MITRE ATT&CK T1110.001", "MITRE ATT&CK T1078"],
+    &["CIS Controls v8 8.11", "MITRE ATT&CK T1110.001", "MITRE ATT&CK T1078"],
     connexion_forcee
 );
 
@@ -34,12 +34,13 @@ regle!(
     675,
     ("programmes en marche suspects", "suspicious running programs"),
     &[
+        "CIS Controls v8 10.7",
         "MITRE ATT&CK T1059.001",
         "MITRE ATT&CK T1218",
         "MITRE ATT&CK T1105",
         "MITRE ATT&CK T1003.001",
         "MITRE ATT&CK T1496",
-        "MITRE ATT&CK T1204.002",
+        "MITRE ATT&CK T1204.002"
     ],
     programmes_suspects
 );

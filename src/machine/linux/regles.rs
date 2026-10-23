@@ -10,16 +10,24 @@ use crate::machine::regles::{Os, regle};
 /// pourraient se contredire.
 static PARE_FEU: ParBilan<Constat> = ParBilan::new();
 
-regle!("LNX-PFE-001", Os::Linux, 10, ("pare-feu", "firewall"), &[], || vec![
-    PARE_FEU.lire(pare_feu)
-]);
+regle!(
+    "LNX-PFE-001",
+    Os::Linux,
+    10,
+    ("pare-feu", "firewall"),
+    &[
+        "CIS Controls v8 4.5",
+        "ANSSI BP-028 (configuration d'un système GNU/Linux)"
+    ],
+    || vec![PARE_FEU.lire(pare_feu)]
+);
 
 regle!(
     "LNX-RES-001",
     Os::Linux,
     100,
     ("services ouverts sur le réseau", "services open to the network"),
-    &[],
+    &["CIS Controls v8 4.8"],
     || {
         let actif = PARE_FEU.lire(pare_feu).probleme.is_none();
         ports_ecoute(actif, actif && ufw_actif())
@@ -31,7 +39,7 @@ regle!(
     Os::Linux,
     110,
     ("Docker exposé ou trop permis", "Docker exposed or over-permissive"),
-    &[],
+    &["CIS Controls v8 4.8", "CIS Docker Benchmark"],
     || docker().into_iter().collect()
 );
 
@@ -40,7 +48,10 @@ regle!(
     Os::Linux,
     120,
     ("serveur SSH", "SSH server"),
-    &[],
+    &[
+        "CIS Controls v8 4.6",
+        "ANSSI, Recommandations pour un usage sécurisé d'(Open)SSH"
+    ],
     || vec![ssh_serveur()]
 );
 
@@ -52,7 +63,10 @@ regle!(
         "ports renvoyés par SSH ouverts au réseau",
         "SSH-forwarded ports open to the network"
     ),
-    &[],
+    &[
+        "CIS Controls v8 4.6",
+        "ANSSI, Recommandations pour un usage sécurisé d'(Open)SSH"
+    ],
     || ports_ssh().into_iter().collect()
 );
 
@@ -61,7 +75,10 @@ regle!(
     Os::Linux,
     126,
     ("réglages secondaires de sshd", "secondary sshd settings"),
-    &[],
+    &[
+        "CIS Controls v8 4.6",
+        "ANSSI, Recommandations pour un usage sécurisé d'(Open)SSH"
+    ],
     || ssh_secondaire().into_iter().collect()
 );
 
@@ -70,7 +87,7 @@ regle!(
     Os::Linux,
     130,
     ("échecs de connexion SSH", "failed SSH logins"),
-    &[],
+    &["CIS Controls v8 8.11"],
     || ssh_echecs().into_iter().collect()
 );
 
@@ -79,7 +96,7 @@ regle!(
     Os::Linux,
     140,
     ("mises à jour en attente", "pending updates"),
-    &[],
+    &["CIS Controls v8 7.3"],
     || vec![mises_a_jour()]
 );
 
@@ -88,7 +105,7 @@ regle!(
     Os::Linux,
     150,
     ("mises à jour de sécurité automatiques", "automatic security updates"),
-    &[],
+    &["CIS Controls v8 7.3"],
     || maj_automatiques().into_iter().collect()
 );
 
@@ -97,7 +114,7 @@ regle!(
     Os::Linux,
     160,
     ("failles connues des paquets", "known package flaws"),
-    &[],
+    &["CIS Controls v8 7.7"],
     || vec![failles_connues()]
 );
 
@@ -109,7 +126,7 @@ regle!(
         "Flatpak, micrologiciels et autres mises à jour",
         "Flatpak, firmware and other updates"
     ),
-    &[],
+    &["CIS Controls v8 7.4"],
     || autres_mises_a_jour().into_iter().collect()
 );
 
@@ -118,7 +135,7 @@ regle!(
     Os::Linux,
     180,
     ("redémarrage demandé", "restart required"),
-    &[],
+    &["CIS Controls v8 7.3"],
     || vec![redemarrage()]
 );
 
@@ -127,7 +144,7 @@ regle!(
     Os::Linux,
     190,
     ("chiffrement du disque", "disk encryption"),
-    &[],
+    &["CIS Controls v8 3.6"],
     || vec![chiffrement_disque()]
 );
 
@@ -136,7 +153,7 @@ regle!(
     Os::Linux,
     200,
     ("session ouverte toute seule", "automatic login"),
-    &[],
+    &["CIS Controls v8 4.3"],
     || ouverture_automatique().into_iter().collect()
 );
 
@@ -145,7 +162,7 @@ regle!(
     Os::Linux,
     210,
     ("verrouillage de l'écran", "screen lock"),
-    &[],
+    &["CIS Controls v8 4.3"],
     || verrouillage_ecran().into_iter().collect()
 );
 
@@ -154,7 +171,7 @@ regle!(
     Os::Linux,
     220,
     ("affichage X11 ouvert", "open X11 display"),
-    &[],
+    &["CIS Controls v8 4.8"],
     || acces_x11().into_iter().collect()
 );
 
@@ -163,11 +180,35 @@ regle!(
     Os::Linux,
     230,
     (
-        "réglages de sécurité du noyau (sysctl)",
-        "kernel security settings (sysctl)"
+        "réglages du noyau pour la mémoire et les processus (sysctl)",
+        "kernel settings for memory and processes (sysctl)"
     ),
-    &[],
-    || vec![durcissement_noyau()]
+    &["CIS Controls v8 10.5", "ANSSI BP-028 (paramétrage du noyau)"],
+    || vec![durcissement_noyau(durcissement::Groupe::Memoire)]
+);
+
+regle!(
+    "LNX-NOY-007",
+    Os::Linux,
+    230,
+    (
+        "liens et fichiers de /tmp protégés par le noyau (sysctl)",
+        "links and files in /tmp protected by the kernel (sysctl)"
+    ),
+    &["CIS Controls v8 4.1", "ANSSI BP-028 (paramétrage du noyau)"],
+    || vec![durcissement_noyau(durcissement::Groupe::FichiersPartages)]
+);
+
+regle!(
+    "LNX-RES-003",
+    Os::Linux,
+    230,
+    (
+        "réglages réseau du noyau (SYN, redirections ICMP)",
+        "kernel network settings (SYN, ICMP redirects)"
+    ),
+    &["CIS Controls v8 4.1", "ANSSI BP-028 (paramétrage réseau du noyau)"],
+    || vec![durcissement_noyau(durcissement::Groupe::Reseau)]
 );
 
 regle!(
@@ -175,7 +216,10 @@ regle!(
     Os::Linux,
     240,
     ("AppArmor ou SELinux", "AppArmor or SELinux"),
-    &[],
+    &[
+        "CIS Controls v8 4.1",
+        "ANSSI BP-028 (configuration d'un système GNU/Linux)"
+    ],
     || vec![module_securite()]
 );
 
@@ -184,7 +228,7 @@ regle!(
     Os::Linux,
     250,
     ("sauvegardes et instantanés", "backups and snapshots"),
-    &[],
+    &["CIS Controls v8 11.2"],
     || vec![sauvegardes()]
 );
 
@@ -193,7 +237,7 @@ regle!(
     Os::Linux,
     260,
     ("fichiers suspects", "suspicious files"),
-    &[],
+    &["CIS Controls v8 10.1"],
     || fichiers_suspects().into_iter().collect()
 );
 
@@ -202,7 +246,7 @@ regle!(
     Os::Linux,
     270,
     ("persistance cachée", "hidden persistence"),
-    &[],
+    &["CIS Controls v8 13.2"],
     || persistance().into_iter().collect()
 );
 
@@ -211,7 +255,10 @@ regle!(
     Os::Linux,
     280,
     ("démarrage sécurisé (Secure Boot)", "Secure Boot"),
-    &[],
+    &[
+        "CIS Controls v8 4.1",
+        "ANSSI BP-028 (configuration d'un système GNU/Linux)"
+    ],
     || vec![demarrage_securise()]
 );
 
@@ -220,7 +267,10 @@ regle!(
     Os::Linux,
     290,
     ("clés SSH du compte", "the account's SSH keys"),
-    &[],
+    &[
+        "CIS Controls v8 3.3",
+        "ANSSI, Recommandations pour un usage sécurisé d'(Open)SSH"
+    ],
     || cles_ssh().into_iter().collect()
 );
 
@@ -232,7 +282,10 @@ regle!(
         "fichiers secrets lisibles par d'autres",
         "secret files readable by others"
     ),
-    &[],
+    &[
+        "CIS Controls v8 3.3",
+        "ANSSI BP-028 (configuration d'un système GNU/Linux)"
+    ],
     || fichiers_secrets().into_iter().collect()
 );
 
@@ -241,7 +294,7 @@ regle!(
     Os::Linux,
     310,
     ("failles du processeur", "processor flaws"),
-    &[],
+    &["CIS Controls v8 10.5"],
     || vec![processeur()]
 );
 
@@ -250,7 +303,10 @@ regle!(
     Os::Linux,
     320,
     ("groupes équivalents à root", "root-equivalent groups"),
-    &[],
+    &[
+        "CIS Controls v8 5.4",
+        "ANSSI BP-028 (configuration d'un système GNU/Linux)"
+    ],
     || groupes_privilegies().into_iter().collect()
 );
 
@@ -259,7 +315,10 @@ regle!(
     Os::Linux,
     330,
     ("sudo sans mot de passe", "passwordless sudo"),
-    &[],
+    &[
+        "CIS Controls v8 5.4",
+        "ANSSI BP-028 (configuration d'un système GNU/Linux)"
+    ],
     || sudo_sans_mot_de_passe().into_iter().collect()
 );
 
@@ -271,7 +330,7 @@ regle!(
         "dossiers de commandes modifiables par d'autres",
         "command folders writable by others"
     ),
-    &[],
+    &["CIS Controls v8 3.3"],
     || dossiers_de_commandes().into_iter().collect()
 );
 
@@ -280,7 +339,7 @@ regle!(
     Os::Linux,
     340,
     ("paquets de l'AUR", "AUR packages"),
-    &[],
+    &["CIS Controls v8 2.2"],
     || paquets_aur().into_iter().collect()
 );
 
@@ -289,7 +348,7 @@ regle!(
     Os::Linux,
     350,
     ("comptes aux droits root cachés", "hidden accounts with root rights"),
-    &[],
+    &["CIS Controls v8 5.4"],
     || vec![comptes()]
 );
 
@@ -301,7 +360,7 @@ regle!(
         "blocage des comptes et longueur des mots de passe (PAM)",
         "account lockout and password length (PAM)"
     ),
-    &[],
+    &["CIS Controls v8 4.10", "CIS Controls v8 5.2"],
     || pam()
 );
 
@@ -310,7 +369,7 @@ regle!(
     Os::Linux,
     360,
     ("réseaux Wi-Fi", "Wi-Fi networks"),
-    &[],
+    &["CIS Controls v8 12.6"],
     || wifi(crate::reseau::scan::passerelle().map(|g| g.to_string()))
 );
 
@@ -319,6 +378,6 @@ regle!(
     Os::Linux,
     370,
     ("services en échec", "failed services"),
-    &[],
+    &["CIS Controls v8 4.1"],
     || vec![services_en_echec()]
 );

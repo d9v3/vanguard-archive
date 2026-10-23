@@ -20,6 +20,8 @@ pub(crate) enum Raison {
     Muette,
     /// La règle a planté (rattrapée) : son identifiant suit le constat.
     Panique,
+    /// La règle a dépassé son délai (`machine::regles`) : le bilan a continué sans elle.
+    Delai,
     /// Écrit par une version plus ancienne de Vanguard (ou à la main) : ce qu'elle ne savait pas écrire manque.
     VersionAncienne,
     /// Un « impossible » d'avant ce modèle, dont la raison n'est que dans le message.
@@ -35,6 +37,7 @@ impl Raison {
             Raison::Illisible(_) => "illisible",
             Raison::Muette => "muette",
             Raison::Panique => "panique",
+            Raison::Delai => "delai",
             Raison::VersionAncienne => "version-ancienne",
             Raison::NonPrecisee => "non-precisee",
         }
@@ -53,6 +56,7 @@ impl Raison {
                 "the check returned nothing".into(),
             ),
             Raison::Panique => ("erreur interne".into(), "internal error".into()),
+            Raison::Delai => ("délai dépassé".into(), "time limit exceeded".into()),
             Raison::VersionAncienne => (
                 "écrit par une version plus ancienne".into(),
                 "written by an older version".into(),
@@ -75,6 +79,7 @@ mod tests {
             Raison::Illisible("accès refusé".into()),
             Raison::Muette,
             Raison::Panique,
+            Raison::Delai,
             Raison::VersionAncienne,
             Raison::NonPrecisee,
         ];

@@ -46,7 +46,7 @@ regle!(
         "veilleur des lancements et des connexions",
         "watcher of launches and connections"
     ),
-    &[],
+    &["CIS Controls v8 8.8"],
     || vec![constat()]
 );
 

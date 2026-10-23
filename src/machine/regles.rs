@@ -90,6 +90,18 @@ pub fn regles(os: Os) -> Vec<&'static Regle> {
     regles
 }
 
+/// La référence d'abord citée d'une règle de ce système (CIS, Microsoft ou ANSSI : `modele::reference`) ; `None`
+/// pour un identifiant inconnu ici (vide, constat hors du registre).
+pub(crate) fn reference_de(id: &str) -> Option<&'static str> {
+    if id.is_empty() {
+        return None;
+    }
+    inventory::iter::<Regle>
+        .into_iter()
+        .find(|r| r.id == id)
+        .and_then(|r| crate::modele::reference::principale(r.references))
+}
+
 /// Le texte d'un sujet dans la langue de l'interface.
 fn sujet(s: (&'static str, &'static str)) -> &'static str {
     if crate::langue::anglais() { s.1 } else { s.0 }
@@ -230,7 +242,6 @@ pub(crate) const MUETTES_TOLEREES: &[&str] = &[
     "WIN-CPT-001",
     "WIN-CPT-002",
     "WIN-DEM-001",
-    "WIN-DUR-001",
     "WIN-JRN-002",
     "WIN-JRN-003",
     "WIN-MAJ-002",
@@ -252,21 +263,61 @@ pub(crate) const MUETTES_TOLEREES: &[&str] = &[
 
 /// Le plafond du cliquet : baisser ce nombre quand une règle sort de la liste, jamais le monter.
 #[cfg(test)]
-const MUETTES_TOLEREES_AU_PLUS: usize = 97;
+const MUETTES_TOLEREES_AU_PLUS: usize = 96;
 
 /// Les vérifications du bilan pour ce système, une par règle, dans l'ordre des rangs.
 pub(super) fn verifications<'a>() -> Vec<Verification<'a>> {
     regles(Os::actuel()).into_iter().map(verification).collect()
 }
 
+/// Le délai d'une règle ordinaire : bien au-delà de ce que prend la plus lente (lire un dossier personnel chargé,
+/// relire des journaux), assez court pour qu'un bilan figé (fichier sur un montage réseau mort, appel du système qui
+/// ne revient pas) finisse et nomme la règle fautive.
+pub(crate) const DELAI: std::time::Duration = std::time::Duration::from_mins(10);
+/// Celui des règles qui attendent Internet ou le gestionnaire de mises à jour (domaine « MAJ ») : softwareupdate,
+/// winget, la recherche de Windows Update et les sources des logiciels pas à jour prennent parfois plusieurs minutes.
+pub(crate) const DELAI_LONG: std::time::Duration = std::time::Duration::from_mins(30);
+
+impl Regle {
+    /// Au-delà, la règle est dite non vérifiée et le bilan continue sans elle.
+    pub(crate) fn delai(&self) -> std::time::Duration {
+        if self.id.get(4..7) == Some("MAJ") {
+            DELAI_LONG
+        } else {
+            DELAI
+        }
+    }
+}
+
 /// La vérification d'une règle : chaque constat porte son identifiant, même celui d'une règle qui plante (« erreur
-/// interne » non vérifiée, qui dit laquelle et que `Audit::fiable` voit) ou qui ne rend rien (« non vérifié »,
-/// hors des muettes tolérées).
+/// interne » non vérifiée, qui dit laquelle et que `Audit::fiable` voit), qui ne rend rien (« non vérifié », hors des
+/// muettes tolérées) ou qui dépasse son délai (« non vérifié », délai dépassé).
 pub(super) fn verification<'a>(r: &'static Regle) -> Verification<'a> {
+    sous_delai(r, r.delai())
+}
+
+/// La règle tourne dans un fil à part, attendu au plus `delai`. Un fil bloqué ne peut pas être arrêté de
+/// l'extérieur : il est laissé à lui-même (ce qu'il rendrait ensuite est jeté), et c'est le seul moyen de ne pas
+/// figer le bilan ni la surveillance horaire derrière lui. `thread::scope` ne le permettrait pas : il attend chacun.
+fn sous_delai<'a>(r: &'static Regle, delai: std::time::Duration) -> Verification<'a> {
     use crate::modele::Raison;
+    use std::sync::mpsc::RecvTimeoutError;
     Box::new(move || {
-        let mut constats = crate::journal::rattraper(r.verifier).unwrap_or_else(|_| {
-            vec![super::impossible_par(
+        let (envoi, reception) = std::sync::mpsc::channel();
+        let lance = std::thread::Builder::new()
+            .name(format!("regle {}", r.id))
+            .spawn(move || {
+                // Le bilan peut être déjà reparti : un envoi qui ne trouve personne ne dit rien.
+                let _ = envoi.send(crate::journal::rattraper(r.verifier));
+            });
+        let rendu = match lance {
+            Ok(_) => reception.recv_timeout(delai),
+            // Plus de fil possible (limite du système) : la règle tourne ici, sans délai, plutôt que pas du tout.
+            Err(_) => Ok(crate::journal::rattraper(r.verifier)),
+        };
+        let mut constats = match rendu {
+            Ok(Ok(constats)) => constats,
+            Ok(Err(_)) | Err(RecvTimeoutError::Disconnected) => vec![super::impossible_par(
                 "Audit",
                 Raison::Panique,
                 crate::trf!(
@@ -274,8 +325,19 @@ pub(super) fn verification<'a>(r: &'static Regle) -> Verification<'a> {
                     "Could not check (internal error, rule {}).",
                     r.id
                 ),
-            )]
-        });
+            )],
+            Err(RecvTimeoutError::Timeout) => vec![super::impossible_par(
+                "Audit",
+                Raison::Delai,
+                crate::trf!(
+                    "Impossible de vérifier ({}) : la vérification dépasse son délai de {} s, règle {}. Le bilan a continué sans elle.",
+                    "Could not check ({}): the check exceeds its {} s time limit, rule {}. The check went on without it.",
+                    sujet(r.sujet),
+                    delai.as_secs(),
+                    r.id
+                ),
+            )],
+        };
         if constats.is_empty() && !MUETTES_TOLEREES.contains(&r.id) {
             constats.push(super::impossible_par(
                 "Audit",
@@ -389,7 +451,7 @@ mod tests {
                 "{id} mal formé dans regles-connues.txt"
             );
             assert!(
-                marques.iter().all(|m| ["sans-reference", "retire"].contains(m)),
+                marques.iter().all(|m| *m == "retire"),
                 "{id} : marque inconnue {marques:?}"
             );
         }
@@ -410,30 +472,114 @@ mod tests {
         }
     }
 
-    /// T3 : les règles sans référence sont marquées « sans-reference » ; une règle qui en gagne doit perdre sa
-    /// marque (le cliquet ne fait que rétrécir).
+    /// T3 (C5) : chaque règle de ce système cite au moins une référence du CIS, de Microsoft ou de l'ANSSI, les
+    /// mesures des CIS Controls v8 bien écrites ; chaque fiche de l'audit du réseau a ses références.
     #[test]
-    fn cliquet_sans_reference() {
-        let connus = connus();
+    fn chaque_regle_a_sa_reference() {
+        use crate::modele::reference::{mesure_cis_bien_ecrite, principale};
         for r in regles(Os::actuel()) {
-            let marquee = connus
-                .iter()
-                .any(|(id, m)| *id == r.id && m.contains(&"sans-reference"));
-            assert_eq!(
-                r.references.is_empty(),
-                marquee,
-                "{} : marque « sans-reference » de regles-connues.txt à {}",
-                r.id,
-                if marquee {
-                    "retirer"
-                } else {
-                    "ajouter, ou mieux, des références à citer"
-                }
+            assert!(
+                principale(r.references).is_some(),
+                "{} : citer une référence du CIS, de Microsoft ou de l'ANSSI",
+                r.id
             );
+            assert!(
+                r.references.iter().all(|x| mesure_cis_bien_ecrite(x)),
+                "{} : {:?}",
+                r.id,
+                r.references
+            );
+            assert_eq!(reference_de(r.id), principale(r.references));
         }
         for f in crate::audit::fiches::FICHES {
             assert!(!f.references.is_empty(), "{} sans référence", f.id);
         }
+        assert_eq!(reference_de(""), None);
+    }
+
+    /// Les références des règles des trois systèmes, lues dans les sources : chaque système ne compile que les
+    /// siennes, et les règles de Windows et de macOS ne passeraient sinon ce test que sous Wine et sur le Mac de
+    /// GitHub. (identifiant, références) de chaque `regle!` et de chaque `Regle { id: … }` de src/machine.
+    fn regles_des_sources() -> Vec<(String, Vec<String>)> {
+        fn parcourir(d: &std::path::Path, sortie: &mut Vec<(String, Vec<String>)>) {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    parcourir(&p, sortie);
+                    continue;
+                }
+                if p.extension().is_none_or(|x| x != "rs") {
+                    continue;
+                }
+                let texte = std::fs::read_to_string(&p).unwrap();
+                let code = texte.find("#[cfg(test)]\nmod ").map_or(texte.as_str(), |t| &texte[..t]);
+                for debut in ["regle!(", "id: \""] {
+                    for (i, _) in code.match_indices(debut) {
+                        let reste = &code[i + debut.len()..];
+                        let reste = reste.trim_start().trim_start_matches('"');
+                        let id: String = reste.chars().take(11).collect();
+                        if !crate::modele::id::bien_forme(&id) || id.contains("TST") {
+                            continue;
+                        }
+                        let Some(a) = reste.find("&[") else { continue };
+                        let Some(b) = reste[a..].find(']') else { continue };
+                        let refs = reste[a + 2..a + b]
+                            .split('"')
+                            .skip(1)
+                            .step_by(2)
+                            .map(String::from)
+                            .collect();
+                        sortie.push((id, refs));
+                    }
+                }
+            }
+        }
+        let mut sortie = Vec::new();
+        parcourir(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/machine"),
+            &mut sortie,
+        );
+        sortie
+    }
+
+    /// C5, pour les trois systèmes : toute règle déclarée dans les sources cite une référence reconnue ; la lecture
+    /// des sources trouve bien les règles de chaque système, nouvelles comprises.
+    #[test]
+    fn chaque_regle_des_trois_systemes_a_sa_reference() {
+        use crate::modele::reference::{mesure_cis_bien_ecrite, principale};
+        let lues = regles_des_sources();
+        for (id, refs) in &lues {
+            let refs: Vec<&str> = refs.iter().map(String::as_str).collect();
+            assert!(
+                principale(&refs).is_some(),
+                "{id} : citer une référence du CIS, de Microsoft ou de l'ANSSI"
+            );
+            assert!(refs.iter().all(|r| mesure_cis_bien_ecrite(r)), "{id} : {refs:?}");
+        }
+        for attendu in [
+            "WIN-SSH-001",
+            "WIN-ANV-003",
+            "WIN-DUR-005",
+            "MAC-CPT-002",
+            "MAC-PRS-003",
+            "LNX-RES-003",
+            "COM-LOG-001",
+            "LNX-PLT-001",
+        ] {
+            assert!(
+                lues.iter().any(|(id, _)| id == attendu),
+                "{attendu} non lu dans les sources"
+            );
+        }
+        // Celles de ce système, toutes lues : la lecture ne peut pas en manquer une sans que ce test le voie.
+        for r in regles(Os::actuel()) {
+            assert!(
+                lues.iter().any(|(id, _)| id == r.id),
+                "{} non lu dans les sources",
+                r.id
+            );
+        }
+        assert!(lues.len() >= 150, "{} règles lues seulement", lues.len());
     }
 
     /// T5 : le cliquet des muettes tolérées : rangées, une seule fois, au plus ce qu'elles étaient, toutes connues,
@@ -491,5 +637,45 @@ mod tests {
             assert_eq!(plantee[0].etat(), Etat::NonVerifie(Raison::Panique), "{}", r.id);
             assert_eq!(plantee[0].regle, r.id);
         }
+    }
+    /// E7 : une règle qui dépasse son délai dit « non vérifié (délai dépassé) » avec son identifiant, sans retenir le
+    /// bilan ; celle d'à côté rend ses constats. Les règles qui attendent Internet ont le délai long.
+    #[test]
+    fn regle_hors_delai_non_verifiee_les_autres_continuent() {
+        use crate::modele::{Etat, Raison};
+        use std::time::{Duration, Instant};
+        let essai = |id: &'static str, verifier: fn() -> Vec<Constat>| -> &'static Regle {
+            Box::leak(Box::new(Regle {
+                id,
+                systeme: Os::actuel(),
+                rang: 1,
+                sujet: ("essai", "test"),
+                references: &[],
+                verifier,
+            }))
+        };
+        let lente = essai("LNX-TST-002", || {
+            std::thread::sleep(Duration::from_secs(3));
+            vec![super::super::ok("Audit", "fini")]
+        });
+        let rapide = essai("LNX-TST-003", || vec![super::super::ok("Audit", "fini")]);
+        let debut = Instant::now();
+        let constats = super::super::en_parallele(vec![
+            sous_delai(lente, Duration::from_millis(50)),
+            sous_delai(rapide, Duration::from_secs(60)),
+        ]);
+        assert!(
+            debut.elapsed() < Duration::from_secs(2),
+            "le bilan a attendu la règle lente"
+        );
+        assert_eq!(constats.len(), 2);
+        assert_eq!(constats[0].etat(), Etat::NonVerifie(Raison::Delai));
+        assert_eq!(constats[0].regle, "LNX-TST-002");
+        assert!(constats[0].message.contains("LNX-TST-002") && constats[0].coherent());
+        assert_eq!(constats[1].etat(), Etat::Sain);
+        assert_eq!(constats[1].regle, "LNX-TST-003");
+        let maj = essai("WIN-MAJ-001", Vec::new);
+        assert_eq!(maj.delai(), DELAI_LONG);
+        assert_eq!(rapide.delai(), DELAI);
     }
 }

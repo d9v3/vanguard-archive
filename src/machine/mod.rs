@@ -23,6 +23,7 @@ mod heure;
 mod journaux;
 #[cfg(target_os = "linux")]
 pub mod linux;
+mod logiciels_vus;
 pub(crate) mod mots_de_passe;
 mod navigateur;
 mod navigation_detournee;
@@ -31,6 +32,7 @@ pub(crate) mod regles;
 mod regles_communes;
 mod sante;
 mod sensibles;
+mod sshd;
 pub(crate) mod wifi;
 #[cfg(target_os = "linux")]
 use linux as os;
@@ -120,7 +122,7 @@ impl Serialize for Constat {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
         let etat = self.etat();
-        let mut m = s.serialize_struct("Constat", 11)?;
+        let mut m = s.serialize_struct("Constat", 12)?;
         m.serialize_field("categorie", self.categorie)?;
         m.serialize_field("probleme", &self.probleme)?;
         m.serialize_field("message", &self.message)?;
@@ -138,6 +140,12 @@ impl Serialize for Constat {
         match self.cle() {
             Some(c) => m.serialize_field("cle", &c.to_string())?,
             None => m.skip_field("cle")?,
+        }
+        // La référence d'abord citée de sa règle (CIS, Microsoft ou ANSSI) : un script relie l'alerte au référentiel
+        // sans tenir sa propre table.
+        match regles::reference_de(self.regle) {
+            Some(r) => m.serialize_field("reference", r)?,
+            None => m.skip_field("reference")?,
         }
         m.serialize_field("etat", etat.code())?;
         match &etat {
@@ -747,8 +755,7 @@ fn constats_config_ssh(lignes: &[(String, usize, String)]) -> Vec<Constat> {
 }
 
 /// Une clé privée SSH est-elle protégée par une phrase de passe ? `None` si ce n'est pas une clé privée.
-#[cfg(unix)]
-fn cle_protegee(texte: &str) -> Option<bool> {
+pub(crate) fn cle_protegee(texte: &str) -> Option<bool> {
     let entete = texte.lines().next()?.trim();
     if !entete.starts_with("-----BEGIN") || !entete.contains("PRIVATE KEY") {
         return None;
@@ -1587,12 +1594,17 @@ mod tests_etat {
         assert_eq!(json["objet"], "port:8080/tcp:python3");
         assert_eq!(json["cle"], "LNX-RES-001|port:8080/tcp:python3");
         assert_eq!(json["etat"], "probleme");
+        assert_eq!(
+            json.get("reference").and_then(|r| r.as_str()),
+            regles::reference_de("LNX-RES-001")
+        );
         let json = serde_json::to_value(&muette).unwrap();
         assert_eq!(
             (json["etat"].as_str(), json["raison"].as_str()),
             (Some("non-verifie"), Some("muette"))
         );
         assert!(json.get("regle").is_none() && json.get("cle").is_none() && json.get("objet").is_none());
+        assert!(json.get("reference").is_none());
         let json = serde_json::to_value(&sans).unwrap();
         assert_eq!(
             (json["etat"].as_str(), json["absence"].as_str()),

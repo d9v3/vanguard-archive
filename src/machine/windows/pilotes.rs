@@ -33,7 +33,13 @@ regle!(
         "pilotes du noyau (emplacement, pilotes vulnérables connus)",
         "kernel drivers (location, known vulnerable drivers)"
     ),
-    &["MITRE ATT&CK T1543.003", "MITRE ATT&CK T1068", "LOLDrivers"],
+    &[
+        "CIS Controls v8 2.5",
+        "Microsoft : Microsoft recommended driver block rules",
+        "MITRE ATT&CK T1543.003",
+        "MITRE ATT&CK T1068",
+        "LOLDrivers"
+    ],
     pilotes
 );
 

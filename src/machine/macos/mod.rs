@@ -13,6 +13,7 @@ use crate::{tr, trf};
 
 mod durcissement;
 mod maj;
+mod parite;
 mod persistance;
 mod privileges;
 mod protection;

@@ -90,8 +90,14 @@ fn nom_asr(id: &str) -> &'static str {
 /// Ce que Defender applique, tel que Get-MpPreference le dit.
 #[derive(Default, Debug, PartialEq)]
 pub struct Etat {
+    /// Defender a répondu (WMI ou PowerShell) : sans réponse, `actif` faux ne veut rien dire, et le bilan le dit non
+    /// vérifié au lieu de le croire coupé.
+    pub lu: bool,
     /// Defender est l'antivirus actif (ni coupé, ni en mode passif derrière un autre antivirus).
     pub actif: bool,
+    /// La protection en temps réel : sans elle, aucun blocage (ASR, protection réseau, PUA, dossiers) ne s'applique,
+    /// même réglé. `None` : pas dit (valeur vide), le jugement ne s'en sert pas.
+    pub temps_reel: Option<bool>,
     /// « cfa », « np », « pua », ou l'identifiant d'une règle ASR → sa valeur.
     valeurs: HashMap<String, u32>,
     /// Dossiers ajoutés à ceux que l'accès contrôlé protège d'office ; illisibles (réservés aux administrateurs sur
@@ -101,6 +107,7 @@ pub struct Etat {
 
 const SCRIPT: &str = "$s = Get-MpComputerStatus; $p = Get-MpPreference; \
     \"mode|$($s.AMRunningMode)\"; \"av|$($s.AntivirusEnabled)\"; \
+    \"rtp|$($s.RealTimeProtectionEnabled)\"; \
     \"cfa|$([int]$p.EnableControlledFolderAccess)\"; \"np|$([int]$p.EnableNetworkProtection)\"; \
     \"pua|$([int]$p.PUAProtection)\"; \
     $ids = @($p.AttackSurfaceReductionRules_Ids); $act = @($p.AttackSurfaceReductionRules_Actions); \
@@ -114,8 +121,22 @@ pub fn lire_sortie(texte: &str) -> Etat {
     for ligne in texte.lines() {
         let mut champs = ligne.trim().splitn(3, '|');
         match (champs.next(), champs.next(), champs.next()) {
-            (Some("mode"), Some(m), _) => mode = m.trim().to_string(),
-            (Some("av"), Some(a), _) => antivirus = a.trim().eq_ignore_ascii_case("true"),
+            (Some("mode"), Some(m), _) => {
+                mode = m.trim().to_string();
+                e.lu = true;
+            }
+            (Some("av"), Some(a), _) => {
+                antivirus = a.trim().eq_ignore_ascii_case("true");
+                e.lu = true;
+            }
+            (Some("rtp"), Some(r), _) => {
+                let r = r.trim();
+                if r.eq_ignore_ascii_case("true") {
+                    e.temps_reel = Some(true);
+                } else if r.eq_ignore_ascii_case("false") {
+                    e.temps_reel = Some(false);
+                }
+            }
             (Some(cle @ ("cfa" | "np" | "pua")), Some(n), _) => {
                 if let Ok(n) = n.trim().parse() {
                     e.valeurs.insert(cle.to_string(), n);
@@ -148,7 +169,7 @@ fn sortie_wmi() -> Option<String> {
         DEFENDER,
         "MSFT_MpComputerStatus",
         "",
-        &["AMRunningMode", "AntivirusEnabled"],
+        &["AMRunningMode", "AntivirusEnabled", "RealTimeProtectionEnabled"],
     )?
     .into_iter()
     .next()?;
@@ -169,14 +190,15 @@ fn sortie_wmi() -> Option<String> {
     .next()?;
     // Comme `[int]$null` : une valeur absente vaut 0 ; un booléen comme PowerShell l'écrit.
     let entier = |v: &Valeur| v.entier().unwrap_or(0);
-    let booleen = match s["AntivirusEnabled"] {
+    let booleen = |v: &Valeur| match v {
         Valeur::Booleen(true) => "True",
         Valeur::Booleen(false) => "False",
         _ => "",
     };
     let mut lignes = vec![
         format!("mode|{}", s["AMRunningMode"].texte().unwrap_or_default()),
-        format!("av|{booleen}"),
+        format!("av|{}", booleen(&s["AntivirusEnabled"])),
+        format!("rtp|{}", booleen(&s["RealTimeProtectionEnabled"])),
         format!("cfa|{}", entier(&p["EnableControlledFolderAccess"])),
         format!("np|{}", entier(&p["EnableNetworkProtection"])),
         format!("pua|{}", entier(&p["PUAProtection"])),
@@ -217,12 +239,28 @@ pub fn oublier() {
     *ETAT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }
 
-fn cle(pref: Pref) -> &'static str {
+/// Le nom court d'une préférence, celui des notes (« defender|np ») et de `SCRIPT`.
+pub(crate) fn cle(pref: Pref) -> &'static str {
     match pref {
         Pref::DossiersControles => "cfa",
         Pref::ProtectionReseau => "np",
         Pref::Pua => "pua",
         Pref::Asr(id) => id,
+    }
+}
+
+/// La préférence d'un nom court ; `None` hors de ce que Vanguard règle (une note qui viserait une autre règle ASR ne
+/// vient pas de lui).
+pub(crate) fn pref_de(cle: &str) -> Option<Pref> {
+    match cle {
+        "cfa" => Some(Pref::DossiersControles),
+        "np" => Some(Pref::ProtectionReseau),
+        "pua" => Some(Pref::Pua),
+        _ => ASR_BASE
+            .iter()
+            .chain(&ASR_BUREAUTIQUE)
+            .find(|id| **id == cle)
+            .map(|id| Pref::Asr(id)),
     }
 }
 
@@ -292,7 +330,12 @@ mod tests {
              asr|9E6C4E1F-7D60-472F-BA1A-A39EF669E4B2|1\nasr|d4f940ab-401b-4efc-aadc-ad5f3c50688a|2\n\
              protege|D:\\Photos\n",
         );
-        assert!(e.actif);
+        assert!(e.actif && e.lu);
+        // Pas de ligne « rtp » : on ne sait pas, rien n'est supposé.
+        assert_eq!(e.temps_reel, None);
+        assert_eq!(lire_sortie("rtp|False\n").temps_reel, Some(false));
+        assert_eq!(lire_sortie("rtp|True\n").temps_reel, Some(true));
+        assert_eq!(lire_sortie("rtp|\n").temps_reel, None);
         assert_eq!(e.valeur(Pref::DossiersControles).as_deref(), Some("mp:0"));
         assert_eq!(e.valeur(Pref::ProtectionReseau).as_deref(), Some("mp:1"));
         assert_eq!(e.valeur(Pref::Pua).as_deref(), Some("mp:2"));
@@ -306,7 +349,8 @@ mod tests {
     fn defender_passif_ou_illisible() {
         // Un autre antivirus : Defender passe en mode passif, ses blocages ne s'appliquent pas.
         assert!(!lire_sortie("mode|Passive Mode\nav|True\n").actif);
-        assert!(!lire_sortie("").actif);
+        assert!(!lire_sortie("").actif && !lire_sortie("").lu);
+        assert!(lire_sortie("mode|Passive Mode\nav|True\n").lu);
         // Windows 10 d'avant 2004 : pas d'AMRunningMode.
         assert!(lire_sortie("mode|\nav|True\n").actif);
         let e = lire_sortie("mode|Normal\nprotege|N/A: Must be an administrator to view protected folders\n");
@@ -331,6 +375,21 @@ mod tests {
             "Set-MpPreference -EnableControlledFolderAccess 1"
         );
         assert_eq!(commande(Pref::Pua, None).unwrap(), "Set-MpPreference -PUAProtection 0");
+    }
+
+    /// Les noms courts des notes : ceux que Vanguard règle, et rien d'autre.
+    #[test]
+    fn noms_courts_aller_retour() {
+        for pref in [
+            Pref::DossiersControles,
+            Pref::ProtectionReseau,
+            Pref::Pua,
+            Pref::Asr(ASR_BASE[2]),
+        ] {
+            assert_eq!(pref_de(cle(pref)), Some(pref));
+        }
+        assert_eq!(pref_de("b2b3f03d-6a65-4f7b-a9c7-1c7ef74a9ba4"), None);
+        assert_eq!(pref_de(""), None);
     }
 
     #[test]

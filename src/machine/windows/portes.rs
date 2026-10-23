@@ -866,7 +866,11 @@ regle!(
         "programmes détournés par un débogueur (Image File Execution Options)",
         "programs hijacked by a debugger (Image File Execution Options)"
     ),
-    &["MITRE ATT&CK T1546.012", "MITRE ATT&CK T1546.008"],
+    &[
+        "CIS Controls v8 13.2",
+        "MITRE ATT&CK T1546.012",
+        "MITRE ATT&CK T1546.008"
+    ],
     ifeo
 );
 
@@ -878,7 +882,7 @@ regle!(
         "programmes d'accessibilité de l'écran de connexion remplacés",
         "sign-in screen accessibility programs replaced"
     ),
-    &["MITRE ATT&CK T1546.008"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1546.008"],
     programmes_remplaces
 );
 
@@ -887,7 +891,7 @@ regle!(
     Os::Windows,
     223,
     ("bureau et Userinit de Winlogon", "Winlogon desktop and Userinit"),
-    &["MITRE ATT&CK T1547.004"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1547.004"],
     winlogon
 );
 
@@ -899,7 +903,7 @@ regle!(
         "DLL imposées à tous les programmes (AppInit_DLLs)",
         "DLLs forced into every program (AppInit_DLLs)"
     ),
-    &["MITRE ATT&CK T1546.010"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1546.010"],
     appinit
 );
 
@@ -908,7 +912,7 @@ regle!(
     Os::Windows,
     225,
     ("abonnements WMI permanents", "permanent WMI subscriptions"),
-    &["MITRE ATT&CK T1546.003"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1546.003"],
     || juger_wmi(Some(&abonnements()))
 );
 

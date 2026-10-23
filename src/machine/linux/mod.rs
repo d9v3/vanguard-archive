@@ -5,7 +5,8 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::unix::{configuration_sshd, mots_de_passe_sshd, mots_de_passe_vides_sshd, valeur_sshd};
+use super::sshd::{mots_de_passe_sshd, mots_de_passe_vides_sshd, valeur_sshd};
+use super::unix::configuration_sshd;
 use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
 use crate::optimiser::Geste;
 use crate::risk::{Niveau, info_port};
