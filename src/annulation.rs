@@ -170,7 +170,9 @@ fn remettre(elements: &[Element]) {
                         "the reverse command failed (see the message above)"
                     )
                     .to_string()),
-                    None => crate::protection::blocage::gestes::defaire(b).map(|_| ()),
+                    None => crate::protection::blocage::gestes::defaire(b)
+                        .map(|_| ())
+                        .map_err(String::from),
                 };
                 match resultat {
                     Ok(()) => trp!(
@@ -217,6 +219,7 @@ mod tests {
             annulation: Some(annulation),
             annule: None,
             supprime: false,
+            evenement: None,
             preuve: None,
         }
     }

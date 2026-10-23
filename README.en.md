@@ -584,6 +584,7 @@ Each menu entry is also a command.
 | `vanguard evidence [folder]` | collect the traces after an infection, before cleaning up: processes, connections, startup, accounts, logs, recent files, in a dated folder with their SHA-256 fingerprints, and the incident timeline (CHRONOLOGIE.txt); read-only |
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal can be reverted exactly |
+| `vanguard events [--json] [--incident id]` | the event log: alerts, evidence recorded before an action, actions, undos, alerts declared normal and version changes, linked; the state of its sealed chain first |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result; a fix marked “undoable” is undone there, then the previous state is read back |
 | `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, real-time protection (`real-time no --for 1h\|4h`, or until turned back on), monitoring, monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
 | `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks clear-cut threats by itself (MalwareBazaar fingerprint, known attack tool, command server) |
@@ -657,9 +658,10 @@ Each menu entry is also a command.
 `memoire`, `isoler`, `courriel`, `motdepasse`, `navigateurs`, `sortantes`, `distance`, `lien`, `verifier-fichier`,
 `camera-micro`, `acces`, `quarantaine`, `conteneurs`, `parametres`, `blocage`, `sauvegarder`, `restaurer`, `nommer`,
 `lenteur`, `demarrage`, `fiche`, `copier-fichiers`, `verifier-copie`, `verifier-sauvegarde`, `verifier-cle`,
-`a-laisser`, `changements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`, `desinstaller`,
-`regles`, `traces`, `depanner`, `proche`, `verifier-moi`, `labo`, `extensions`, `veilleur`, `sites-dangereux`,
-`dernieres-failles`, `wifi-public`, `optimiser`, `courriel-suspect`, `logiciels-espions`, `logiciels-perimes`).
+`a-laisser`, `changements`, `evenements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`,
+`desinstaller`, `regles`, `traces`, `depanner`, `proche`, `verifier-moi`, `labo`, `extensions`, `veilleur`,
+`sites-dangereux`, `dernieres-failles`, `wifi-public`, `optimiser`, `courriel-suspect`, `logiciels-espions`,
+`logiciels-perimes`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,

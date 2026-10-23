@@ -219,7 +219,12 @@ regle!(
     695,
     ("état de Vanguard scellé", "Vanguard's sealed state"),
     &["CIS Controls v8 4.1"],
-    || crate::sceau::constat().into_iter().collect()
+    // Le journal des événements en plus des sceaux : une ligne retirée au milieu laisse sa tête scellée intacte.
+    || {
+        let mut c = crate::sceau::constat();
+        c.extend(crate::modele::journal::constat());
+        c
+    }
 );
 
 regle!(

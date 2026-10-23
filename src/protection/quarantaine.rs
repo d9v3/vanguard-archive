@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::modele::{Echec, Raison};
+
 use serde::{Deserialize, Serialize};
 
 use crate::ui::*;
@@ -67,8 +69,8 @@ pub(crate) struct Demande {
     pub automatique: bool,
     /// Ce qui a été fait juste avant (l'arrêt du processus), noté avec la quarantaine.
     pub lancees: Vec<String>,
-    /// Le relevé d'avant le geste (`preuve`).
-    pub preuve: crate::protection::preuve::Preuve,
+    /// Le relevé d'avant le geste (`preuve::relever`) : sans lui, pas de quarantaine.
+    pub preuve: crate::protection::preuve::PreuveFaite,
 }
 
 /// La demande d'une analyse (antivirus, YARA) qui a trouvé `chemin` : son relevé est fait maintenant, avant
@@ -84,7 +86,11 @@ pub(crate) fn demande_d_analyse(chemin: &Path, detection: &str) -> Demande {
         ),
         automatique: false,
         lancees: Vec::new(),
-        preuve: crate::protection::preuve::relever_fichier(chemin),
+        preuve: crate::protection::preuve::relever(
+            crate::protection::preuve::Releve::Fichier(chemin),
+            &format!("fichier:{}", chemin.display()),
+            crate::modele::evenement::Source::Analyse,
+        ),
     }
 }
 
@@ -96,8 +102,8 @@ pub(crate) fn isoler(chemin: &Path, detection: &str, d: Demande) -> std::io::Res
     lancees.push(format!("quarantaine : {}", chemin.display()));
     let sha256 = d
         .preuve
-        .fichier
-        .as_ref()
+        .preuve()
+        .and_then(|p| p.fichier.as_ref())
         .filter(|f| Path::new(&f.chemin) == chemin)
         .and_then(|f| f.sha256.clone());
     let r = isoler_dans(chemin, detection, &dossier(), sha256);
@@ -119,8 +125,10 @@ pub(crate) fn isoler(chemin: &Path, detection: &str, d: Demande) -> std::io::Res
             annulation,
             annule: None,
             supprime: false,
-            preuve: Some(d.preuve),
+            preuve: None,
+            evenement: None,
         },
+        d.preuve,
     );
     r
 }
@@ -130,14 +138,19 @@ pub(crate) fn isoler(chemin: &Path, detection: &str, d: Demande) -> std::io::Res
 /// comme une quarantaine. ClamAV, seul à le proposer, n'est lancé d'ici que sous Linux et macOS.
 #[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn supprimer_apres_analyse(chemin: &Path, detection: &str) -> std::io::Result<()> {
-    let preuve = crate::protection::preuve::relever_fichier(chemin);
+    let cle = format!("fichier:{}", chemin.display());
+    let preuve = crate::protection::preuve::relever(
+        crate::protection::preuve::Releve::Fichier(chemin),
+        &cle,
+        crate::modele::evenement::Source::Analyse,
+    );
     let r = std::fs::remove_file(chemin);
     crate::changements::noter_blocage(
         vec![format!("suppression : {}", chemin.display())],
         r.is_ok(),
         crate::changements::Blocage {
             id: crate::changements::nouvel_id(),
-            cle: format!("fichier:{}", chemin.display()),
+            cle,
             quoi: trf!(
                 "Suppression de « {} » : {}",
                 "Deletion of “{}”: {}",
@@ -148,8 +161,10 @@ pub(crate) fn supprimer_apres_analyse(chemin: &Path, detection: &str) -> std::io
             annulation: None,
             annule: None,
             supprime: false,
-            preuve: Some(preuve),
+            preuve: None,
+            evenement: None,
         },
+        preuve,
     );
     r
 }
@@ -273,14 +288,14 @@ pub(crate) type PourTraces = (String, String, String, Option<String>);
 /// Ce qui est en quarantaine dans `dossier`, pour les traces d'incident : (date, origine, détection, empreinte
 /// SHA-256). `Err` : un registre qui n'est pas un fichier ordinaire. La collecte peut tourner en administrateur dans
 /// le dossier du compte : un tube nommé à sa place la bloquerait sans fin, un lien ferait lire un autre fichier.
-pub(crate) fn pour_traces_dans(dossier: &Path) -> Result<Vec<PourTraces>, String> {
+pub(crate) fn pour_traces_dans(dossier: &Path) -> Result<Vec<PourTraces>, Echec> {
     for f in [registre_dans(dossier), dossier.join("journal.txt")] {
         if let Ok(m) = std::fs::symlink_metadata(&f)
             && !m.is_file()
         {
-            return Err(format!(
-                "{} : pas un fichier ordinaire / not a regular file",
-                f.display()
+            return Err(Echec::refuse(
+                "quarantaine/traces",
+                format!("{} : pas un fichier ordinaire / not a regular file", f.display()),
             ));
         }
     }
@@ -291,18 +306,21 @@ pub(crate) fn pour_traces_dans(dossier: &Path) -> Result<Vec<PourTraces>, String
 }
 
 /// Remet un fichier à sa place d'origine, avec ses permissions d'avant. Refuse d'écraser ce qui l'aurait remplacé.
-fn remettre_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
+fn remettre_dans(e: &Entree, dossier: &Path) -> Result<(), Echec> {
+    const OU: &str = "quarantaine/remettre";
     let source = dossier.join(&e.nom);
     let origine = PathBuf::from(&e.origine);
     if origine.exists() {
-        return Err(tr!(
-            "un autre fichier est à sa place : rien n'est écrasé",
-            "another file is in its place: nothing is overwritten"
-        )
-        .into());
+        return Err(Echec::refuse(
+            OU,
+            tr!(
+                "un autre fichier est à sa place : rien n'est écrasé",
+                "another file is in its place: nothing is overwritten"
+            ),
+        ));
     }
     if let Some(parent) = origine.parent() {
-        std::fs::create_dir_all(parent).map_err(|x| x.to_string())?;
+        std::fs::create_dir_all(parent).map_err(|x| Echec::ecriture(OU, &x))?;
     }
     // Il faut pouvoir le lire pour le copier d'un disque à l'autre.
     #[cfg(unix)]
@@ -316,7 +334,7 @@ fn remettre_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
     }
     std::fs::rename(&source, &origine)
         .or_else(|_| std::fs::copy(&source, &origine).and_then(|_| std::fs::remove_file(&source)))
-        .map_err(|x| x.to_string())?;
+        .map_err(|x| Echec::ecriture(OU, &x))?;
     #[cfg(unix)]
     {
         // Sans mode noté (isolé avant la 0.61) : lecture et écriture pour soi, rien d'exécutable.
@@ -329,12 +347,12 @@ fn remettre_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
 
 /// Remet à sa place le fichier isolé sous ce nom (l'annulation d'un blocage) ; même garde que le menu : rien n'est
 /// écrasé.
-pub(crate) fn remettre(nom: &str) -> Result<(), String> {
+pub(crate) fn remettre(nom: &str) -> Result<(), Echec> {
     let dossier = dossier();
-    let e = liste_dans(&dossier)
-        .into_iter()
-        .find(|e| e.nom == nom)
-        .ok_or_else(|| tr!("plus dans la quarantaine", "no longer in the quarantine").to_string())?;
+    let e = liste_dans(&dossier).into_iter().find(|e| e.nom == nom).ok_or_else(|| {
+        Echec::new("quarantaine/remettre", Raison::Introuvable)
+            .detail(tr!("plus dans la quarantaine", "no longer in the quarantine"))
+    })?;
     remettre_dans(&e, &dossier)
 }
 
@@ -349,7 +367,7 @@ pub(crate) fn nombre_dans(dossier: &Path) -> usize {
 }
 
 /// Supprime pour de bon un fichier de la quarantaine.
-fn supprimer_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
+fn supprimer_dans(e: &Entree, dossier: &Path) -> Result<(), Echec> {
     let chemin = dossier.join(&e.nom);
     #[cfg(windows)]
     if let Ok(m) = std::fs::metadata(&chemin) {
@@ -358,7 +376,7 @@ fn supprimer_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
         p.set_readonly(false);
         let _ = std::fs::set_permissions(&chemin, p);
     }
-    std::fs::remove_file(&chemin).map_err(|x| x.to_string())?;
+    std::fs::remove_file(&chemin).map_err(|x| Echec::ecriture("quarantaine/supprimer", &x))?;
     retirer_du_registre(dossier, &e.nom);
     Ok(())
 }

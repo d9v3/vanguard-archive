@@ -10,7 +10,8 @@ use super::menaces::{Geste, Menace};
 use super::pare_feu::{self, PareFeu};
 use crate::changements::{self, Annulation, Blocage, Inverse};
 use crate::machine::regles::Os;
-use crate::protection::preuve::{self, Preuve};
+use crate::modele::{Echec, Raison};
+use crate::protection::preuve;
 use crate::ui::{affichable, chemin_affichable};
 use crate::{tr, trf};
 
@@ -21,7 +22,7 @@ pub(crate) struct Contexte {
     pub intouchables: HashSet<u32>,
     /// Ce que les connexions en cours interdisent de couper ; `None` : illisibles.
     pub sessions: Option<gardes::Sessions>,
-    pub pare_feu: Result<PareFeu, String>,
+    pub pare_feu: Result<PareFeu, Echec>,
     /// Vanguard tourne en administrateur (root, jeton élevé) : rien à demander.
     pub admin: bool,
     /// Quelqu'un peut répondre à une demande de mot de passe ou d'administrateur : pas la surveillance horaire.
@@ -98,7 +99,8 @@ fn droits_manquants() -> String {
 /// Prépare le geste d'une menace : `Err` dit pourquoi il ne se fera pas (garde-fou, droits, pare-feu non
 /// disponible) ; la menace reste alors une alerte. `automatique` : le geste se fera sans clic (protection active),
 /// et les garde-fous sont alors plus stricts.
-pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<Pret, String> {
+pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<Pret, Echec> {
+    const OU: &str = "blocage/preparer";
     let (pret, droits) = match &m.geste {
         Geste::Programme {
             pid,
@@ -109,7 +111,7 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<
         } => preparer_programme(*pid, nom, (chemin.as_deref(), fichier.as_deref()), detection, ctx)?,
         Geste::Adresse { ip } => {
             if let Some(raison) = gardes::adresse_intouchable(*ip, ctx.sessions.as_ref(), automatique) {
-                return Err(raison.to_string());
+                return Err(Echec::refuse(OU, raison));
             }
             let pf = ctx.pare_feu.clone()?;
             let regle = pare_feu::sortante(pf, *ip);
@@ -172,13 +174,16 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<
         }
         Geste::ServeurIa { port, nom } => {
             if let Some(raison) = gardes::port_intouchable(*port) {
-                return Err(raison.to_string());
+                return Err(Echec::refuse(OU, raison));
             }
             let pf = ctx.pare_feu.clone()?;
             let Some(regle) = pare_feu::entrante(pf, *port) else {
-                return Err(trf!(
-                    "non disponible ici : fais écouter {nom} sur 127.0.0.1 seulement (Ollama : OLLAMA_HOST=127.0.0.1)",
-                    "not available here: make {nom} listen on 127.0.0.1 only (Ollama: OLLAMA_HOST=127.0.0.1)"
+                return Err(Echec::refuse(
+                    OU,
+                    trf!(
+                        "non disponible ici : fais écouter {nom} sur 127.0.0.1 seulement (Ollama : OLLAMA_HOST=127.0.0.1)",
+                        "not available here: make {nom} listen on 127.0.0.1 only (Ollama: OLLAMA_HOST=127.0.0.1)"
+                    ),
                 ));
             };
             let mut etapes = vec![trf!(
@@ -207,13 +212,15 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<
             (pret, true)
         }
         Geste::Permissions { fichier, outil } => {
-            let texte = std::fs::read_to_string(fichier).map_err(|e| e.to_string())?;
+            let texte = std::fs::read_to_string(fichier).map_err(|e| Echec::io(OU, &e))?;
             let nouveau = sans_contournement(&texte).ok_or_else(|| {
-                tr!(
-                    "réglage écrit d'une façon que Vanguard ne réécrit pas sans risque : à changer à la main (defaultMode « default »)",
-                    "setting written in a way Vanguard does not rewrite safely: change it by hand (defaultMode “default”)"
+                Echec::refuse(
+                    OU,
+                    tr!(
+                        "réglage écrit d'une façon que Vanguard ne réécrit pas sans risque : à changer à la main (defaultMode « default »)",
+                        "setting written in a way Vanguard does not rewrite safely: change it by hand (defaultMode “default”)"
+                    ),
                 )
-                .to_string()
             })?;
             let pret = Pret {
                 etapes: vec![
@@ -238,7 +245,7 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<
         }
     };
     if droits && !ctx.admin && !ctx.interactif {
-        return Err(droits_manquants());
+        return Err(Echec::refuse(OU, droits_manquants()));
     }
     Ok(pret)
 }
@@ -260,7 +267,7 @@ fn preparer_programme(
     (chemin, fichier): (Option<&Path>, Option<&Path>),
     detection: &str,
     ctx: &Contexte,
-) -> Result<(Pret, bool), String> {
+) -> Result<(Pret, bool), Echec> {
     let chemin_texte = chemin.map(|c| c.to_string_lossy().into_owned());
     let mut etapes = Vec::new();
     let mut commandes = Vec::new();
@@ -270,13 +277,16 @@ fn preparer_programme(
     let arret = match (pid, chemin_du_processus_tel(pid)) {
         (Some(pid), Some(actuel)) => {
             if !chemin_texte.as_deref().is_some_and(|c| meme_chemin(c, &actuel)) {
-                return Err(trf!(
-                    "le PID {pid} désigne maintenant un autre programme : rien n'est arrêté",
-                    "PID {pid} now points to another program: nothing is stopped"
+                return Err(Echec::refuse(
+                    "blocage/preparer",
+                    trf!(
+                        "le PID {pid} désigne maintenant un autre programme : rien n'est arrêté",
+                        "PID {pid} now points to another program: nothing is stopped"
+                    ),
                 ));
             }
             if let Some(raison) = gardes::processus_intouchable(pid, nom, Some(&actuel), &ctx.intouchables, ctx.os) {
-                return Err(raison.to_string());
+                return Err(Echec::refuse("blocage/preparer", raison));
             }
             let ici = arret_sans_droits(pid);
             if !ici {
@@ -303,14 +313,16 @@ fn preparer_programme(
         Some(c) => {
             let texte = c.to_string_lossy();
             if let Some(raison) = gardes::fichier_intouchable(&texte, ctx.os, ctx.mon_programme.as_deref()) {
-                return Err(raison.to_string());
+                return Err(Echec::refuse("blocage/preparer", raison));
             }
             if !peut_deplacer(c) {
-                return Err(tr!(
-                    "ce compte ne peut pas déplacer ce fichier : relance Vanguard en administrateur (sudo, ou « Exécuter en tant qu'administrateur ») ; rien n'a été fait",
-                    "this account cannot move this file: start Vanguard again as administrator (sudo, or “Run as administrator”); nothing was done"
-                )
-                .to_string());
+                return Err(Echec::refuse(
+                    "blocage/preparer",
+                    tr!(
+                        "ce compte ne peut pas déplacer ce fichier : relance Vanguard en administrateur (sudo, ou « Exécuter en tant qu'administrateur ») ; rien n'a été fait",
+                        "this account cannot move this file: start Vanguard again as administrator (sudo, or “Run as administrator”); nothing was done"
+                    ),
+                ));
             }
             etapes.push(trf!(
                 "Mettre « {} » en quarantaine : rendu inutilisable, remis exactement par « vanguard blocage annuler »",
@@ -322,11 +334,13 @@ fn preparer_programme(
         None => None,
     };
     if arret.is_none() && quarantaine.is_none() {
-        return Err(tr!(
-            "plus rien à bloquer : le processus est fini et son fichier n'est plus là",
-            "nothing left to block: the process has ended and its file is gone"
-        )
-        .to_string());
+        return Err(Echec::refuse(
+            "blocage/preparer",
+            tr!(
+                "plus rien à bloquer : le processus est fini et son fichier n'est plus là",
+                "nothing left to block: the process has ended and its file is gone"
+            ),
+        ));
     }
     if arret.is_some() && quarantaine.is_none() {
         etapes.push(
@@ -512,11 +526,16 @@ fn peut_deplacer(chemin: &Path) -> bool {
 
 /// Fait le geste préparé, puis le note avec de quoi l'annuler. `Ok` : ce qui a été fait ; `Err` : ce qui a échoué
 /// (noté aussi).
-pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String, String> {
+pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String, Echec> {
+    const OU: &str = "blocage/faire";
     // La preuve d'abord, avant tout geste : ce que l'arrêt et la quarantaine vont effacer. Ce qui ne se lit pas y
     // est dit « impossible », et le geste se fait quand même (défensif d'abord).
-    let preuve = releve(&m.geste, &pret.faire);
-    let note = |annulation: Option<Annulation>, preuve: Option<Preuve>| Blocage {
+    let preuve = preuve::relever(
+        releve(&m.geste, &pret.faire),
+        &m.cle,
+        crate::modele::evenement::Source::Blocage,
+    );
+    let note = |annulation: Option<Annulation>| Blocage {
         id: changements::nouvel_id(),
         cle: m.cle.clone(),
         quoi: m.quoi.clone(),
@@ -524,7 +543,8 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
         annulation,
         annule: None,
         supprime: false,
-        preuve,
+        preuve: None,
+        evenement: None,
     };
     match pret.faire {
         Faire::Commandes { annulation, retenir } => {
@@ -541,15 +561,17 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                     );
                 }
             }
-            changements::noter_blocage(lancees, reussi, note(Some(annulation), preuve));
+            changements::noter_blocage(lancees, reussi, note(Some(annulation)), preuve);
             if reussi {
                 Ok(fait)
             } else {
-                Err(tr!(
-                    "la commande a échoué (voir le message ci-dessus) : rien n'est bloqué",
-                    "the command failed (see the message above): nothing is blocked"
-                )
-                .to_string())
+                Err(Echec::echoue(
+                    OU,
+                    tr!(
+                        "la commande a échoué (voir le message ci-dessus) : rien n'est bloqué",
+                        "the command failed (see the message above): nothing is blocked"
+                    ),
+                ))
             }
         }
         Faire::Programme { arret, quarantaine } => {
@@ -559,18 +581,20 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                 if chemin_du_processus(a.pid).is_some_and(|c| meme_chemin(&c, &a.chemin)) {
                     let arrete = arreter(a, &pret.commandes, &mut lancees);
                     if !arrete {
-                        changements::noter_blocage(lancees, false, note(None, preuve));
-                        return Err(tr!(
-                            "l'arrêt du processus a échoué : rien d'autre n'a été fait",
-                            "stopping the process failed: nothing else was done"
-                        )
-                        .to_string());
+                        changements::noter_blocage(lancees, false, note(None), preuve);
+                        return Err(Echec::echoue(
+                            OU,
+                            tr!(
+                                "l'arrêt du processus a échoué : rien d'autre n'a été fait",
+                                "stopping the process failed: nothing else was done"
+                            ),
+                        ));
                     }
                     attendre_la_fin(a);
                 }
             }
             let Some((chemin, detection)) = &quarantaine else {
-                changements::noter_blocage(lancees, true, note(None, preuve));
+                changements::noter_blocage(lancees, true, note(None), preuve);
                 return Ok(m.quoi.clone());
             };
             // Le seul chemin vers la quarantaine : il note le geste, la preuve et de quoi l'annuler.
@@ -579,13 +603,16 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                 quoi: m.quoi.clone(),
                 automatique,
                 lancees,
-                preuve: preuve.unwrap_or_default(),
+                preuve,
             };
             match crate::protection::quarantaine::isoler(chemin, detection, demande) {
                 Ok(_) => Ok(m.quoi.clone()),
-                Err(e) => Err(trf!(
-                    "quarantaine impossible ({e}) : le fichier reste en place",
-                    "quarantine not possible ({e}): the file stays in place"
+                Err(e) => Err(Echec::echoue(
+                    OU,
+                    trf!(
+                        "quarantaine impossible ({e}) : le fichier reste en place",
+                        "quarantine not possible ({e}): the file stays in place"
+                    ),
                 )),
             }
         }
@@ -594,20 +621,25 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                 changements::noter_blocage(
                     vec![trf!("retiré du démarrage : {id}", "removed from startup: {id}")],
                     true,
-                    note(Some(Annulation::Demarrage { id }), preuve),
+                    note(Some(Annulation::Demarrage { id })),
+                    preuve,
                 );
                 Ok(m.quoi.clone())
             }
-            Some(false) => Err(tr!(
-                "le retrait du démarrage a échoué (voir le message ci-dessus)",
-                "removing it from startup failed (see the message above)"
-            )
-            .to_string()),
-            None => Err(tr!(
-                "il ne se lance déjà plus au démarrage",
-                "it no longer starts at login already"
-            )
-            .to_string()),
+            Some(false) => Err(Echec::echoue(
+                OU,
+                tr!(
+                    "le retrait du démarrage a échoué (voir le message ci-dessus)",
+                    "removing it from startup failed (see the message above)"
+                ),
+            )),
+            None => Err(Echec::echoue(
+                OU,
+                tr!(
+                    "il ne se lance déjà plus au démarrage",
+                    "it no longer starts at login already"
+                ),
+            )),
         },
         Faire::Permissions { fichier, nouveau } => {
             let copie = crate::socle::dossier_local()
@@ -632,8 +664,8 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                 copie: copie.to_string_lossy().into_owned(),
                 empreinte: empreinte_texte(nouveau.as_bytes()),
             };
-            changements::noter_blocage(lancees, ecrit.is_ok(), note(Some(annulation), preuve));
-            ecrit.map(|()| m.quoi.clone()).map_err(|e| e.to_string())
+            changements::noter_blocage(lancees, ecrit.is_ok(), note(Some(annulation)), preuve);
+            ecrit.map(|()| m.quoi.clone()).map_err(|e| Echec::ecriture(OU, &e))
         }
     }
 }
@@ -641,23 +673,35 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
 /// Le relevé d'avant le geste : le processus et le fichier d'un programme, les connexions vers une adresse, le
 /// fichier réglé tel qu'il était. Rien pour ce qui ne fait disparaître aucune trace (un démarrage retiré se remet
 /// exactement, une liste de pilotes, un port fermé).
-fn releve(geste: &Geste, faire: &Faire) -> Option<Preuve> {
+fn releve<'a>(geste: &'a Geste, faire: &'a Faire) -> preuve::Releve<'a> {
+    use preuve::Releve;
     match (geste, faire) {
         // Le numéro relu avant le relevé, comme avant l'arrêt : entre la question et la réponse, le processus a pu
         // finir et son numéro être repris ; la preuve décrirait alors un autre programme.
         (Geste::Programme { pid, fichier, .. }, Faire::Programme { arret, .. }) => {
             let vivant = |a: &Arret| chemin_du_processus(a.pid).is_some_and(|c| meme_chemin(&c, &a.chemin));
-            Some(match (arret, pid) {
-                (Some(a), _) if vivant(a) => preuve::relever_programme(Some(a.pid), fichier.as_deref()),
+            match (arret, pid) {
+                (Some(a), _) if vivant(a) => Releve::Programme {
+                    pid: Some(a.pid),
+                    fichier: fichier.as_deref(),
+                },
                 // Plus là, ou son programme ne se lit plus : rien ne dit que ce numéro est encore le sien.
-                (Some(_), _) | (None, Some(_)) => preuve::relever_programme_parti(fichier.as_deref()),
-                (None, None) => preuve::relever_programme(None, fichier.as_deref()),
-            })
+                (Some(_), _) | (None, Some(_)) => Releve::ProgrammeParti {
+                    fichier: fichier.as_deref(),
+                },
+                (None, None) => Releve::Programme {
+                    pid: None,
+                    fichier: fichier.as_deref(),
+                },
+            }
         }
-        (Geste::Programme { pid, fichier, .. }, _) => Some(preuve::relever_programme(*pid, fichier.as_deref())),
-        (Geste::Adresse { ip }, _) => Some(preuve::relever_adresse(*ip)),
-        (_, Faire::Permissions { fichier, .. }) => Some(preuve::relever_fichier(fichier)),
-        _ => None,
+        (Geste::Programme { pid, fichier, .. }, _) => Releve::Programme {
+            pid: *pid,
+            fichier: fichier.as_deref(),
+        },
+        (Geste::Adresse { ip }, _) => Releve::Adresse(*ip),
+        (_, Faire::Permissions { fichier, .. }) => Releve::Fichier(fichier),
+        _ => Releve::Rien,
     }
 }
 
@@ -692,9 +736,10 @@ fn empreinte_texte(octets: &[u8]) -> String {
 }
 
 /// Défait un blocage noté, exactement, puis le marque annulé.
-pub(crate) fn defaire(b: &Blocage) -> Result<String, String> {
+pub(crate) fn defaire(b: &Blocage) -> Result<String, Echec> {
+    const OU: &str = "blocage/defaire";
     let Some(annulation) = &b.annulation else {
-        return Err(tr!("rien à défaire", "nothing to undo").to_string());
+        return Err(Echec::new(OU, Raison::Introuvable).detail(tr!("rien à défaire", "nothing to undo")));
     };
     let fait = match annulation {
         Annulation::Commandes {
@@ -703,18 +748,20 @@ pub(crate) fn defaire(b: &Blocage) -> Result<String, String> {
             inverse,
         } => {
             let (commandes, port) = commandes_d_annulation(commandes, port.as_deref(), *inverse)
-                .ok_or_else(|| refus_d_annulation(commandes))?;
+                .ok_or_else(|| Echec::refuse(OU, refus_d_annulation(commandes)))?;
             if crate::machine::appliquer(&commandes) {
                 if let Some(p) = port {
                     crate::machine::oublier_port(&p);
                 }
                 Ok(())
             } else {
-                Err(tr!(
-                    "la commande inverse a échoué (voir le message ci-dessus)",
-                    "the reverse command failed (see the message above)"
-                )
-                .to_string())
+                Err(Echec::echoue(
+                    OU,
+                    tr!(
+                        "la commande inverse a échoué (voir le message ci-dessus)",
+                        "the reverse command failed (see the message above)"
+                    ),
+                ))
             }
         }
         Annulation::Quarantaine { nom } => {
@@ -733,16 +780,17 @@ pub(crate) fn defaire(b: &Blocage) -> Result<String, String> {
         }
         Annulation::Demarrage { id } => match crate::optimiser::remettre_au_demarrage(id) {
             Some(true) => Ok(()),
-            Some(false) => Err(tr!(
-                "la remise au démarrage a échoué (voir le message ci-dessus)",
-                "putting it back at startup failed (see the message above)"
-            )
-            .to_string()),
-            None => Err(tr!(
+            Some(false) => Err(Echec::echoue(
+                OU,
+                tr!(
+                    "la remise au démarrage a échoué (voir le message ci-dessus)",
+                    "putting it back at startup failed (see the message above)"
+                ),
+            )),
+            None => Err(Echec::new(OU, Raison::Introuvable).detail(tr!(
                 "plus de note pour ce programme dans les réglages d'Optimiser",
                 "no more note for this program in Optimize's settings"
-            )
-            .to_string()),
+            ))),
         },
     };
     fait.map(|()| {
@@ -836,20 +884,24 @@ pub(crate) fn inverse_reconnue(commandes: &[String], port: Option<&str>) -> Opti
 
 /// Remet la copie d'avant, seulement si le fichier est encore celui que Vanguard a écrit : sinon une modification
 /// faite depuis serait perdue.
-pub(crate) fn remettre_copie(fichier: &Path, copie: &Path, empreinte: &str) -> Result<(), String> {
+pub(crate) fn remettre_copie(fichier: &Path, copie: &Path, empreinte: &str) -> Result<(), Echec> {
+    const OU: &str = "blocage/remettre-copie";
     if !copie_admise(fichier, copie) {
-        return Err(refus_de_copie(fichier, copie));
+        return Err(Echec::refuse(OU, refus_de_copie(fichier, copie)));
     }
-    let actuel = std::fs::read(fichier).map_err(|e| e.to_string())?;
+    let actuel = std::fs::read(fichier).map_err(|e| Echec::io(OU, &e))?;
     if empreinte_texte(&actuel) != empreinte {
-        return Err(trf!(
-            "le fichier a changé depuis le blocage : rien n'est écrasé ; la copie d'avant est ici : {}",
-            "the file changed since the block: nothing is overwritten; the previous copy is here: {}",
-            copie.display()
+        return Err(Echec::refuse(
+            OU,
+            trf!(
+                "le fichier a changé depuis le blocage : rien n'est écrasé ; la copie d'avant est ici : {}",
+                "the file changed since the block: nothing is overwritten; the previous copy is here: {}",
+                copie.display()
+            ),
         ));
     }
-    let avant = std::fs::read(copie).map_err(|e| e.to_string())?;
-    std::fs::write(fichier, avant).map_err(|e| e.to_string())
+    let avant = std::fs::read(copie).map_err(|e| Echec::io(OU, &e))?;
+    std::fs::write(fichier, avant).map_err(|e| Echec::ecriture(OU, &e))
 }
 
 /// La note de copie a la forme que `Faire::Permissions` écrit : la copie, un fichier ordinaire (pas un lien), dans
@@ -1072,6 +1124,8 @@ mod tests {
         // Cible qui n'est pas un settings.json de .claude.
         assert!(!copie_admise(&hosts, &piege));
         let e = remettre_copie(&hosts, &piege, &empreinte).unwrap_err();
+        assert_eq!(e.code(), "refuse");
+        let e = e.to_string();
         assert!(e.contains("main") || e.contains("hand"), "{e}");
         assert_eq!(std::fs::read_to_string(&hosts).unwrap(), "127.0.0.1 localhost\n");
         // Bonne cible, copie hors de blocage/copies.
@@ -1272,6 +1326,7 @@ mod tests {
         ));
         // Surveillance (personne pour répondre) sans droits : rien.
         let refus = preparer(&adresse("203.0.113.7"), &contexte(false, false), false).err();
+        let refus = refus.map(|r| r.to_string());
         assert!(refus.is_some_and(|r| r.contains("droits") || r.contains("rights")));
         // Un autre compte a une connexion avec cette adresse : d'un clic oui, jamais tout seul.
         assert!(preparer(&adresse("203.0.113.9"), &contexte(true, true), false).is_ok());
@@ -1280,7 +1335,7 @@ mod tests {
         assert!(preparer(&adresse("203.0.113.7"), &contexte(false, true), false).is_ok());
         // Pas de pare-feu : non disponible.
         let mut sans = contexte(true, true);
-        sans.pare_feu = Err("non disponible".into());
+        sans.pare_feu = Err(Echec::new("essai", Raison::Absente("nftables".into())));
         assert!(preparer(&adresse("203.0.113.7"), &sans, false).is_err());
         // Jamais fermer SSH en entrée.
         let ssh = menace(Geste::ServeurIa {
@@ -1379,6 +1434,11 @@ mod tests {
     /// ce programme-là, elle le dit ; toujours le même, elle le relève.
     #[test]
     fn preuve_d_un_numero_repris() {
+        fn relever(r: preuve::Releve<'_>) -> preuve::Preuve {
+            preuve::relever(r, "programme:/tmp/.x/outil", crate::modele::evenement::Source::Blocage)
+                .en_preuve()
+                .unwrap()
+        }
         let moi = std::process::id();
         let geste = Geste::Programme {
             pid: Some(moi),
@@ -1395,11 +1455,11 @@ mod tests {
             }),
             quarantaine: None,
         };
-        let repris = releve(&geste, &faire("/tmp/.x/outil".into())).unwrap();
+        let repris = relever(releve(&geste, &faire("/tmp/.x/outil".into())));
         assert!(repris.processus.is_none());
         assert!(repris.impossible.iter().any(|l| l.contains("repris")), "{repris:?}");
         if let Some(actuel) = chemin_du_processus(moi) {
-            let meme = releve(&geste, &faire(actuel)).unwrap();
+            let meme = relever(releve(&geste, &faire(actuel)));
             assert_eq!(meme.processus.map(|p| p.pid), Some(moi));
         }
     }

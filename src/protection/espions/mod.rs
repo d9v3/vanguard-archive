@@ -12,6 +12,7 @@
 mod clavier;
 mod connus;
 mod echap;
+pub(crate) mod resultat;
 #[cfg(any(target_os = "macos", test))]
 pub(crate) mod tcc;
 #[cfg(windows)]
@@ -589,7 +590,9 @@ fn ecran() -> Option<Niveau> {
     ) {
         println!("  {ligne}");
     }
+    let debut = (chrono::Utc::now(), std::time::Instant::now());
     let (r, age) = relever_ecran();
+    crate::modele::resultat::verser(&resultat::resultat(&r, debut));
     let echap_lue = age.is_some();
     afficher_section(
         &r,
@@ -677,6 +680,15 @@ fn ecran() -> Option<Niveau> {
 /// `vanguard logiciels-espions`, et le menu (qui demande Entrée ensuite, comme pour chaque outil).
 pub fn afficher() {
     let _ = ecran();
+}
+
+/// `vanguard logiciels-espions --json` : le même relevé que l'écran, jugé en résultat et versé comme lui.
+pub fn json() {
+    let debut = (chrono::Utc::now(), std::time::Instant::now());
+    let (r, _) = relever_ecran();
+    let res = resultat::resultat(&r, debut);
+    crate::modele::resultat::verser(&res);
+    println!("{}", crate::modele::resultat::json(&res));
 }
 
 /// Les constats du bilan, sans réseau : la copie d'Échap seulement si elle a moins d'une semaine (pour les noms des

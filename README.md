@@ -622,6 +622,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard traces [dossier]` | collecter les traces après une infection, avant de nettoyer : processus, connexions, démarrage, comptes, journaux, fichiers récents, dans un dossier daté avec leurs empreintes SHA-256, et la chronologie de l'incident (CHRONOLOGIE.txt) ; lecture seule |
 | `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
+| `vanguard evenements [--json] [--incident id]` | le journal des événements : alertes, preuves relevées avant un geste, gestes, annulations, alertes déclarées normales et passages de version, reliés ; l'état de sa chaîne scellée d'abord |
 | `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat ; une correction marquée « annulable » s'y annule, puis l'état d'avant est relu |
 | `vanguard parametres [réglage valeur]` | paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, protection en temps réel (`temps-reel non --pendant 1h\|4h`, ou jusqu'à reprise), surveillance, entretien du mois, alertes apprises, blocage, restrictions des extensions, clé abuse.ch (masquée) ; la valeur d'avant est montrée pour revenir |
 | `vanguard blocage [chercher\|annuler\|auto\|clic\|catégorie mode]` | blocage des menaces : « Bloquer » d'un clic pour chaque menace (geste montré, noté, annulable) ; protection active, après un accord, qui bloque toute seule ce qui ne fait aucun doute (empreinte de MalwareBazaar, outil d'attaque connu, serveur de commande) |
@@ -694,9 +695,9 @@ Chaque entrée du menu existe aussi en commande.
 `connection`, `blocklists`, `channels`, `iot`, `fast-dns`, `integrity`, `decoys`, `harden`, `memory`, `sandbox`,
 `email`, `password`, `browser-passwords`, `outbound`, `remote-access`, `link`, `check-file`, `camera-mic`,
 `permissions`, `quarantine`, `containers`, `settings`, `blocking`, `backup`, `restore`, `name`, `slow`, `startup`,
-`specs`, `copy-files`, `check-copy`, `check-backup`, `check-drive`, `handout`, `changes`, `auto-backup`, `shortcut`,
-`computers`, `self-update`, `uninstall`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`, `lab`, `ext`,
-`watcher`, `dangerous-sites`, `latest-flaws`, `public-wifi`, `optimize`, `suspicious-email`, `spyware`,
+`specs`, `copy-files`, `check-copy`, `check-backup`, `check-drive`, `handout`, `changes`, `events`, `auto-backup`,
+`shortcut`, `computers`, `self-update`, `uninstall`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`,
+`lab`, `ext`, `watcher`, `dangerous-sites`, `latest-flaws`, `public-wifi`, `optimize`, `suspicious-email`, `spyware`,
 `outdated-software`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant

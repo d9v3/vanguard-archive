@@ -20,6 +20,7 @@ pub(crate) mod mozilla_avis;
 pub(crate) mod produits;
 #[cfg(any(windows, target_os = "macos", test))]
 mod rapport;
+pub(crate) mod resultat;
 #[cfg(any(windows, target_os = "macos", test))]
 pub(crate) mod sources;
 #[cfg(any(windows, target_os = "macos", test))]
@@ -83,6 +84,16 @@ pub fn afficher() {
             "",
         );
     }
+}
+
+/// `vanguard logiciels-perimes --json` : le résultat de l'examen, versé comme celui de l'écran.
+pub fn json() {
+    let debut = (chrono::Utc::now(), std::time::Instant::now());
+    #[cfg(any(windows, target_os = "macos"))]
+    let r = rapport::resultat_verse(debut);
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let r = resultat::hors_portee(debut);
+    println!("{}", crate::modele::resultat::json(&r));
 }
 
 #[cfg(test)]

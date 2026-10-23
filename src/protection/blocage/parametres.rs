@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::modele::{Echec, Raison};
+
 use crate::{tr, trf};
 
 /// Ce que Vanguard fait d'une menace d'une catégorie.
@@ -156,12 +158,15 @@ impl Parametres {
     }
 
     /// Règle le mode d'une catégorie ; « automatique » là où rien n'est certain est refusé (`Err` : pourquoi).
-    pub(crate) fn regler(&mut self, c: Categorie, m: Mode) -> Result<(), String> {
+    pub(crate) fn regler(&mut self, c: Categorie, m: Mode) -> Result<(), Echec> {
         if m == Mode::Automatique && !c.a_du_certain() {
-            return Err(trf!(
-                "« {} » n'a rien de certain : jamais automatique, désactivé ou un clic seulement.",
-                "“{}” has nothing certain: never automatic, only off or one click.",
-                c.titre()
+            return Err(Echec::refuse(
+                "blocage/regler",
+                trf!(
+                    "« {} » n'a rien de certain : jamais automatique, désactivé ou un clic seulement.",
+                    "“{}” has nothing certain: never automatic, only off or one click.",
+                    c.titre()
+                ),
             ));
         }
         *match c {
@@ -219,15 +224,17 @@ fn fichier() -> PathBuf {
 
 /// Les réglages ; `Err` (la raison) si le fichier existe mais ne se lit pas : les défauts servent, sans automatique,
 /// et rien ne l'écrase en silence.
-pub(crate) fn charger() -> Result<Parametres, String> {
+pub(crate) fn charger() -> Result<Parametres, Echec> {
     charger_de(&fichier())
 }
 
-fn charger_de(chemin: &Path) -> Result<Parametres, String> {
+fn charger_de(chemin: &Path) -> Result<Parametres, Echec> {
+    const OU: &str = "blocage/reglages";
     match std::fs::read_to_string(chemin) {
-        Ok(texte) => serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()),
+        Ok(texte) => serde_json::from_str(texte.trim_start_matches('\u{feff}'))
+            .map_err(|e| Echec::new(OU, Raison::Illisible(e.to_string()))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Parametres::default()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(Echec::io(OU, &e)),
     }
 }
 

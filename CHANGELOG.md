@@ -39,6 +39,18 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   « c'est normal » sur l'ancienne alerte groupée du noyau Linux vaut pour les trois nouvelles ; au premier bilan
   après la mise à jour, l'historique peut encore la montrer réglée puis nouvelle.
 
+- **Un journal des événements relié et scellé.** Les alertes, la preuve relevée avant chaque geste, les blocages,
+  quarantaines et corrections, leurs annulations, les alertes déclarées normales et les passages de version vont dans
+  un seul journal (evenements/AAAA-MM.jsonl, sur cet ordinateur seulement), écrit en ajout seul : chaque ligne porte
+  l'empreinte de la précédente, la tête est scellée, chaque mois clos aussi, 13 mois et 20 Mo au plus. Une ligne
+  retirée, changée ou ajoutée se voit ; une fin qui ne correspond plus est notée dans le journal même. L'alerte d'un
+  serveur de botnet, la preuve, le blocage et son annulation sont reliés (`vanguard evenements --incident <id>`), et
+  un blocage ne peut plus être noté sans son relevé. Le tableau de bord et les traces d'incident lisent ce journal
+  (et l'ancien, qu'une version d'avant écrit encore) ; une faille du catalogue KEV y est critique. Les logiciels
+  espions, les logiciels pas à jour et le courriel suspect rendent un résultat (`--json`), gardé pour le rapport
+  (« Derniers examens des outils ») ; les erreurs du blocage, de la quarantaine et des versions vues ont un code
+  stable. Une chaîne rompue est dite au bilan ; ni un mois futur posé à la main ni une horloge en avance ne vident
+  l'historique, et un mois plein refuse d'écrire plutôt que de devenir illisible.
 - **Les corrections du bilan s'annulent, une par une.** Avant chaque correction (Linux, Windows, macOS), Vanguard
   relève l'état d'avant de ce qu'elle change (fichier de sysctl ou de sshd posé par Vanguard, réglages du noyau,
   service, heure réseau, droits d'un fichier personnel, valeur du registre, préférence) et le note, scellé, dans

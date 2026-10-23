@@ -7,12 +7,15 @@
 //! problèmes. Ce module n'importe rien de l'interface : ce qu'il décide ne dépend jamais de la langue.
 
 pub(crate) mod etat;
+pub(crate) mod evenement;
 pub(crate) mod id;
 pub(crate) mod inventaire;
+pub(crate) mod journal;
 pub(crate) mod raison;
 pub(crate) mod reference;
 pub(crate) mod registre;
+pub(crate) mod resultat;
 
 pub(crate) use etat::{Absence, Etat, Precision};
 pub(crate) use id::{Cle, Objet};
-pub(crate) use raison::Raison;
+pub(crate) use raison::{Echec, Raison};

@@ -871,6 +871,7 @@ mod tests {
             annulation: Some(annulation),
             annule: None,
             supprime: false,
+            evenement: None,
             preuve: None,
         };
         let en_place = vec![
