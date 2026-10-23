@@ -3,7 +3,8 @@ VANGUARD — cyberdéfense portable des postes et des réseaux
 English version: README.txt
 
 Vanguard durcit les ordinateurs, détecte les failles et les intrusions (bilan noté de A à F, audit du réseau,
-chasse aux menaces, analyse YARA, journaux), bloque les menaces trouvées et collecte les traces d'un incident.
+chasse aux menaces, analyse YARA, journaux, logiciels espions, logiciels pas à jour), bloque les menaces trouvées
+et collecte les traces d'un incident.
 Chaque constat est expliqué ; rien n'est modifié sans accord. En plus : le dépannage, l'optimisation, les
 données et la sauvegarde ; en développement, des images qui démarrent un ordinateur en panne (dossier ISO).
 
@@ -43,7 +44,8 @@ un autre ordinateur pour lire le carnet des appareils ; Entrée sans rien, il co
 
 Pour commencer : lancer Vanguard, choisir « 1. Bilan complet », puis « 2. Corriger ».
 
-Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap ou Retour arrière pour revenir ; ou le chiffre, puis Entrée)
+Menu (↑ ↓ pour choisir, Entrée ou → pour lancer, Échap, ← ou Retour arrière pour revenir ; ou le chiffre, puis
+Entrée ; la fenêtre ouverte pour Vanguard prend la taille du menu)
 Recherche : dans tout menu, un mot tapé (wifi, disque, dns…) ne laisse que les lignes qui le contiennent ;
 Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trouve aussi chaque outil des sous-menus
 (« 5.3 » : groupe 5, 3e outil, aussi tapable tel quel) et chaque page du guide.
@@ -56,12 +58,14 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Réparer et nettoyer (Internet, navigation détournée, pare-feu, disque plein, mises à jour bloquées…)
        Diagnostic (matériel, plantages et erreurs récents, copie texte sur la clé)
        Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : vanguard integrite --temps-reel)
-       Ce que Vanguard a appris : les habitudes, et les alertes déclarées normales (« i » à la correction)
+       Ce que Vanguard a appris : les habitudes, et les alertes déclarées normales (« i » à la correction, dans la
+         surveillance, le veilleur ou le blocage)
        Pourquoi c'est lent ? (processeur, mémoire, disque, démarrage, programmes à l'ouverture de session ;
        les retirer du démarrage ou les remettre, après accord : vanguard demarrage)
        Fiche de l'ordinateur (modèle, processeur, mémoire, carte graphique, disques ; numéros de série à l'écran)
        Rapport à laisser : une page simple pour la personne dépannée, posée sur son Bureau
-       Ce que Vanguard a changé : chaque correction lancée ici, datée, réussie ou non
+       Ce que Vanguard a changé : chaque correction lancée ici, datée, réussie ou non ; celles marquées
+         « annulable » s'y annulent une par une, puis l'état d'avant est relu
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
        Paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, protection en temps
          réel, surveillance, entretien, alertes apprises, blocage, restrictions des extensions, clé abuse.ch
@@ -134,7 +138,9 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Performance et fiabilité (démarrage rapide, SSD…) · Confort et fichiers (extensions visibles,
        pas de lancement automatique des clés, menu complet au clic droit…)
        DNS le plus rapide (mesuré ici ; un DNS qui protège est gardé) · Tout remettre comme avant
-       Chaque réglage montre son état et s'annule exactement : la valeur d'avant est remise.
+       Chaque réglage montre son état et s'annule exactement : la valeur d'avant est remise. « Tout remettre comme
+       avant » défait aussi les corrections du bilan, Gaming, les blocages et le mode Wi-Fi public (vanguard
+       optimiser annuler).
   9  Données ›
        Sauvegarder ou restaurer (surnoms, historique des réseaux)
        Copier mes fichiers vers un disque externe (copie vérifiée, rien d'effacé, reprise après interruption)
@@ -173,13 +179,16 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
   i intégrité, n nommer, c connexion, a clé USB, b bac à sable, p mots de passe, e courriel, l logiciels,
   g gaming, d données.
 
-Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, SSH (ses tentatives de
-connexion ratées, ses algorithmes cassés), mot de passe deviné (connexion réussie après une rafale d'échecs),
-Wi-Fi (et faux point d'accès qui copie son nom), programmes lancés au démarrage, programmes en marche suspects,
-portes dérobées et portes cachées de Windows (paquets de LSA, moniteurs d'impression…), pilotes vulnérables, signes
-de rootkit sous Linux, journaux d'événements de Windows, agents d'IA trop permissifs, DNS, certificats racine
-ajoutés, extensions de navigateur, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur,
-fichiers sensibles, sauvegardes, santé des disques et de la batterie.
+Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, logiciels pas à jour (Windows, macOS) et
+logiciels installés depuis le dernier bilan, chiffrement, comptes, règle des mots de passe, SSH (ses tentatives de
+connexion ratées, ses algorithmes cassés ; sous Windows, le serveur OpenSSH et les clés sans phrase de passe), mot
+de passe deviné (connexion réussie après une rafale d'échecs), Wi-Fi (et faux point d'accès qui copie son nom),
+programmes lancés au démarrage, programmes en marche suspects, portes dérobées et portes cachées de Windows
+(paquets de LSA, moniteurs d'impression…), protections de Defender coupées, sécurité du démarrage et éléments de
+fond sous macOS, pilotes vulnérables, signes de rootkit sous Linux, journaux d'événements de Windows, logiciels
+espions, agents d'IA trop permissifs, DNS, certificats racine ajoutés, extensions de navigateur, Bluetooth, heure,
+fin de support, comptes oubliés, mots de passe du navigateur, fichiers sensibles, sauvegardes, santé des disques
+et de la batterie. Chaque règle cite sa référence (CIS, Microsoft ou ANSSI).
 
 Langue : français ou anglais selon le système. Pour forcer le français : menu Paramètres (« s »), ou
   Linux :   VANGUARD_LANG=fr ./vanguard
@@ -198,7 +207,11 @@ Bon à savoir
   - Blocage des menaces : chaque menace trouvée se bloque d'un clic, après accord ; la protection active, une
     fois mise en marche, bloque toute seule ce qui ne fait aucun doute (empreinte de MalwareBazaar, outil d'attaque
     connu, serveur de commande), puis prévient ; en administrateur, elle ne bloque rien seule. Chaque blocage
-    s'annule (vanguard blocage annuler), sauf l'arrêt d'un programme.
+    s'annule (vanguard blocage annuler), sauf l'arrêt d'un programme. Avant chaque geste, Vanguard relève ce qu'il va
+    effacer (programme, ligne de commande, empreinte, connexions) ; le journal des événements, scellé, relie
+    l'alerte, cette preuve, le geste et son annulation (vanguard evenements).
+  - Chaque correction note d'abord l'état d'avant de ce qu'elle change, et s'annule ensuite dans « Ce que Vanguard
+    a changé » ; celles qui rallument une protection (pare-feu, antivirus, BitLocker, UAC…) ne se défont jamais.
   - Avant la première correction, mise à jour ou réparation qui modifie le système, un point de restauration est
     créé automatiquement quand le système le permet (snapper ou timeshift configuré sous Linux, point de
     restauration sous Windows, instantané local de Time Machine sous macOS).

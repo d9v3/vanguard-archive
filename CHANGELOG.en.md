@@ -9,56 +9,92 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
-- **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
-  adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
-  can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category
-  counts among what closes incoming connections: a network left Private, a company network or an unreadable category
-  leaves the mode “on, incoming open”, and a setting that cannot be re-read shows as not verified, never ✔. On Linux, a
-  DNS, encrypted DNS, mDNS or LLMNR undone by a program of the account (NetworkManager allows it without a password)
-  shows in the check (Medium), on the menu line and in its header, with a way to put it back. DNS is no longer kept as
-  “already encrypted and filtering” when only one of its servers filters: they must all filter, otherwise the Shield is
-  set; the check no longer says such a DNS blocks dangerous sites either.
-- **Attack campaign no. 2: eight weaknesses closed.** “Put everything back” never replays a command text read from
-  changements.jsonl (which any program of the account can write): each block is undone by the commands rebuilt from
-  its typed fields, like a single undo, and an unrecognized block is refused and shown instead of running as
-  administrator. The event log is read with an overall bound (months, bytes, events), most recent first, and says what
-  it did not read; files placed under the names of future months (2099…) do not count there, are no longer followed
-  by writing nor counted by pruning, and no longer push the real current month out of the read and the traces: they
-  are reported. formula.json, cask.json and endoflife.date are read as a stream, with a cap on entries: a small
-  hostile file no longer makes the program allocate gigabytes. The attachment name of a suspicious email goes filtered
-  (direction marks, control characters) into the result, the log and the report, and so does every written finding
-  message. A software inventory that hits a bound (subkeys, entries in a folder, 20,000 programs, many keys without a
-  name) is not verified, never silently truncated. Tool results (examens/*.json) are sealed: a “nothing found”
-  rewritten outside Vanguard shows as not verified, never green. The nightly watch no longer deposits into the VM the
-  program of a branch written by the AI (to run after review, `vm-tester.sh --branche`), and only passes the subject,
-  file and line of a proposal to the AI that fixes.
-- **Check rule parity: SSH and Defender on Windows, passwords, startup and persistence on macOS, one reference per rule,
-  one time limit per rule.** Windows gains the OpenSSH server (service, %ProgramData%\ssh configuration, password
-  sign-in, administrators_authorized_keys rights, read in Rust: registry, WMI, files and their rights) and the keys in
-  %USERPROFILE%\.ssh (no passphrase, readable by others), WIN-SSH-001 and 002; the check re-reads the Defender
-  protections that “harden” turns on (ASR rules, network protection, PUA, controlled folders, WIN-ANV-003): a protection
-  Vanguard set and that was later turned off is a high alert, the basic blocking, network protection and PUA are
-  offered, each fix can be undone. macOS gains the password policy and account lockout (pwpolicy, MAC-CPT-002), startup
-  security (bputil or T2 chip, MAC-DEM-001), login and background items (sfltool, as administrator, MAC-PRS-002), login
-  hooks and authorization plugins (MAC-PRS-003). Catch-all rules are split: Windows hardening into five (WIN-DUR-001 to
-  005), plus Windows Update off or paused (WIN-MAJ-003) and automatic sign-in (WIN-SES-002); sysctl settings into three
-  (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), whose fixes append to the file instead of overwriting each other. Every
-  machine rule cites at least one CIS, Microsoft or ANSSI reference (required by a test for all three systems), also
-  given in the check's JSON (“reference”). A software inventory, kept sealed on the computer and never sent, tells for a
-  week each program installed since the last check (COM-LOG-001). Finally, each rule has its time limit (10 min, 30 for
-  updates): one that exceeds it is reported as not checked, the others go on. None of this has run on a real Windows or
-  a real Mac yet: tests under Wine, clippy for macOS. What is said is accurate: an inventory erased or changed outside
-  Vanguard no longer hides what was installed meanwhile (everything is reported again), an update whose displayed name
-  carries the version (“Tool 1.3 (x64)”) is no longer new software, and a source that cannot be read (silent Flatpak,
-  unreadable ~/Applications) makes the check not verified instead of forgetting its programs, reported as “new”
-  later; programs of other open Windows sessions no longer count. Defender: a protection set by a check fix and later
-  turned off is high, like one set by Optimize; nothing is said to “block” while real-time protection is off, nor
-  healthy when nothing blocks. OpenSSH: an uninstalled server whose configuration stayed is not applicable,
-  administrators_authorized_keys open to others is medium when StrictModes (the default) makes it refused, critical
-  without it, and its files are bounded before being read. macOS: root's settings unreadable without sudo make the
-  login hook not verified, never “no hook” again. A “this is normal” choice on the old grouped Linux kernel alert
-  applies to the three new ones; at the first check after the update, the history may still show it fixed then new.
-
+- **Spyware.** `vanguard spyware` (or `logiciels-espions`; Antivirus and protection menu, last) looks for signs of
+  spyware planted by someone close: current connections and recently asked names going to known spyware servers and
+  sites (list from the Échap association, CC-BY 4.0, downloaded when used and kept a day, never embedded), known
+  monitoring software installed or running (FlexiSPY, Spyrix, Refog, Ardamax…; parental control and employee
+  monitoring called normal if installed on purpose), programs reading the keyboard (Linux: /dev/input; recognized:
+  compositor, key remappers, Steam, OBS), Input Monitoring, Accessibility and Screen Recording permissions (macOS,
+  read by a SQLite reader written for Vanguard). Everything is read in Rust, without external commands. Read-only:
+  nothing is removed, since whoever planted it could notice; the screen says to keep screenshots and ask for help
+  first. What could not be checked is counted, and the verdict is never “no spyware”. In the full check too, without
+  network.
+- **Outdated software.** `vanguard outdated-software` (or `logiciels-perimes`; Antivirus and protection menu, last; in
+  the full check on Windows and macOS) compares the installed version of browsers (Chrome, Extended channel included,
+  Edge, Firefox and ESR, Brave), Office, Acrobat and Reader, Java, 7-Zip, PuTTY and Slack with the latest published:
+  public files from the publishers, endoflife.date and Homebrew (formula.json, also taken on Windows for 7-Zip and
+  PuTTY, whose formulae follow upstream), downloaded in full once a day, the same for everyone: the list of your
+  software never leaves the computer (Settings › Software versions to turn these downloads off). The version is read
+  in the file itself (a reader of .exe version resources written for Vanguard, Info.plist, Homebrew Cellar folder),
+  for all accounts as administrator; per-account Slack in its version folder, not its launcher. Firefox: each
+  exploited flaw in CISA's catalog is checked against the installed version (Mozilla security advisories); Edge Stable
+  likewise, from the flaws Microsoft says each version fixes; a version older than the fix is critical. For the
+  others, the number of exploited flaws of the product in the catalog, without concluding for the installed version
+  (Slack embeds Chromium, but its flaws do not carry over to it). What has no source (Edge Extended Stable, Acrobat
+  2020 and 2024, App Store) is said not checked, as is a Slack answer of an unexpected form (its API is undocumented),
+  a disabled or deprecated Homebrew formula, or an Edge flaw list of another form; a browser that cannot be compared
+  keeps the 60-days-without-update check, which leaves end of support. formula.json, cask.json and endoflife.date are
+  read as a stream, with a cap on entries: a small hostile file no longer makes the program allocate gigabytes. The
+  history no longer shows “fixed” then “new” for software whose version changes while still out of date. On Linux, the
+  command points to the package manager. The zip reader (command guide) drops an entry whose content does not have the
+  announced size, which could exceed its limit; gzip and zip join the fuzzing bench.
+- **Public Wi-Fi mode** (`vanguard public-wifi`, Network and Internet › Public Wi-Fi mode). Turn it on when arriving
+  at a café, a hotel or an airport, turn it off when leaving: the computer no longer accepts any connection from that
+  network (an SSH session already open stays), file sharing and the announcement of its name are off (on macOS, the
+  firewall closes sharing; Bonjour and AirDrop stay), and the DNS switches to the Canadian Shield “Protected”,
+  encrypted on Linux when systemd-resolved answers (a resolver on the computer, such as NextDNS, is kept, and so is a
+  DNS already encrypted and filtering, provided all its servers filter: otherwise the Shield is set, and the check no
+  longer says such a DNS blocks dangerous sites). On Linux, a separate nftables table, which also closes transit
+  coming from the Wi-Fi adapter (a container port published by Docker, podman or k3s, which goes through DNAT then
+  `forward` and never `input`, can no longer be reached from the public network), and services masked until restart,
+  then mDNS, LLMNR and encrypted DNS on the public network's profile only; on Windows, Public category, firewall
+  Public profile closed to incoming connections, NetBIOS off, in a single administrator prompt; on macOS, firewall set
+  to “block all” and stealth mode. Incoming connections that could not be closed (no nft, unreadable firewall, on
+  Windows a network left Private, a company network or an unreadable category) are stated in the menu and the check,
+  “on, incoming open”, never “everything in place”; a setting that cannot be read back shows as not verified, never ✔.
+  On Linux, a DNS, encrypted DNS, mDNS or LLMNR undone by a program of the account (NetworkManager allows it without a
+  password) shows in the check (Medium), on the menu line and in its header, with a way to put it back. Each change is
+  shown with its previous value, noted and sealed before the first command; turning off puts everything back in
+  reverse order, read back, even after a crash or a restart (the menu and the check say so). A state changed outside
+  Vanguard is never put back: safe shutdown instead, which only removes Vanguard's table. A firewall found off is
+  turned on and never turned off again. `vanguard public-wifi portal` reopens the network's sign-in page: encrypted
+  DNS is relaxed until Enter, ten minutes at most, and the next launch makes it strict again if Vanguard was closed
+  before. Nothing is sent to recognize a public network: a suggestion only. Tried on Linux (table set then removed in
+  a separate namespace, previews); Windows and macOS: compiled and partly tested, not yet tried on a real system, nor
+  encrypted DNS on a real public network.
+- **Menus: arrow keys, and a window that fits.** In the menus, → runs the selected line like Enter (except when it
+  completes a search prediction) and ← goes back like Esc; during a search, ← clears it. On the main menu, ← does
+  nothing: one press too many when leaving a submenu would close Vanguard (Esc and q always quit). In checklists, ←
+  goes back but → does not confirm: these lists start changes (clean up, uninstall), only Enter confirms them. “Enter
+  to go back” pauses are left with a single key (Enter, ←, Esc or Backspace), typed questions go back with ← or Esc on
+  an empty line, and leaving a tool with “back” no longer asks for one more pause. At each menu, the window takes 78
+  columns and the menu's height, bounded by the screen, then centers itself; only a window opened for Vanguard: under
+  Hyprland, its terminal's floating window; on Windows, a console where Vanguard is alone, the old console or Windows
+  Terminal. Elsewhere, nothing moves.
+- **Check-up fixes can be undone, one by one, and “Put everything back” undoes it all.** Before each fix (Linux,
+  Windows, macOS), Vanguard reads the previous state of what it changes (sysctl or sshd file written by Vanguard,
+  kernel settings, service, network time, rights of a personal file, registry value, preference) and notes it, sealed,
+  in reglages.json, like Optimize. “What Vanguard changed” undoes a fix marked “undoable”, then reads the state back:
+  restored, or not (and why). A fix whose previous state cannot be read is called “not undoable” before it is applied;
+  one that turns a protection back on (firewall, antivirus, BitLocker, UAC, SELinux, Gatekeeper) is never undone. “Put
+  everything back” (`vanguard optimize undo`) now undoes check-up fixes, Optimize, Gaming, blocks and public Wi-Fi
+  mode, from the most recent to the oldest, in one administrator request. Gaming settings go through the same
+  mechanism: their notes in jeux.json, which was not sealed, are taken over without loss, only once, never over an
+  adopted reglages.json. Fixes from the same “[a]ll” that touch the same file share one note: undoing one marks them
+  all undone; two notes on the same target undone together are both put back, without a false ✖. A service enabled but
+  stopped is said not undoable rather than falsely restored, and fixed ~/.ssh rights can be undone.
+- **Undoing never reopens what a fix closed, nor replays a command.** reglages.json, whose values are put back as
+  administrator, is sealed: rewritten by another program, it is no longer trusted (it is set aside, intact, and
+  nothing from it is restored), and a reglages.json accepted without a seal is not resealed on reading: the check-up
+  keeps saying so. Each value is checked when put back, against a closed list (a known service state, a boolean, a
+  number, IP addresses, a simple word); a value of any other form brings back the fresh-system one, written in the
+  program. A note for the sysctl and sshd files Vanguard writes is put back only if it holds the safe values Vanguard
+  writes there (“ptrace_scope = 0”, “PermitRootLogin yes” or an added weak algorithm are refused), and their content
+  is shown before the question; a note aimed at UAC is refused on Windows. Undoing a block, alone or through “Put
+  everything back”, never replays a command text read from the evidence or from changements.jsonl (which any program
+  of the account can write): the commands are rebuilt from the noted address, port or value, and an unrecognized block
+  is refused and shown instead of running as administrator. Undoing only puts back a copy of Claude Code settings made
+  by Vanguard, and “put back as before” for the gaming settings only rewrites as root what Vanguard puts in /etc.
 - **A linked, sealed event log.** Alerts, the evidence recorded before each action, blocks, quarantines and fixes,
   their undoing, alerts declared normal and version changes go into a single log (evenements/YYYY-MM.jsonl, on this
   computer only), append-only: each line carries the fingerprint of the previous one, the head is sealed, and so is
@@ -66,222 +102,184 @@ delivered just before it. Only the latest version has its download page; every v
   matches is recorded in the log itself. A botnet server's alert, the evidence, the block and its undoing are linked
   (`vanguard events --incident <id>`), and a block can no longer be recorded without its evidence. The monitoring
   dashboard and the incident traces read this log (and the old one, which an earlier version still writes); a flaw
-  from the KEV catalog is critical there. Spyware, outdated software and suspicious email return a result
-  (`--json`), kept for the report (“Latest tool examinations”); errors from blocking, quarantine and the versions
-  seen have a stable code. A broken chain is reported by the security check; neither a future month planted by hand
-  nor a clock running ahead empties the history, and a full month refuses to write rather than become unreadable.
-- **Check-up fixes can be undone, one by one.** Before each fix (Linux, Windows, macOS), Vanguard reads the previous
-  state of what it changes (sysctl or sshd file written by Vanguard, kernel settings, service, network time, rights
-  of a personal file, registry value, preference) and notes it, sealed, in reglages.json, like Optimize; each value
-  is checked against a closed list before being put back as administrator. “What Vanguard changed” undoes a fix
-  marked “undoable”, then reads the state back: restored, or not (and why). A fix whose previous state cannot be
-  read is called “not undoable” before it is applied; one that turns a protection back on (firewall, antivirus,
-  BitLocker, UAC, SELinux, Gatekeeper) is never undone. “Put everything back” now undoes check-up fixes, Optimize,
-  Gaming, blocks and public Wi-Fi mode, from the most recent to the oldest, in one administrator request. Gaming
-  settings go through the same mechanism: their notes in jeux.json, which was not sealed, are taken over without
-  loss.
-- **Undoing never reopens what a fix closed.** A note for the sysctl and sshd files Vanguard writes is put back
-  only if it holds the safe values Vanguard writes there (“ptrace_scope = 0”, “PermitRootLogin yes” or an added weak
-  algorithm are refused), and their content is shown before the question; a note aimed at UAC is refused on
-  Windows. jeux.json is taken over only once, never over an adopted reglages.json. Fixes from the same “[a]ll”
-  that touch the same file share one note: undoing one marks them all undone. Two notes on the same target undone
-  together are both put back, without a false ✖. A service enabled but stopped is said not undoable rather than
-  falsely restored, and fixed ~/.ssh rights can be undone.
-- **Vanguard better withstands attacks on itself** (attack campaign of Oct. 23, 18 weaknesses fixed, each with its
-  test). The backup key can revoke a stolen main key (“revoque principale” at the end of the manifest, which 0.85
-  copies still read): kept in the sealed state, the main key is never accepted again, and the highest version seen
-  starts over. The signed Mac program only comes from a master build, without cache. As root, a program in a folder
-  others can change is no longer replaced. State files are read only when they are plain files of bounded size (a
-  named pipe froze monitoring forever); deleted along with the seals, they are “unknown” and everything is said again,
-  and the check says the seals were remade; real-time, its reminder, the audit, the sites and the gateway already
-  reported are sealed (a pause set by another program no longer pauses anything); a critical file changed again is
-  notified again; writing no longer follows links, and root no longer writes into an account's folder. Undoing a block
-  never replays a command read back from the log: it is rebuilt from the noted address, port or value. The USB key:
-  its Ventoy menu and ISO images (by size) enter the manifest, and a recognized key whose serial number changed is
-  reported. Local network: UPnP is read only at the gateway (a device claiming to be the router is reported), never
-  towards this machine or another host, and listening goes on after an oversized datagram; DNS is also tested on
-  randomly drawn names. The MalwareBazaar list is only unpacked up to its announced size, and the sshd log only counts
-  lines written by root. A second pass against these fixes closed their bypasses: a VANGUARD key without a reference,
-  where other keys have theirs, is a medium warning (changing its token too no longer brings it down to information),
-  and only a reference carrying its token accuses it of a changed identifier (an unreadable identifier no longer
-  accuses anything); an updated 0.85 no longer looks like deleted seals, and deleting the history along with them no
-  longer makes a first pass; the time of the last look at Downloads and the unblocked threats already reported are
-  sealed; undoing only puts back a copy of Claude Code settings made by Vanguard; “put back as before” for the gaming
-  settings only rewrites as root what Vanguard puts in /etc; the quarantine no longer follows links and root no longer
-  writes into an account's folder there; UPnP listening no longer counts oversized datagrams; the ThreatFox export is
-  bounded like the MalwareBazaar list; and a tag named master no longer reuses a cache on the Mac.
+  from the KEV catalog is critical there. It is read with an overall bound (months, bytes, events), most recent first,
+  and says what it did not read. A broken chain is reported by the check; files placed under the names of future
+  months (2099…) do not count, are neither followed by writing nor counted by pruning, no longer push the real current
+  month out of the read and the traces, and are reported; a clock running ahead does not empty the history, and a full
+  month refuses to write rather than become unreadable. Spyware, outdated software and suspicious email return a
+  result (`--json`), kept for the report (“Latest tool examinations”) and sealed: a “nothing found” rewritten outside
+  Vanguard shows as not verified, never green. Errors from blocking, quarantine and the versions seen have a stable
+  code.
+- **Evidence before the action, and what Vanguard did in the traces.** Before stopping a program, quarantining a file
+  or blocking an address, including on its own at night, Vanguard records what the action will erase: the program, its
+  command line, its parent, its account, the file's SHA-256 fingerprint, the current connections. What cannot be read
+  is noted “not possible (reason)”, and the block happens anyway; on Windows, the evidence does not wait more than 3
+  seconds for WMI before stopping, and a reused process number is not described. The evidence is kept with the block
+  (“What Vanguard changed” summarizes it); the quarantine keeps each file's fingerprint. “vanguard traces” now
+  includes what Vanguard saw and did (07-vanguard.txt): its alerts, its blocks and quarantines with their evidence,
+  and threads that link the alert, the evidence and the action about the same program or address; these landmarks
+  enter the timeline, and Vanguard's state files are copied as they are so the MANIFEST covers them. A file deleted
+  from the Quarantine menu, or after a ClamAV scan, reads “deleted” there, with its fingerprint recorded; traces run
+  with sudo read the data of the account that ran them, and a named pipe or a link in place of a state file no longer
+  blocks them. A single path leads to the quarantine: the antivirus and YARA ones are now noted and undone with
+  “vanguard blocking undo”, like blocking's; it no longer follows links, and root no longer writes into an account's
+  folder there. The same file downloaded again after a quarantine is offered for blocking again. The watcher judges
+  programs with the same sources as blocking: it also recognizes MalwareBazaar's known fingerprints (those of the last
+  48 hours, the full list does not fit in its memory), and no longer gets stuck on a file that does not respond (not
+  hashed, reported as not checked). Installing ClamAV or a third-party tool is noted like any fix.
+- **“This is normal” for monitoring, the watcher and blocking.** An alert that keeps coming back for no reason (a
+  development tool started from /tmp, a known device) can be declared normal for 90 days in What Vanguard has learned,
+  and a threat offered for blocking with “i”. The choice is about what the alert is about (the program, with its
+  reason and script, the address, the device), not its text: declaring python3 normal for a command that downloads
+  does not silence python3 running something else. It is forgotten in the same place. An alert is offered only if its
+  kind matches its key, and what it designates is shown before choosing; a certain threat, and the alert of its block,
+  are never silenced. The list is sealed: changed outside Vanguard, it silences nothing.
 - **A problem recognized by its rule and its object, no longer by its translated text.** Open ports, suspicious
   autostarts, browser extensions, forgotten accounts or new administrators, stalkerware, remote control tools,
   outdated software and the VANGUARD key's record now carry a key (“LNX-RES-001|port:8080/tcp:python3”): switching
   language no longer brings back an alert marked as normal, no longer shows “new” problems in the history and
   re-notifies nothing in the monitoring. Earlier choices are found by their text, then completed with their key; a
-  choice only covers its object (another program on the same port, another outdated version come back). On macOS, a
-  launch agent is recognized by its file and what it launches, on Linux each suspicious autostart line by its
-  fingerprint: a rewritten command or a line added to an already reported file is never silenced by an earlier choice.
-  One choice per key, the most recent. Monitoring re-notifies an alert that gets worse without changing key (an
-  extension that gains access to all sites); the history no longer shows “fixed” then “new” for software whose version
-  changes while still out of date. The inventory of state files gains the device record, its locks, the takeover of an
-  earlier version and the traces folder, and its test also reads the data folder's variables. The history keeps its
-  first checksum unchanged and gains a second one, covering the keys and the network audit grades: a key is never
-  outside a checksum, and a check without it is called not checked, compared on its text. The check's JSON gains
-  `objet`, `cle` and `etat` (healthy, not applicable, not checked with its reason, problem).
+  choice only covers its object (another program on the same port, another outdated version come back), and one choice
+  per key counts, the most recent. On macOS, a launch agent is recognized by its file and what it launches, on Linux
+  each suspicious autostart line by its fingerprint: a rewritten command or a line added to an already reported file
+  is never silenced by an earlier choice. Monitoring re-notifies an alert that gets worse without changing key (an
+  extension that gains access to all sites). The history keeps its first checksum unchanged and gains a second one,
+  covering the keys and the network audit grades: a key is never outside a checksum, and a check without it is called
+  not checked, compared on its text. The check's JSON gains `objet`, `cle` and `etat` (healthy, not applicable, not
+  checked with its reason, problem). The inventory of state files gains the device record, its locks, the takeover of
+  an earlier version and the traces folder, and its test also reads the data folder's variables.
 - **A rule that returns nothing says “not checked”, never a silence read as healthy** (outside a list of tolerated
   rules that can only shrink). Wi-Fi is no longer silent when NetworkManager is missing (iwd, systemd-networkd):
-  without a card, “nothing to judge”; with a card, not checked. On Windows, a network that netsh hides for lack of
-  location access is called not checked; on macOS, unreadable stealth mode and Remote Login too. Only reading the
-  firewall itself decides whether the grade holds: unreadable stealth mode no longer removes it on its own. Without
-  NetworkManager, an unreadable network card list (/sys/class/net) gives “not checked”, never “no Wi-Fi card”. A “not
-  applicable” finding no longer counts among the checks for the grade's reliability. `vanguard rules` also shows the
-  network audit rules and the tools: a single registry of identifiers, checked by the tests, with the inventory of
-  state files from which the seals take the list to protect.
-- **Evidence before the action, and what Vanguard did in the traces.** Before stopping a program, quarantining a file
-  or blocking an address, including on its own at night, Vanguard records what the action will erase: the program,
-  its command line, its parent, its account, the file's SHA-256 fingerprint, the current connections. What cannot be
-  read is noted "not possible (reason)", and the block happens anyway. The evidence is kept with the block ("What
-  Vanguard changed" summarizes it); the quarantine keeps each file's fingerprint. "vanguard traces" now includes what
-  Vanguard saw and did (07-vanguard.txt): its alerts, its blocks and quarantines with their evidence, and threads that
-  link the alert, the evidence and the action about the same program or address; these landmarks enter the timeline,
-  and Vanguard's state files are copied as they are so the MANIFEST covers them. A single path leads to the
-  quarantine: the antivirus and YARA ones are now noted and undone with "vanguard blocking undo", like blocking's.
-  The watcher judges programs with the same sources as blocking: it also recognizes MalwareBazaar's known
-  fingerprints (those of the last 48 hours, the full list does not fit in its memory). Installing ClamAV or a
-  third-party tool is noted like any fix.
-  **"This is normal" for monitoring, the watcher and blocking.** An alert that keeps coming back for no reason (a
-  development tool started from /tmp, a known device) can be declared normal for 90 days in What Vanguard has
-  learned, and a threat offered for blocking with "i". The choice is about what the alert is about (the program, the
-  address, the device), not its text, and is forgotten in the same place. The list is sealed: changed outside
-  Vanguard, it silences nothing.
-  **Optimize's previous values are sealed and checked.** reglages.json, whose values are put back as administrator to
-  undo a setting, is sealed like Vanguard's state: rewritten by another program, it is no longer trusted (it is set
-  aside, intact, and nothing from it is restored). Each value is also checked when put back: a known service state, a
-  boolean, a number, IP addresses, a simple word; a value of any other form brings back the fresh-system one, written
-  in the program.
-  **Reviewed and tightened before release.** "This is normal" no longer silences a certain threat, and the alert of
-  its block is never silenced; it keeps a program's reason and script (declaring python3 normal for a command that
-  downloads no longer silences python3 running something else); an alert is offered only if its kind matches its
-  key, and what it designates is shown before choosing. A reglages.json accepted without a seal is no longer resealed
-  on reading: the check-up keeps saying so. The same file downloaded again after a quarantine is offered for
-  blocking again. A file deleted from the Quarantine menu, or after a ClamAV scan, reads "deleted" in the traces,
-  with its fingerprint recorded. Traces run with sudo read the data of the account that ran them, and a named pipe
-  or a link in place of a state file no longer blocks them. The watcher no longer gets stuck on a file that does not
-  respond (not hashed, reported as not checked); on Windows, the evidence no longer waits more than 3 seconds for WMI
-  before stopping; a reused process number is no longer described in the evidence.
-- **Public Wi-Fi mode** (`vanguard public-wifi`, Network and Internet › Public Wi-Fi mode). Turn it on when arriving
-  at a café, a hotel or an airport, turn it off when leaving: the computer no longer accepts any connection from that
-  network (an SSH session already open stays), file sharing and the announcement of its name are off (on macOS, the
-  firewall closes sharing; Bonjour and AirDrop stay), and the DNS switches to the Canadian Shield “Protected”,
-  encrypted on Linux when systemd-resolved answers (a resolver on the computer, such as NextDNS, or a DNS already
-  encrypted and filtering, is kept). Incoming connections that could not be closed (no nft, unreadable firewall) are
-  stated in the menu and the check, never “everything in place”. On Linux, a separate nftables table and services
-  masked until restart, then mDNS, LLMNR and encrypted DNS on the public network's profile only; on Windows, Public
-  category, firewall Public profile closed to incoming connections, NetBIOS off, in a single administrator prompt; on
-  macOS, firewall set to “block all” and stealth mode. Each change is shown with its previous value, noted and sealed
-  before the first command; turning off puts everything back in reverse order, read back, even after a crash or a
-  restart (the menu and the check say so). A state changed outside Vanguard is never put back: safe shutdown instead,
-  which only removes Vanguard's table. A firewall found off is turned on and never turned off again. `vanguard
-  public-wifi portal` reopens the network's login page: encrypted DNS is relaxed until Enter, ten minutes at most, and
-  the next launch makes it strict again if Vanguard was closed before. Nothing is sent to recognize a public network:
-  a suggestion only. Tried on Linux (table set then removed in a separate namespace, previews); Windows and macOS:
-  compiled and partly tested, not yet tried on a real system, nor encrypted DNS on a real public network.
-
+  without a card, “nothing to judge”; with a card, not checked; an unreadable network card list (/sys/class/net) gives
+  “not checked”, never “no Wi-Fi card”. On Windows, a network that netsh hides for lack of location access is called
+  not checked; on macOS, unreadable stealth mode and Remote Login too. Only reading the firewall itself decides
+  whether the grade holds: unreadable stealth mode no longer removes it on its own. A “not applicable” finding no
+  longer counts among the checks for the grade's reliability. `vanguard rules` also shows the network audit rules and
+  the tools: a single registry of identifiers, checked by the tests, with the inventory of state files from which the
+  seals take the list to protect.
+- **New check rules: SSH and Defender on Windows, passwords, startup and persistence on macOS, one reference and one
+  time limit per rule.** Windows gains the OpenSSH server (service, %ProgramData%\ssh configuration, password sign-in,
+  administrators_authorized_keys rights, read in Rust: registry, WMI, files and their rights) and the keys in
+  %USERPROFILE%\.ssh (no passphrase, readable by others), WIN-SSH-001 and 002. An uninstalled server whose
+  configuration stayed is not applicable; administrators_authorized_keys open to others is medium when StrictModes
+  (the default) makes it refused, critical without it, and its files are bounded before being read. The check re-reads
+  the Defender protections that “harden” turns on (ASR rules, network protection, PUA, controlled folders,
+  WIN-ANV-003): a protection Vanguard set (Optimize or a check fix) and that was later turned off is a high alert; the
+  basic blocking, network protection and PUA are offered, each fix can be undone; nothing is said to “block” while
+  real-time protection is off, nor healthy when nothing blocks. macOS gains the password policy and account lockout
+  (pwpolicy, MAC-CPT-002), startup security (bputil or T2 chip, MAC-DEM-001), login and background items (sfltool, as
+  administrator, MAC-PRS-002), login hooks and authorization plugins (MAC-PRS-003); root's settings unreadable without
+  sudo make the login hook not verified, never “no hook”. Catch-all rules are split: Windows hardening into five
+  (WIN-DUR-001 to 005), plus Windows Update off or paused (WIN-MAJ-003) and automatic sign-in (WIN-SES-002); sysctl
+  settings into three (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), whose fixes append to the file instead of overwriting
+  each other. A “this is normal” choice on the old grouped Linux kernel alert applies to the three new ones; at the
+  first check after the update, the history may still show it fixed then new. Every machine rule cites at least one
+  CIS, Microsoft or ANSSI reference (required by a test for all three systems), also given in the check's JSON
+  (“reference”). A software inventory, kept sealed on the computer and never sent, tells for a week each program
+  installed since the last check (COM-LOG-001): erased or changed outside Vanguard, it no longer hides what was
+  installed meanwhile (everything is reported again); an update whose displayed name carries the version (“Tool 1.3
+  (x64)”) is no longer new software; a source that cannot be read (silent Flatpak, unreadable ~/Applications) or a
+  bound that is hit (subkeys, entries in a folder, 20,000 programs, many keys without a name) makes the check not
+  verified instead of forgetting programs or silently truncating them; programs of other open Windows sessions no
+  longer count. Finally, each rule has its time limit (10 min, 30 for updates): one that exceeds it is reported as not
+  checked, the others go on. None of this has run on a real Windows or a real Mac yet: tests under Wine, clippy for
+  macOS.
+- **Update chain of trust.** A backup key, kept offline and encrypted from its creation, also signs releases: if the
+  main key is lost or stolen, updates go on, and the backup key can revoke the main one (“revoque principale” at the
+  end of the manifest, which stays readable by 0.85 copies); kept in the sealed state, the main key is then never
+  accepted again, and the highest version seen starts over. The main key can be encrypted, its passphrase asked once
+  per release (`outils/signer-versions.sh`, `--secours`, which refuses an unencrypted backup key). Vanguard remembers
+  the highest signed version already seen and refuses an older manifest; a latest signed version older than 45 days, a
+  clock running behind that would make an old manifest look fresh, or a copy here newer than the latest version signed
+  on GitHub (an old manifest may have been put back) are no longer called “up to date” or “nothing newer”, but not
+  verified. The macOS program only comes from a master build, without cache (a tag named master does not reuse one),
+  and it is checked before it is signed (commit, checksum from its build log, universal Mach-O, version). The
+  monitoring's local copy goes through the update path (never to an older version), and a new copy is tried before it
+  replaces the old one (Linux and macOS); as root, a program in a folder others can change is no longer replaced.
+  Signed version history: `vanguard self-check [program]` also checks a copy that is no longer the latest, changing
+  nothing for copies already installed; run without a terminal, it no longer asks about the history, which quit before
+  the final warning, and 0.85 is no longer said to be missing from the history.
+- **Vanguard's state sealed.** `appris.json`, `integrite.json`, `surveillance-botnets.txt`, the versions already seen,
+  the machine state from the last monitoring pass, the changes already reported by integrity monitoring, real-time
+  protection and its reminder, the audit, the sites and the gateway already reported, the time of the last look at
+  Downloads and the unblocked threats already reported carry a BLAKE3 checksum: changed outside Vanguard (by a program
+  trying to silence its alert, or to pause protection), they no longer count and the check says so (COM-ETA-001);
+  damaged, they never silence an alert. They are read only when they are plain files of bounded size (a named pipe
+  froze monitoring forever); writing no longer follows links, and root no longer writes into an account's folder.
+  Deleting `sceaux.json` no longer makes the state files accepted as they are: they stay “adopted”, reported by the
+  check, and the versions already seen are then not trusted; the adopted integrity reference is still used for
+  comparing and stays reported until it is accepted (a difference with it is still a difference, and moving to a new
+  version does not stop monitoring), never remade without consent. Deleted along with the seals, the state files are
+  “unknown” and everything is said again, and the check says the seals were remade; deleting the history at the same
+  time no longer makes a first pass, and an updated 0.85 does not look like deleted seals. A critical file changed
+  again is notified again.
+- **Two attack campaigns against Vanguard itself**, on October 23: 18 weaknesses fixed by the first, then 10 bypasses
+  and regressions of these fixes, and 12 by the second, each with its test. Those about a subject above are described
+  there; here are the others. The USB key: its Ventoy menu and ISO images (by size) enter the manifest; a recognized
+  key whose serial number changed is reported, a VANGUARD key without a reference, where other keys have theirs, is a
+  medium warning (changing its token too no longer brings it down to information), and only a reference carrying its
+  token accuses it of a changed identifier (an unreadable identifier no longer accuses anything). Local network: UPnP
+  is read only at the gateway (a device claiming to be the router is reported), never towards this machine or another
+  host, and listening goes on after an oversized datagram, without counting it; DNS is also tested on randomly drawn
+  names. The MalwareBazaar list is only unpacked up to its announced size, the ThreatFox export is bounded the same
+  way, and the sshd log only counts lines written by root. The attachment name of a suspicious email goes filtered
+  (direction marks, control characters) into the result, the log and the report, like every written finding message.
+  The nightly watch no longer deposits into the VM the program of a branch written by the AI (to run after review,
+  `vm-tester.sh --branche`), and only passes the subject, file and line of a proposal to the AI that fixes.
 - **Small safety fixes.** On Windows, system programs (netstat, netsh, powercfg, wevtutil, tasklist, schtasks,
   ipconfig, cmd, PowerShell…) are started by their path in System32, asked from Windows itself: a fake program of the
   same name placed next to Vanguard (Downloads) or in the current folder can no longer hide a port, a process or a
   setting; cmd no longer searches its current folder, and a test refuses any new start by bare name. The vulnerable
   drivers list (LOLDrivers) is only replaced by an answer that really is one: an error page no longer stops the check
-  for a week. On macOS, a download's hash is computed in Rust, without md5 or shasum, and the Privacy check
-  reads the permissions database with Vanguard's SQLite reader, without /usr/bin/sqlite3. Clean up: “Downloaded
-  packages” is no longer recommended without paccache, and says it erases what lets you roll back. The menu,
-  `--help` and the launcher use the showcase tagline (“Portable cyber defense for endpoints and networks”). Dead
-  code removed and lighter dependencies (one crate less on Windows, fewer features compiled for reqwest, tokio and
-  futures): 9 to 14 fewer libraries depending on the system.
-
-- **Spyware.** `vanguard spyware` (or `logiciels-espions`; Antivirus and protection menu, last) looks for signs of
-  spyware planted by someone close: current connections and recently asked names going to known spyware servers and
-  sites (list from the Échap association, CC-BY 4.0, downloaded when used and kept a day, never embedded), known
-  monitoring software installed or running (FlexiSPY, Spyrix, Refog, Ardamax…; parental control and employee
-  monitoring called normal if installed on purpose), programs reading the keyboard (Linux: /dev/input; recognized:
-  compositor, key remappers, Steam, OBS), Input Monitoring, Accessibility and Screen Recording permissions (macOS, read
-  by a SQLite reader written for Vanguard). Everything is read in Rust, without external commands. Read-only: nothing
-  is removed, since whoever planted it could notice; the screen says to keep screenshots and ask for help first. What
-  could not be checked is counted, and the verdict is never “no spyware”. In the full check too, without network.
-- **Outdated software.** `vanguard outdated-software` (or `logiciels-perimes`; Antivirus and protection menu, last; in
-  the full check on Windows and macOS) compares the installed version of browsers (Chrome, Extended channel included,
-  Edge, Firefox and ESR, Brave), Office, Acrobat and Reader, Java, 7-Zip, PuTTY and Slack with the latest published:
-  public files from the publishers, endoflife.date and Homebrew (formula.json, also taken on Windows for 7-Zip and
-  PuTTY, whose formulae follow upstream), downloaded in full once a day, the same for everyone (the list of your
-  software never leaves; Settings › Software versions to turn it off). Version read in the file itself (a reader of .exe
-  version resources written for Vanguard, Info.plist, Homebrew Cellar folder), all accounts as administrator;
-  per-account Slack in its version folder, not its launcher. Firefox: each exploited flaw in CISA's catalog checked
-  against your version (Mozilla security advisories); Edge Stable likewise, from the flaws Microsoft says each version
-  fixes; a version older than the fix is critical. The others: the number of exploited flaws of the product in the
-  catalog, without concluding for your version (Slack embeds Chromium, but its flaws do not carry over to it). What has
-  no source (Edge Extended Stable, Acrobat 2020 and 2024, App Store) is said not checked, as is a Slack answer of an
-  unexpected form (its API is undocumented), a disabled or deprecated Homebrew formula, or an Edge flaw list of another
-  form; a browser that cannot be compared keeps the 60-days-without-update check, which leaves end of support. On Linux, the command points to the package manager. The zip reader (command guide) drops
-  an entry whose content does not have the announced size, which could exceed its limit; gzip and zip join the fuzzing
-  bench.
-- **Update chain of trust.** A backup key, kept offline, also signs releases (if the main key is lost or stolen,
-  updates go on); the main key can be encrypted, its passphrase asked once per release (`outils/signer-versions.sh`,
-  `--secours`). Vanguard remembers the highest signed version already seen and refuses an older manifest; a latest
-  signed version older than 45 days is no longer called “up to date”, but not verified. The macOS program is checked
-  before it is signed (commit, checksum from its build log, universal Mach-O, version). The monitoring's local copy
-  goes through the update path (never to an older version), and a new copy is tried before it replaces the old one
-  (Linux and macOS).
-- **Vanguard's state sealed.** `appris.json`, `integrite.json`, `surveillance-botnets.txt` and the versions already
-  seen carry a BLAKE3 checksum: changed outside Vanguard (by a program trying to silence its alert), they no longer
-  count and the check says so (COM-ETA-001); damaged, they never silence an alert.
-- **Chain of trust, second review.** A copy here newer than the latest version signed on GitHub (installed from
-  the key) no longer shows “nothing newer” but “not verified”: an old manifest may have been put back. A clock
-  running behind no longer makes an old manifest look fresh: “not verified”. Deleting `sceaux.json` no longer makes
-  the state files silently accepted as they are: they stay “adopted”, reported by the check (COM-ETA-001), and the
-  versions already seen are then not trusted; the integrity reference is still used for comparing (a difference
-  with it is still a difference, and moving to a new version does not stop monitoring), never remade without
-  consent. The machine state from the last monitoring pass and the list of changes already reported by integrity
-  monitoring are sealed too.
-  `signer-versions.sh --secours` refuses an unencrypted backup key.
-- **CI.** `/dev/root` read by its device number like findmnt, enable links of vanished systemd units left out like
-  systemctl, local HTTP client time bound adjusted for Windows; `claude-journal.yml` analysis only.
-- **Quality and delivery.** `outils/verifier.sh` builds the fuzzing bench and spends a few seconds on each target (two
-  more: the SQLite reader and the Échap YAML list); CI spends five minutes per target every night. Tests that cannot
-  run on a computer (missing tool, root of a namespace) say they were “skipped”: `verifier.sh` counts them next to the
-  passed tests and gives their reasons. The text check and a keyboard test of the menus, in a real pseudo-terminal,
-  are in the repository. CI runs `verifier.sh` itself (a single logic), the real distributions count, Windows runs on
-  each push, and the delivered .exe (MinGW) is tried on a real Windows. A release page is only published if the VM ran
-  that very .exe, and an .exe without its manifest (UTF-8, asInvoker) no longer builds. A single table of tools for
-  the menu and the command line, compared by tests with the README, `--help`, the key's manual and the Structure
-  table; `vanguard optimize` (including `undo`) joins the command line, and the help of the watcher, dangerous sites
-  and latest flaws finds its command again. Signed version history: `vanguard self-check [program]` also checks a copy
-  that is no longer the latest, changing nothing for copies already installed. Pinned Rust toolchain
-  (`rust-toolchain.toml`) and a shared build recipe (`outils/compiler-version.sh`): two builds in two folders give the
-  same program. Extensions: isolation on macOS too (sandbox-exec), and author checked by an Ed25519 signature of the
-  folder, whose key is kept at approval. Windows test program down from 520 to 314 MB. A green that checked nothing no
-  longer passes: under `verifier.sh --seulement` (the nightly CI audit), a skipped or unrun step fails and an unknown
-  step name is refused (tried by `outils/essais-verifier.sh`); tests skipped on the real Windows and the Mac of CI are
-  counted and shown; a fuzzing bench without targets fails; without `.github/hors-code.txt`, the night tests Windows
-  and the Mac instead of skipping them. A failed download of the previous signed history no longer restarts it from
-  scratch before deleting the previous pages: nothing is signed or published (`signer-versions.sh --premier` for the
-  very first time). `vanguard self-check` run without a terminal no longer asks about the history, which quit before
-  the final warning, and 0.85 is no longer said to be missing from the history. Isolation on macOS: no `open`, Apple
-  Events, clipboard or plugged-in disks (/Volumes), through which an extension left the sandbox (profile not checked
-  on a Mac).
+  for a week. On macOS, a download's hash is computed in Rust, without md5 or shasum, and the Privacy check reads the
+  permissions database with Vanguard's SQLite reader, without /usr/bin/sqlite3. Clean up: “Downloaded packages” is no
+  longer recommended without paccache, and says it erases what lets you roll back. The menu, `--help` and the launcher
+  use the showcase tagline (“Portable cyber defense for endpoints and networks”). Dead code removed and lighter
+  dependencies (one crate less on Windows, fewer features compiled for reqwest, tokio and futures): 9 to 14 fewer
+  libraries depending on the system.
 - **Common base, no duplicates.** What all of Vanguard shares lives in `src/socle/`, once, tested once: Vanguard's
   folder, atomic write and lock (out of the network module), cache of downloaded lists (out of abuse.ch), an IP
-  address's scope per the RFCs, home folder, Linux and macOS processes, JSON with comments, os-release,
-  fingerprints; the package inventory leaves Gaming for `machine/linux/paquets.rs`, and `sha1_smol` and the
-  hand-written MD5 give way to RustCrypto's sha1 and md-5, already pulled in by YARA-X (no extra crate). Some copies
-  were wrong: an SSH attempt logged as “::ffff:192.168.1.5” looked like it came from the Internet; a Chrome policy
-  with “1, // comment” before “}” was called unreadable; a held package had no version; a folder or a
-  non-executable file with the same name passed for an installed program before a sudo command; an empty HOME made
-  reads and writes start from the current folder. An unreadable /proc no longer counts as checked (spyware,
-  keyboard readers, camera, remote control), and a /proc mounted with hidepid is reported. Threat lists and tldr
-  are written by the atomic write (on Windows, Defender holding the old copy kept it in place). Run keys are read
-  one way, the safest: “Is someone controlling my PC?” and “Spyware” also see RunOnce and malformed names, and
-  “Spyware” reports an unreadable key. The check-up reads Wi-Fi through nl80211 and wlanapi, like the network
-  audit (nmcli and netsh as fallbacks), and judges saved open networks the same way it does: the protection kept
-  is the one Windows negotiated (a WPA2/WPA3 access point joined in WPA2 stays WPA2), two access points with the
-  same name and different protections, with no known transmitter, defer to nmcli, and NetworkManager profiles are
-  also read from /run (netplan) and /usr/lib, with nmcli as a fallback when a file is refused.
+  address's scope per the RFCs, home folder, Linux and macOS processes, JSON with comments, os-release, fingerprints;
+  the package inventory leaves Gaming for `machine/linux/paquets.rs`, and `sha1_smol` and the hand-written MD5 give
+  way to RustCrypto's sha1 and md-5, already pulled in by YARA-X (no extra crate). Some copies were wrong: an SSH
+  attempt logged as “::ffff:192.168.1.5” looked like it came from the Internet; a Chrome policy with “1, // comment”
+  before “}” was called unreadable; a held package had no version; a folder or a non-executable file with the same
+  name passed for an installed program before a sudo command; an empty HOME made reads and writes start from the
+  current folder. An unreadable /proc no longer counts as checked (spyware, keyboard readers, camera, remote control),
+  and a /proc mounted with hidepid is reported. Threat lists and tldr are written by the atomic write (on Windows,
+  Defender holding the old copy kept it in place). Run keys are read one way, the safest: “Is someone controlling my
+  PC?” and “Spyware” also see RunOnce and malformed names, and “Spyware” reports an unreadable key. The check-up reads
+  Wi-Fi through nl80211 and wlanapi, like the network audit (nmcli and netsh as fallbacks), and judges saved open
+  networks the same way it does: the protection kept is the one Windows negotiated (a WPA2/WPA3 access point joined in
+  WPA2 stays WPA2), two access points with the same name and different protections, with no known transmitter, defer
+  to nmcli, and NetworkManager profiles are also read from /run (netplan) and /usr/lib, with nmcli as a fallback when
+  a file is refused.
+- **Quality and delivery.** `outils/verifier.sh` builds the fuzzing bench and spends a few seconds on each target (two
+  more: the SQLite reader and the Échap YAML list); CI spends five minutes per target every night, and a bench without
+  targets fails. Tests that cannot run on a computer (missing tool, root of a namespace) say they were “skipped”:
+  `verifier.sh` counts them next to the passed tests and gives their reasons, and those skipped on the real Windows
+  and the Mac of CI are counted and shown there. A green that checked nothing no longer passes: under
+  `verifier.sh --seulement` (the nightly CI audit), a skipped or unrun step fails and an unknown step name is refused
+  (tried by `outils/essais-verifier.sh`). The text check and a keyboard test of the menus, in a real pseudo-terminal,
+  are in the repository. CI runs `verifier.sh` itself (a single logic), the real distributions count, Windows runs on
+  each push, and the delivered .exe (MinGW) is tried on a real Windows; without `.github/hors-code.txt`, the night
+  tests Windows and the Mac instead of skipping them, and every night, even with the author's computer off, the real
+  downloaded sources are read back by their reader (format canaries). CI: `/dev/root` read by its device number like
+  findmnt, enable links of vanished systemd units left out like systemctl, local HTTP client time bound adjusted for
+  Windows; `claude-journal.yml` analysis only. A release page is only published if the VM ran that very .exe, and an
+  .exe without its manifest (UTF-8, asInvoker) no longer builds; a failed download of the previous signed history no
+  longer restarts it from scratch before deleting the previous pages: nothing is signed or published
+  (`signer-versions.sh --premier` for the very first time). A single table of tools for the menu and the command line,
+  compared by tests with the README, `--help`, the key's manual and the Structure table; `vanguard optimize`
+  (including `undo`) joins the command line, and the help of the watcher, dangerous sites and latest flaws finds its
+  command again. Pinned Rust toolchain (`rust-toolchain.toml`) and a shared build recipe
+  (`outils/compiler-version.sh`): two builds in two folders give the same program. Extensions: isolation on macOS too
+  (sandbox-exec), with no `open`, Apple Events, clipboard or plugged-in disks (/Volumes), through which an extension
+  left the sandbox (profile not checked on a Mac), and author checked by an Ed25519 signature of the folder, whose key
+  is kept at approval. Windows test program down from 520 to 314 MB; tests without a click in the Windows VM (a queue,
+  `outils/vm-tester.sh`), menus included, in a real console. Continuous watch (`outils/veille/`): every night, without
+  AI, verification, fuzzing and sources; on an alert only, a fix proposed in a separate branch, never merged or pushed
+  by itself.
 
 ## October 22, 2026, evening: version 0.85
 

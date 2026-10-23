@@ -3,7 +3,8 @@ VANGUARD — portable cyber defense for endpoints and networks
 Version française : LISEZMOI.txt
 
 Vanguard hardens computers, detects vulnerabilities and intrusions (check graded from A to F, network audit,
-threat hunting, YARA scan, logs), blocks the threats it finds and collects the evidence of an incident. Every
+threat hunting, YARA scan, logs, spyware, outdated software), blocks the threats it finds and collects the
+evidence of an incident. Every
 finding is explained; nothing is changed without consent. Also included: troubleshooting, optimization, data and
 backup; in development, images that start a computer that no longer boots (ISO folder).
 
@@ -42,7 +43,8 @@ never starts anything by itself from a USB key (protection against viruses since
 
 To start: run Vanguard, choose "1. Full check", then "2. Fix".
 
-Menu (↑ ↓ to select, Enter to run, Esc or Backspace to go back; or the number, then Enter)
+Menu (↑ ↓ to select, Enter or → to run, Esc, ← or Backspace to go back; or the number, then Enter; the window
+opened for Vanguard takes the menu's size)
 Search: in any menu, type a word (wifi, disk, dns…): only the lines containing it stay, Enter opens the
 highlighted one, Esc clears it. In the main menu, it also finds each tool of the submenus (“5.3”: group 5,
 3rd tool, which can also be typed as is) and each page of the guide.
@@ -55,12 +57,14 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Repair and clean up (Internet, hijacked browsing, firewall, disk full, stuck updates…)
        Diagnostic (hardware, recent crashes and errors, text copy on the key)
        Critical file integrity (accounts, sudo, SSH, startup; live: vanguard integrity --live)
-       What Vanguard has learned: your habits, and the alerts you declared normal ("i" when fixing)
+       What Vanguard has learned: your habits, and the alerts you declared normal ("i" when fixing, in monitoring,
+         the watcher or blocking)
        Why is it slow? (processor, memory, disk, startup, programs started at login; remove them from
        startup or put them back, after your consent: vanguard startup)
        Computer specs (model, processor, memory, graphics card, disks; serial numbers on screen)
        Report to leave behind: a simple page for the person you helped, put on their Desktop
-       What Vanguard changed: each fix run here, dated, successful or not
+       What Vanguard changed: each fix run here, dated, successful or not; those marked "undoable" can be undone
+         there one by one, then the previous state is read back
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
        Settings (also "s" in the main menu): language, emojis, working without the Internet, real-time
          protection, monitoring, check-up, learned alerts, blocking, extension restrictions, abuse.ch key
@@ -132,7 +136,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Performance and reliability (fast startup, SSD…) · Comfort and files (file extensions shown,
        no autorun from USB drives, full right-click menu…)
        Fastest DNS (measured here; a DNS that protects you is kept) · Put everything back
-       Each setting shows its state and can be reverted exactly: the previous value is put back.
+       Each setting shows its state and can be reverted exactly: the previous value is put back. "Put everything
+       back" also undoes check-up fixes, Gaming, blocks and public Wi-Fi mode (vanguard optimize undo).
   9  Data ›
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
@@ -170,12 +175,15 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.
 
-The check covers, among others: firewall, open ports, updates, encryption, accounts, SSH (its failed login
-attempts, its broken algorithms), guessed password (successful sign-in after a burst of failures), Wi-Fi (and
-fake access points copying its name), programs started at boot, suspicious running programs, Windows backdoors
-and hidden doors (LSA packages, print monitors…), vulnerable drivers, rootkit signs on Linux, Windows event logs,
-overly permissive AI agents, DNS, added root certificates, browser extensions, Bluetooth, clock, end of support,
-forgotten accounts, browser passwords, sensitive files, backups, disk and battery health.
+The check covers, among others: firewall, open ports, updates, outdated software (Windows, macOS) and software
+installed since the last check, encryption, accounts, password policy, SSH (its failed login attempts, its broken
+algorithms; on Windows, the OpenSSH server and keys without a passphrase), guessed password (successful sign-in
+after a burst of failures), Wi-Fi (and fake access points copying its name), programs started at boot, suspicious
+running programs, Windows backdoors and hidden doors (LSA packages, print monitors…), Defender protections turned
+off, startup security and background items on macOS, vulnerable drivers, rootkit signs on Linux, Windows event
+logs, spyware, overly permissive AI agents, DNS, added root certificates, browser extensions, Bluetooth, clock,
+end of support, forgotten accounts, browser passwords, sensitive files, backups, disk and battery health. Each
+rule cites its reference (CIS, Microsoft or ANSSI).
 
 Language: French or English, following the system. To force English: the Settings menu ("s"), or
   Linux:   VANGUARD_LANG=en ./vanguard
@@ -193,7 +201,11 @@ Good to know
   - Threat blocking: each threat found can be blocked with one click, after consent; active protection, once
     enabled, blocks clear-cut threats by itself (MalwareBazaar fingerprint, known attack tool, command server), then
     lets you know; as administrator, it blocks nothing by itself. Each block can be undone (vanguard blocking
-    undo), except stopping a program.
+    undo), except stopping a program. Before each action, Vanguard records what it will erase (program, command
+    line, fingerprint, connections); the sealed event log links the alert, this evidence, the action and its undoing
+    (vanguard events).
+  - Each fix first records the previous state of what it changes, and can then be undone in "What Vanguard
+    changed"; those that turn a protection back on (firewall, antivirus, BitLocker, UAC…) are never undone.
   - Before the first fix, update or repair that changes the system, a restore point is created automatically when
     the system allows one (snapper or timeshift configured on Linux, a restore point on Windows, a local Time
     Machine snapshot on macOS).

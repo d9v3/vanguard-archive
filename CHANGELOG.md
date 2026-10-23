@@ -9,301 +9,297 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
-- **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
-  carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
-  `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la
-  catégorie Public compte parmi ce qui ferme les entrées : un réseau resté en Privé, d'entreprise ou à la catégorie
-  illisible laisse le mode « allumé, entrées ouvertes », et un réglage qui ne se relit pas s'affiche non vérifié, jamais
-  ✔. Sous Linux, un DNS, un DNS chiffré, mDNS ou LLMNR défait par un programme du compte (NetworkManager le permet sans
-  mot de passe) se voit au bilan (Moyen), sur la ligne du menu et dans son en-tête, avec de quoi le reposer. Le DNS
-  n'est plus gardé « déjà chiffré et filtrant » quand un seul de ses serveurs filtre : il faut qu'ils filtrent tous,
-  sinon le Bouclier est posé ; le bilan ne dit plus non plus qu'un tel DNS bloque les sites dangereux.
-- **Campagne d'attaque n° 2 : huit faiblesses fermées.** « Tout remettre comme avant » ne rejoue plus jamais le
-  texte d'une commande lu dans changements.jsonl (que tout programme du compte peut écrire) : chaque blocage se défait
-  par les commandes refaites depuis ses champs typés, comme une annulation seule, et un blocage non reconnu est refusé
-  et montré, au lieu de partir en administrateur. Le journal des événements se lit borné en tout (mois, octets,
-  événements), les plus récents d'abord, et dit ce qu'il n'a pas lu ; des fichiers posés aux noms de mois à venir
-  (2099…) n'y comptent pas, ne sont plus suivis par l'écriture ni comptés par l'élagage, et ne font plus sortir le
-  vrai mois en cours de la lecture et des traces : ils sont dits. formula.json, cask.json et endoflife.date se
-  lisent en flux, avec un plafond d'entrées : un petit fichier hostile ne fait plus allouer des Gio. Le nom d'une pièce
-  jointe d'un courriel suspect passe filtré (caractères de direction, contrôles) dans le résultat, le journal et le
-  rapport, et tout message écrit d'un constat aussi. L'inventaire des logiciels dont une borne est atteinte (sous-clés,
-  entrées d'un dossier, 20 000 logiciels, clés sans nom en nombre) est non vérifié, jamais tronqué en silence. Les
-  résultats des outils (examens/*.json) sont scellés : un « rien trouvé » réécrit hors de Vanguard se montre non
-  vérifié, jamais vert. La veille de nuit ne dépose plus dans la VM le programme d'une branche écrite par l'IA (à
-  lancer après relecture, `vm-tester.sh --branche`), et ne transmet plus à l'IA qui corrige que le sujet, le fichier
-  et la ligne d'une proposition.
-- **Parité des règles du bilan : SSH et Defender sous Windows, mots de passe, démarrage et persistance sous macOS, une
-  référence par règle, un délai par règle.** Windows gagne le serveur OpenSSH (service, configuration de
-  %ProgramData%\ssh, connexion par mot de passe, droits de administrators_authorized_keys, lus en Rust : registre, WMI,
-  fichiers et leurs droits) et les clés de %USERPROFILE%\.ssh (sans phrase de passe, lisibles par d'autres), WIN-SSH-001
-  et 002 ; le bilan relit les protections de Defender que « durcir » active (règles ASR, protection réseau, PUA,
-  dossiers contrôlés, WIN-ANV-003) : une protection posée par Vanguard puis coupée est une alerte élevée, les blocages
-  de base, la protection réseau et PUA sont proposés, chaque correction annulable. macOS gagne la règle des mots de
-  passe et le blocage des comptes (pwpolicy, MAC-CPT-002), la sécurité du démarrage (bputil ou puce T2, MAC-DEM-001),
-  les éléments d'ouverture et de fond (sfltool, en administrateur, MAC-PRS-002), les crochets de connexion et les
-  extensions d'autorisation (MAC-PRS-003). Les règles fourre-tout sont scindées : le durcissement de Windows en cinq
-  (WIN-DUR-001 à 005), plus Windows Update coupé ou en pause (WIN-MAJ-003) et la session ouverte toute seule
-  (WIN-SES-002) ; les réglages sysctl en trois (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), dont les corrections s'ajoutent
-  au fichier au lieu de se réécrire l'une l'autre. Chaque règle de la machine cite au moins une référence du CIS, de
-  Microsoft ou de l'ANSSI (exigé par un test pour les trois systèmes), donnée aussi dans le JSON du bilan (« reference
-  »). Un inventaire des logiciels, gardé scellé sur l'ordinateur et jamais envoyé, dit pendant une semaine chaque
-  logiciel installé depuis le dernier bilan (COM-LOG-001). Enfin, chaque règle a son délai (10 min, 30 pour les mises à
-  jour) : celle qui le dépasse est dite non vérifiée, les autres continuent. Rien de cela n'a encore tourné sur un vrai
-  Windows ni sur un vrai Mac : tests sous Wine, clippy pour macOS. Ce qui est dit l'est juste : l'inventaire effacé
-  ou changé hors de Vanguard ne tait plus ce qui s'est installé entre-temps (tout est redit), une mise à jour dont le
-  nom affiché porte la version (« Outil 1.3 (x64) ») n'est plus un nouveau logiciel, et une source qui ne se lit pas
-  (Flatpak muet, ~/Applications illisible) rend le bilan non vérifié au lieu de faire oublier ses logiciels, redits
-  « nouveaux » ensuite ; les logiciels des autres sessions Windows ouvertes ne comptent plus. Defender : une
-  protection posée par une correction du bilan puis coupée est élevée comme celle d'Optimiser, rien n'est dit « qui
-  bloque » quand la protection en temps réel est coupée, ni sain quand rien ne bloque. OpenSSH : un serveur désinstallé
-  dont la configuration est restée est sans objet, administrators_authorized_keys ouvert est moyen quand StrictModes
-  (par défaut) le fait refuser, critique sans lui, et ses fichiers sont bornés avant d'être lus. macOS : les réglages
-  de root illisibles sans sudo rendent le crochet de connexion non vérifié, plus jamais « aucun crochet ». Un choix
-  « c'est normal » sur l'ancienne alerte groupée du noyau Linux vaut pour les trois nouvelles ; au premier bilan
-  après la mise à jour, l'historique peut encore la montrer réglée puis nouvelle.
-
+- **Logiciels espions.** `vanguard logiciels-espions` (alias `spyware` ; menu Antivirus et protection, en dernier)
+  cherche les signes d'un logiciel espion posé par un proche : connexions en cours et noms demandés récemment vers les
+  serveurs et sites des logiciels espions connus (liste de l'association Échap, CC-BY 4.0, téléchargée à l'usage et
+  gardée un jour, jamais intégrée), logiciels de surveillance connus installés ou en marche (FlexiSPY, Spyrix, Refog,
+  Ardamax… ; contrôle parental et surveillance d'employés dits normaux s'ils ont été installés exprès), programmes qui
+  lisent le clavier (Linux : /dev/input ; reconnus : compositeur, remappage, Steam, OBS), autorisations Surveillance
+  de l'entrée, Accessibilité et Enregistrement de l'écran (macOS, lues par un lecteur SQLite écrit pour Vanguard).
+  Tout est lu en Rust, sans commande externe. Lecture seule : rien n'est retiré, car celui qui l'a posé pourrait le
+  voir ; l'écran dit de garder des captures et de demander de l'aide d'abord. Ce qui n'a pas pu être vérifié est
+  compté, et le verdict n'est jamais « aucun logiciel espion ». Au bilan aussi, sans réseau.
+- **Logiciels pas à jour.** `vanguard logiciels-perimes` (alias `outdated-software` ; menu Antivirus et protection, en
+  dernier ; au bilan sous Windows et macOS) compare la version installée des navigateurs (Chrome, y compris le canal
+  Extended, Edge, Firefox et ESR, Brave), d'Office, d'Acrobat et Reader, de Java, de 7-Zip, de PuTTY et de Slack à la
+  dernière publiée : fichiers publics des éditeurs, d'endoflife.date et de Homebrew (formula.json, pris sous Windows
+  aussi pour 7-Zip et PuTTY, dont les formules suivent l'amont), téléchargés en entier une fois par jour, les mêmes
+  pour tous : la liste des logiciels ne sort jamais de l'ordinateur (Paramètres › Versions des logiciels pour couper
+  ces téléchargements). La version est lue dans le fichier même (lecteur de la ressource de version des .exe écrit
+  pour Vanguard, Info.plist, dossier du Cellar de Homebrew), pour tous les comptes en administrateur ; Slack par
+  compte, dans son dossier de version, pas son lanceur. Firefox : chaque faille exploitée du catalogue de la CISA est
+  vérifiée contre la version installée (avis de sécurité de Mozilla) ; Edge Stable de même, d'après les failles que
+  Microsoft dit corrigées par chaque version ; une version antérieure au correctif est critique. Pour les autres, le
+  nombre de failles exploitées du produit au catalogue, sans conclure pour la version installée (Slack embarque
+  Chromium, mais ses failles ne se reportent pas sur lui). Ce qui n'a pas de source (Edge Extended Stable, Acrobat
+  2020 et 2024, App Store) est dit non vérifié, comme une réponse de Slack d'une forme inattendue (son API n'est pas
+  documentée), une formule de Homebrew désactivée ou obsolète, ou une liste de failles d'Edge d'une autre forme ; un
+  navigateur qui ne se compare pas garde le contrôle des 60 jours sans mise à jour, qui quitte la fin de support.
+  formula.json, cask.json et endoflife.date se lisent en flux, avec un plafond d'entrées : un petit fichier hostile ne
+  fait plus allouer des Gio. L'historique ne montre plus « réglé » puis « nouveau » pour un logiciel dont la version
+  change sans être à jour. Sous Linux, la commande renvoie au gestionnaire de paquets. Le lecteur zip (guide des
+  commandes) écarte une entrée dont le contenu n'a pas la taille annoncée, qui pouvait dépasser sa borne ; gzip et zip
+  passent au banc de fuzzing.
+- **Mode Wi-Fi public** (`vanguard wifi-public`, Réseau et Internet › Mode Wi-Fi public). On l'allume en arrivant dans
+  un café, un hôtel ou un aéroport, on l'éteint en partant : l'ordinateur n'accepte plus aucune connexion venue de ce
+  réseau (une session SSH déjà ouverte reste), le partage de fichiers et l'annonce de son nom sont coupés (sous macOS,
+  le pare-feu ferme le partage ; Bonjour et AirDrop restent), et le DNS passe au Bouclier canadien « Protégé »,
+  chiffré sous Linux quand systemd-resolved répond (un résolveur sur l'ordinateur, comme NextDNS, est gardé, et un DNS
+  déjà chiffré et filtrant aussi, à condition que tous ses serveurs filtrent : sinon le Bouclier est posé, et le bilan
+  ne dit plus qu'un tel DNS bloque les sites dangereux). Sous Linux, une table nftables à part, qui ferme aussi le
+  transit venu de la carte Wi-Fi (un port de conteneur publié par Docker, podman ou k3s, qui passe par DNAT puis
+  `forward` et jamais par `input`, n'est plus joignable du réseau public), et des services masqués jusqu'au
+  redémarrage, puis mDNS, LLMNR et le DNS chiffré sur le seul profil du réseau public ; sous Windows, catégorie
+  Public, profil Public du pare-feu fermé aux entrées, NetBIOS coupé, en une seule demande d'administrateur ; sous
+  macOS, pare-feu en « tout bloquer » et mode furtif. Les entrées qui n'ont pas pu être fermées (pas de nft, pare-feu
+  illisible, sous Windows un réseau resté en Privé, d'entreprise ou à la catégorie illisible) sont dites au menu et au
+  bilan, « allumé, entrées ouvertes », jamais « tout est en place » ; un réglage qui ne se relit pas s'affiche non
+  vérifié, jamais ✔. Sous Linux, un DNS, un DNS chiffré, mDNS ou LLMNR défait par un programme du compte
+  (NetworkManager le permet sans mot de passe) se voit au bilan (Moyen), sur la ligne du menu et dans son en-tête,
+  avec de quoi le reposer. Chaque changement est montré avec sa valeur d'avant, notée et scellée avant la première
+  commande ; l'extinction remet tout dans l'ordre inverse, relu, même après un plantage ou un redémarrage (le menu et
+  le bilan le disent). Un état changé hors de Vanguard n'est jamais remis : extinction sûre à la place, qui ne retire
+  que la table de Vanguard. Un pare-feu trouvé coupé est allumé et jamais recoupé. `vanguard wifi-public portail`
+  rouvre la page de connexion du réseau : le DNS chiffré se relâche jusqu'à Entrée, dix minutes au plus, et le
+  lancement suivant le remet strict si Vanguard a été fermé avant. Rien n'est envoyé pour reconnaître un réseau
+  public : une suggestion seulement. Essayé sous Linux (table posée puis retirée dans un espace de noms à part,
+  aperçus) ; Windows et macOS : compilés et testés en partie, pas encore essayés sur un vrai système, ni le DNS
+  chiffré sur un vrai réseau public.
+- **Menus : les flèches, et une fenêtre à leur taille.** Dans les menus, → lance la ligne choisie comme Entrée (sauf
+  quand il complète une prédiction de la recherche) et ← revient comme Échap ; pendant une recherche, ← l'efface. Au
+  menu principal, ← ne fait rien : un appui de trop en sortant d'un sous-menu fermerait Vanguard (Échap et q quittent
+  toujours). Dans les listes à cocher, ← revient mais → ne valide pas : ces listes lancent des changements (nettoyer,
+  désinstaller), Entrée seule les confirme. Les pauses « Entrée pour revenir » se quittent d'une seule touche (Entrée,
+  ←, Échap ou Retour arrière), les questions qui se tapent reviennent par ← ou Échap sur une ligne vide, et quitter un
+  outil par « revenir » ne demande plus une pause de plus. À chaque menu, la fenêtre prend 78 colonnes et la hauteur
+  du menu, bornée à l'écran, puis se centre ; seulement une fenêtre ouverte pour Vanguard : sous Hyprland, la fenêtre
+  flottante de son terminal ; sous Windows, une console où Vanguard est seul, l'ancienne console ou le Terminal
+  Windows. Ailleurs, rien ne bouge.
+- **Les corrections du bilan s'annulent, une par une, et « Tout remettre comme avant » défait tout.** Avant chaque
+  correction (Linux, Windows, macOS), Vanguard relève l'état d'avant de ce qu'elle change (fichier de sysctl ou de
+  sshd posé par Vanguard, réglages du noyau, service, heure réseau, droits d'un fichier personnel, valeur du registre,
+  préférence) et le note, scellé, dans reglages.json, comme Optimiser. « Ce que Vanguard a changé » annule une
+  correction marquée « annulable », puis relit l'état : revenu, ou pas (et pourquoi). Une correction dont l'état
+  d'avant ne se relève pas est dite « non annulable » avant d'être appliquée ; celle qui rallume une protection
+  (pare-feu, antivirus, BitLocker, UAC, SELinux, Gatekeeper) ne se défait jamais. « Tout remettre comme avant »
+  (`vanguard optimiser annuler`) défait maintenant le bilan, Optimiser, Gaming, les blocages et le mode Wi-Fi public,
+  du plus récent au plus ancien, en une demande administrateur. Les réglages de Gaming passent par le même mécanisme :
+  leurs notes de jeux.json, qui n'était pas scellé, sont reprises sans perte, une seule fois, jamais par-dessus un
+  reglages.json adopté. Les corrections d'un même « [t]out appliquer » qui touchent le même fichier partagent une
+  note : en annuler une les marque toutes défaites ; deux notes sur la même cible défaites ensemble sont toutes deux
+  remises, sans faux ✖. Un service activé mais arrêté est dit non annulable plutôt que faussement remis, et les droits
+  de ~/.ssh corrigés s'annulent.
+- **Annuler ne rouvre jamais ce qu'une correction a fermé, ni ne rejoue une commande.** reglages.json, dont les
+  valeurs sont remises en administrateur, est scellé : réécrit par un autre programme, il n'est plus cru (il est mis
+  de côté, intact, et rien n'en est remis), et un reglages.json accepté sans sceau n'est pas rescellé à la lecture :
+  le bilan continue de le dire. Chaque valeur est vérifiée à la remise, sur une liste fermée (un état de service
+  connu, un booléen, un nombre, des adresses IP, un mot simple) ; une valeur d'une autre forme fait revenir celle d'un
+  système neuf, écrite dans le programme. Une note des fichiers de sysctl et de sshd que Vanguard pose n'est remise
+  que si elle porte les valeurs sûres qu'il y écrit (« ptrace_scope = 0 », « PermitRootLogin yes » ou un algorithme
+  faible ajouté sont refusés), et leur contenu est montré avant la question ; une note qui viserait l'UAC est refusée
+  sous Windows. Annuler un blocage, seul ou par « Tout remettre comme avant », ne rejoue plus jamais le texte d'une
+  commande lu dans le relevé ou dans changements.jsonl (que tout programme du compte peut écrire) : les commandes sont
+  refaites depuis l'adresse, le port ou la valeur notés, et un blocage non reconnu est refusé et montré au lieu de
+  partir en administrateur. Annuler ne remet qu'une copie de réglages de Claude Code faite par Vanguard, et remettre
+  comme avant les réglages pour jouer ne réécrit en root que ce que Vanguard met dans /etc.
 - **Un journal des événements relié et scellé.** Les alertes, la preuve relevée avant chaque geste, les blocages,
   quarantaines et corrections, leurs annulations, les alertes déclarées normales et les passages de version vont dans
   un seul journal (evenements/AAAA-MM.jsonl, sur cet ordinateur seulement), écrit en ajout seul : chaque ligne porte
   l'empreinte de la précédente, la tête est scellée, chaque mois clos aussi, 13 mois et 20 Mo au plus. Une ligne
   retirée, changée ou ajoutée se voit ; une fin qui ne correspond plus est notée dans le journal même. L'alerte d'un
   serveur de botnet, la preuve, le blocage et son annulation sont reliés (`vanguard evenements --incident <id>`), et
-  un blocage ne peut plus être noté sans son relevé. Le tableau de bord et les traces d'incident lisent ce journal
-  (et l'ancien, qu'une version d'avant écrit encore) ; une faille du catalogue KEV y est critique. Les logiciels
-  espions, les logiciels pas à jour et le courriel suspect rendent un résultat (`--json`), gardé pour le rapport
-  (« Derniers examens des outils ») ; les erreurs du blocage, de la quarantaine et des versions vues ont un code
-  stable. Une chaîne rompue est dite au bilan ; ni un mois futur posé à la main ni une horloge en avance ne vident
-  l'historique, et un mois plein refuse d'écrire plutôt que de devenir illisible.
-- **Les corrections du bilan s'annulent, une par une.** Avant chaque correction (Linux, Windows, macOS), Vanguard
-  relève l'état d'avant de ce qu'elle change (fichier de sysctl ou de sshd posé par Vanguard, réglages du noyau,
-  service, heure réseau, droits d'un fichier personnel, valeur du registre, préférence) et le note, scellé, dans
-  reglages.json, comme Optimiser ; chaque valeur est relue sur une liste fermée avant d'être remise en
-  administrateur. « Ce que Vanguard a changé » annule une correction marquée « annulable », puis relit l'état :
-  revenu, ou pas (et pourquoi). Une correction dont l'état d'avant ne se relève pas est dite « non annulable »
-  avant d'être appliquée ; celle qui rallume une protection (pare-feu, antivirus, BitLocker, UAC, SELinux,
-  Gatekeeper) ne se défait jamais. « Tout remettre comme avant » défait maintenant le bilan, Optimiser, Gaming, les
-  blocages et le mode Wi-Fi public, du plus récent au plus ancien, en une demande administrateur. Les réglages de
-  Gaming passent par le même mécanisme : leurs notes de jeux.json, qui n'était pas scellé, sont reprises sans perte.
-- **Annuler ne rouvre jamais ce qu'une correction a fermé.** Une note des fichiers de sysctl et de sshd que
-  Vanguard pose n'est remise que si elle porte les valeurs sûres qu'il y écrit (« ptrace_scope = 0 »,
-  « PermitRootLogin yes » ou un algorithme faible ajouté sont refusés), et leur contenu est montré avant la question ;
-  une note qui viserait l'UAC est refusée sous Windows. jeux.json n'est repris qu'une fois, jamais par-dessus un
-  reglages.json adopté. Les corrections d'un même « [t]out appliquer » qui touchent le même fichier partagent une
-  note : en annuler une les marque toutes défaites. Deux notes sur la même cible défaites ensemble sont toutes deux
-  remises, sans faux ✖. Un service activé mais arrêté est dit non annulable plutôt que faussement remis, et les
-  droits de ~/.ssh corrigés s'annulent.
-- **Vanguard résiste mieux à qui l'attaque lui-même** (campagne d'attaque du 23 oct., 18 faiblesses corrigées, chacune
-  avec son essai). La clé de secours peut révoquer la clé principale volée (« revoque principale » à la fin du
-  manifeste, que les 0.85 lisent toujours) : retenue dans l'état scellé, la principale n'est plus jamais acceptée, et
-  la plus haute version vue repart. Le programme Mac signé ne vient que d'une compilation de master, sans cache. En
-  root, un programme posé dans un dossier modifiable par d'autres n'est plus remplacé. Les fichiers d'état ne se
-  lisent que s'ils sont de simples fichiers de taille bornée (un tube nommé figeait la surveillance pour toujours) ;
-  effacés avec les sceaux, ils sont « inconnus » et tout est redit, et le bilan dit les sceaux refaits ; le temps
-  réel, son rappel, l'audit, les sites et la passerelle déjà signalés sont scellés (une coupure posée par un autre
-  programme ne coupe plus rien) ; un fichier critique rechangé est renotifié ; l'écriture ne suit plus de lien, et
-  root n'écrit plus dans le dossier d'un compte. Annuler un blocage ne rejoue plus jamais une commande relue du relevé
-  : elle est refaite depuis l'adresse, le port ou la valeur notés. La clé USB : son menu Ventoy et ses images ISO (par
-  leur taille) entrent dans le manifeste, et une clé reconnue dont le numéro de série a changé est signalée. Réseau
-  local : l'UPnP n'est lu qu'à la passerelle (un appareil qui se dit box est signalé), jamais vers cette machine ni un
-  autre hôte, et l'écoute continue après un datagramme trop gros ; le DNS est aussi éprouvé sur des noms tirés au
-  hasard. La liste de MalwareBazaar ne se décompresse que jusqu'à sa taille annoncée, et le journal de sshd ne compte
-  que les lignes écrites par root. Une seconde passe contre ces corrections en a refermé les contournements : une clé
-  VANGUARD sans référence, là où d'autres clés ont la leur, est un avertissement moyen (changer aussi son jeton ne la
-  ramène plus à une information), et seule une référence qui porte son jeton l'accuse d'un identifiant changé (un
-  identifiant illisible n'accuse plus rien) ; une 0.85 mise à jour n'a plus l'air de sceaux effacés, et effacer avec
-  eux l'historique ne fait plus un premier passage ; l'heure du dernier regard sur Téléchargements et les menaces non
-  bloquées déjà signalées sont scellées ; annuler ne remet plus qu'une copie de réglages de Claude Code faite par
-  Vanguard ; « remettre comme avant » les réglages pour jouer ne réécrit en root que ce que Vanguard met dans /etc ;
-  la quarantaine ne suit plus de lien et root n'y écrit plus dans le dossier d'un compte ; l'écoute UPnP ne compte
-  plus les datagrammes trop gros ; l'export de ThreatFox est borné comme la liste de MalwareBazaar ; et une étiquette
-  nommée master ne reprend plus de cache sur le Mac.
+  un blocage ne peut plus être noté sans son relevé. Le tableau de bord et les traces d'incident lisent ce journal (et
+  l'ancien, qu'une version d'avant écrit encore) ; une faille du catalogue KEV y est critique. Il se lit borné en tout
+  (mois, octets, événements), les plus récents d'abord, et dit ce qu'il n'a pas lu. Une chaîne rompue est dite au
+  bilan ; des fichiers posés aux noms de mois à venir (2099…) n'y comptent pas, ne sont ni suivis par l'écriture ni
+  comptés par l'élagage, ne font plus sortir le vrai mois en cours de la lecture et des traces, et sont dits ; une
+  horloge en avance ne vide pas l'historique, et un mois plein refuse d'écrire plutôt que de devenir illisible. Les
+  logiciels espions, les logiciels pas à jour et le courriel suspect rendent un résultat (`--json`), gardé pour le
+  rapport (« Derniers examens des outils ») et scellé : un « rien trouvé » réécrit hors de Vanguard se montre non
+  vérifié, jamais vert. Les erreurs du blocage, de la quarantaine et des versions vues ont un code stable.
+- **La preuve avant le geste, et ce que Vanguard a fait dans les traces.** Avant d'arrêter un programme, de mettre un
+  fichier en quarantaine ou de bloquer une adresse, y compris tout seul la nuit, Vanguard relève ce que le geste va
+  effacer : le programme, sa ligne de commande, son parent, son compte, l'empreinte SHA-256 du fichier, les connexions
+  en cours. Ce qui ne se lit pas est noté « impossible (raison) », et le blocage se fait quand même ; sous Windows, le
+  relevé n'attend pas WMI plus de 3 secondes avant l'arrêt, et un numéro de processus repris n'est pas décrit. La
+  preuve est gardée avec le blocage (« Ce que Vanguard a changé » la résume) ; la quarantaine garde l'empreinte de
+  chaque fichier. « vanguard traces » reprend enfin ce que Vanguard a vu et fait (07-vanguard.txt) : ses alertes, ses
+  blocages et quarantaines avec leur preuve, et des fils qui relient l'alerte, la preuve et le geste d'un même
+  programme ou d'une même adresse ; ces repères entrent dans la chronologie, et les fichiers d'état de Vanguard sont
+  recopiés tels quels pour que le MANIFESTE les couvre. Un fichier supprimé du menu Quarantaine, ou après une analyse
+  de ClamAV, s'y lit « supprimé », avec son empreinte relevée ; les traces lancées avec sudo lisent les données du
+  compte qui les a lancées, et un tube nommé ou un lien à la place d'un fichier d'état ne les bloque plus. Une seule
+  voie mène à la quarantaine : celle de l'antivirus et de YARA est désormais notée et s'annule par « vanguard blocage
+  annuler », comme celle du blocage ; elle ne suit plus de lien, et root n'y écrit plus dans le dossier d'un compte.
+  Le même fichier téléchargé de nouveau après une quarantaine est reproposé au blocage. Le veilleur juge les
+  programmes par les mêmes sources que le blocage : il reconnaît aussi les empreintes connues de MalwareBazaar (celles
+  des dernières 48 heures, la liste complète ne tenant pas dans sa mémoire), et ne reste plus pris sur un fichier qui
+  ne répond pas (non haché, dit non vérifié). Installer ClamAV ou un outil tiers est noté comme toute correction.
+- **« C'est normal » pour la surveillance, le veilleur et le blocage.** Une alerte qui revient sans raison (un outil
+  de développement lancé depuis /tmp, un appareil connu) se déclare normale pour 90 jours dans Ce que Vanguard a
+  appris, et une menace proposée au blocage par « i ». Le choix porte sur ce dont parle l'alerte (le programme, avec
+  sa raison et son script, l'adresse, l'appareil), pas sur son texte : déclarer python3 normal pour une commande qui
+  télécharge ne fait pas taire python3 qui lance autre chose. Il s'oublie au même endroit. Une alerte n'est proposée
+  que si son genre est celui de sa clé, et ce qu'elle désigne est montré avant de choisir ; une menace certaine, et
+  l'alerte de son blocage, ne se taisent jamais. La liste est scellée : changée hors de Vanguard, elle ne fait rien
+  taire.
 - **Un problème reconnu à sa règle et à son objet, plus à son texte traduit.** Les ports ouverts, les lancements
   automatiques suspects, les extensions de navigateur, les comptes oubliés ou ajoutés aux administrateurs, les
   logiciels espions, la prise de contrôle à distance, les logiciels périmés et le carnet de la clé VANGUARD portent
   maintenant une clé (« LNX-RES-001|port:8080/tcp:python3 ») : changer de langue ne fait plus revenir une alerte
   déclarée normale, ne fait plus voir de « nouveau » problème dans l'historique et ne renotifie rien dans la
   surveillance. Les choix d'avant sont retrouvés par leur texte puis complétés de leur clé ; un choix ne vaut que pour
-  son objet (un autre programme sur le même port, une autre version périmée reviennent). Sous macOS, un agent de
-  démarrage est reconnu à son fichier et à ce qu'il lance, sous Linux chaque ligne de lancement suspecte à son
-  empreinte : une commande réécrite ou une ligne ajoutée dans un fichier déjà signalé n'est jamais tue par un choix
-  d'avant. Un seul choix par clé, le plus récent. La surveillance renotifie une alerte qui s'aggrave sans changer de
-  clé (une extension qui gagne l'accès à tous les sites) ; l'historique ne montre plus « réglé » puis « nouveau » pour
-  un logiciel dont la version change sans être à jour. L'inventaire des fichiers d'état gagne le carnet des appareils,
-  ses verrous, la reprise d'une version d'avant et le dossier des traces, et son test lit aussi les variables du
-  dossier de données. L'historique garde sa première empreinte telle quelle et en gagne une seconde, qui couvre les
-  clés et les notes de l'audit du réseau : une clé n'est jamais hors d'une empreinte, et un bilan sans elle est dit
-  non vérifié, comparé sur son texte. Le JSON du bilan gagne `objet`, `cle` et `etat` (sain, sans objet, non vérifié
-  avec sa raison, problème).
+  son objet (un autre programme sur le même port, une autre version périmée reviennent), et un seul choix par clé
+  compte, le plus récent. Sous macOS, un agent de démarrage est reconnu à son fichier et à ce qu'il lance, sous Linux
+  chaque ligne de lancement suspecte à son empreinte : une commande réécrite ou une ligne ajoutée dans un fichier déjà
+  signalé n'est jamais tue par un choix d'avant. La surveillance renotifie une alerte qui s'aggrave sans changer de
+  clé (une extension qui gagne l'accès à tous les sites). L'historique garde sa première empreinte telle quelle et en
+  gagne une seconde, qui couvre les clés et les notes de l'audit du réseau : une clé n'est jamais hors d'une
+  empreinte, et un bilan sans elle est dit non vérifié, comparé sur son texte. Le JSON du bilan gagne `objet`, `cle`
+  et `etat` (sain, sans objet, non vérifié avec sa raison, problème). L'inventaire des fichiers d'état gagne le carnet
+  des appareils, ses verrous, la reprise d'une version d'avant et le dossier des traces, et son test lit aussi les
+  variables du dossier de données.
 - **Une règle qui ne rend rien dit « non vérifié », jamais un silence lu comme sain** (hors d'une liste de règles
   tolérées, qui ne peut que rétrécir). Le Wi-Fi n'est plus tu quand NetworkManager manque (iwd, systemd-networkd) :
-  sans carte, « rien à juger » ; avec une carte, non vérifié. Sous Windows, un réseau que netsh cache faute
-  d'autorisation de localisation est dit non vérifié ; sous macOS, le mode furtif illisible et la session à distance
-  aussi. Seule la lecture du pare-feu lui-même décide si la note tient : le mode furtif illisible ne la retire plus à
-  lui seul. Sans NetworkManager, une liste des cartes réseau illisible (/sys/class/net) donne « non vérifié », jamais
-  « pas de carte Wi-Fi ». Un constat « sans objet » ne compte plus parmi les vérifications pour la fiabilité de la
-  note. `vanguard regles` montre aussi les règles de l'audit du réseau et les outils : un seul registre
-  d'identifiants, vérifié par les tests, avec l'inventaire des fichiers d'état dont les sceaux tirent la liste à
-  protéger.
-- **La preuve avant le geste, et ce que Vanguard a fait dans les traces.** Avant d'arrêter un programme, de mettre un
-  fichier en quarantaine ou de bloquer une adresse, y compris tout seul la nuit, Vanguard relève ce que le geste va
-  effacer : le programme, sa ligne de commande, son parent, son compte, l'empreinte SHA-256 du fichier, les connexions
-  en cours. Ce qui ne se lit pas est noté « impossible (raison) », et le blocage se fait quand même. La preuve est
-  gardée avec le blocage (« Ce que Vanguard a changé » la résume) ; la quarantaine garde l'empreinte de chaque
-  fichier. « vanguard traces » reprend enfin ce que Vanguard a vu et fait (07-vanguard.txt) : ses alertes, ses
-  blocages et quarantaines avec leur preuve, et des fils qui relient l'alerte, la preuve et le geste d'un même
-  programme ou d'une même adresse ; ces repères entrent dans la chronologie, et les fichiers d'état de Vanguard sont
-  recopiés tels quels pour que le MANIFESTE les couvre. Une seule voie mène à la quarantaine : celle de l'antivirus et
-  de YARA est désormais notée et s'annule par « vanguard blocage annuler », comme celle du blocage. Le veilleur juge
-  les programmes par les mêmes sources que le blocage : il reconnaît aussi les empreintes connues de MalwareBazaar
-  (celles des dernières 48 heures, la liste complète ne tenant pas dans sa mémoire). Installer ClamAV ou un outil
-  tiers est noté comme toute correction.
-  **« C'est normal » pour la surveillance, le veilleur et le blocage.** Une alerte qui revient sans raison (un outil
-  de développement lancé depuis /tmp, un appareil connu) se déclare normale pour 90 jours dans Ce que Vanguard a
-  appris, et une menace proposée au blocage par « i ». Le choix porte sur ce dont parle l'alerte (le programme,
-  l'adresse, l'appareil), pas sur son texte, et s'oublie au même endroit. La liste est scellée : changée hors de
-  Vanguard, elle ne fait rien taire.
-  **Les valeurs d'avant d'Optimiser sont scellées et vérifiées.** reglages.json, dont les valeurs sont remises en
-  administrateur pour annuler un réglage, est scellé comme l'état de Vanguard : réécrit par un autre programme, il
-  n'est plus cru (il est mis de côté, intact, et rien n'en est remis). Chaque valeur est aussi vérifiée à la remise :
-  un état de service connu, un booléen, un nombre, des adresses IP, un mot simple ; une valeur d'une autre forme fait
-  revenir celle d'un système neuf, écrite dans le programme.
-  **Relu et resserré avant la sortie.** « C'est normal » ne fait plus taire une menace certaine, et l'alerte de son
-  blocage n'est jamais tue ; il retient la raison et le script d'un programme (déclarer python3 normal pour une
-  commande qui télécharge ne fait plus taire python3 qui lance autre chose) ; une alerte n'est proposée que si son
-  genre est celui de sa clé, et ce qu'elle désigne est montré avant de choisir. Un reglages.json accepté sans sceau
-  n'est plus rescellé à la lecture : le bilan continue de le dire. Le même fichier téléchargé de nouveau après une
-  quarantaine est reproposé au blocage. Un fichier supprimé du menu Quarantaine, ou après une analyse de ClamAV, se lit
-  « supprimé » dans les traces, avec son empreinte relevée. Les traces lancées avec sudo lisent les données du compte
-  qui les a lancées, et un tube nommé ou un lien à la place d'un fichier d'état ne les bloque plus. Le veilleur ne
-  reste plus pris sur un fichier qui ne répond pas (non haché, dit non vérifié) ; sous Windows, le relevé n'attend
-  plus WMI plus de 3 secondes avant l'arrêt ; un numéro de processus repris n'est plus décrit dans la preuve.
-- **Mode Wi-Fi public** (`vanguard wifi-public`, Réseau et Internet › Mode Wi-Fi public). On l'allume en arrivant dans
-  un café, un hôtel ou un aéroport, on l'éteint en partant : l'ordinateur n'accepte plus aucune connexion venue de ce
-  réseau (une session SSH déjà ouverte reste), le partage de fichiers et l'annonce de son nom sont coupés (sous macOS,
-  le pare-feu ferme le partage ; Bonjour et AirDrop restent), et le DNS passe au Bouclier canadien « Protégé »,
-  chiffré sous Linux quand systemd-resolved répond (un résolveur sur l'ordinateur, comme NextDNS, ou un DNS déjà
-  chiffré et filtrant, est gardé). Les entrées qui n'ont pas pu être fermées (pas de nft, pare-feu illisible) sont
-  dites au menu et au bilan, jamais « tout est en place ». Sous Linux, une table nftables à part et des services
-  masqués jusqu'au redémarrage, puis mDNS, LLMNR et le DNS chiffré sur le seul profil du réseau public ; sous Windows,
-  catégorie Public, profil Public du pare-feu fermé aux entrées, NetBIOS coupé, en une seule demande
-  d'administrateur ; sous macOS, pare-feu en « tout bloquer » et mode furtif. Chaque changement est montré avec sa valeur d'avant,
-  notée et scellée avant la première commande ; l'extinction remet tout dans l'ordre inverse, relu, même après un
-  plantage ou un redémarrage (le menu et le bilan le disent). Un état changé hors de Vanguard n'est jamais remis :
-  extinction sûre à la place, qui ne retire que la table de Vanguard. Un pare-feu trouvé coupé est allumé et jamais
-  recoupé. `vanguard wifi-public portail` rouvre la page de connexion du réseau : le DNS chiffré se relâche jusqu'à
-  Entrée, dix minutes au plus, et le lancement suivant le remet strict si Vanguard a été fermé avant. Rien n'est
-  envoyé pour reconnaître un réseau public : une suggestion seulement. Essayé sous Linux (table posée puis retirée
-  dans un espace de noms à part, aperçus) ; Windows et macOS : compilés et testés en partie, pas encore essayés sur un
-  vrai système, ni le DNS chiffré sur un vrai réseau public.
-
+  sans carte, « rien à juger » ; avec une carte, non vérifié ; une liste des cartes réseau illisible (/sys/class/net)
+  donne « non vérifié », jamais « pas de carte Wi-Fi ». Sous Windows, un réseau que netsh cache faute d'autorisation
+  de localisation est dit non vérifié ; sous macOS, le mode furtif illisible et la session à distance aussi. Seule la
+  lecture du pare-feu lui-même décide si la note tient : le mode furtif illisible ne la retire plus à lui seul. Un
+  constat « sans objet » ne compte plus parmi les vérifications pour la fiabilité de la note. `vanguard regles` montre
+  aussi les règles de l'audit du réseau et les outils : un seul registre d'identifiants, vérifié par les tests, avec
+  l'inventaire des fichiers d'état dont les sceaux tirent la liste à protéger.
+- **Nouvelles règles du bilan : SSH et Defender sous Windows, mots de passe, démarrage et persistance sous macOS, une
+  référence et un délai par règle.** Windows gagne le serveur OpenSSH (service, configuration de %ProgramData%\ssh,
+  connexion par mot de passe, droits de administrators_authorized_keys, lus en Rust : registre, WMI, fichiers et leurs
+  droits) et les clés de %USERPROFILE%\.ssh (sans phrase de passe, lisibles par d'autres), WIN-SSH-001 et 002. Un
+  serveur désinstallé dont la configuration est restée est sans objet ; administrators_authorized_keys ouvert est
+  moyen quand StrictModes (par défaut) le fait refuser, critique sans lui, et ses fichiers sont bornés avant d'être
+  lus. Le bilan relit les protections de Defender que « durcir » active (règles ASR, protection réseau, PUA, dossiers
+  contrôlés, WIN-ANV-003) : une protection posée par Vanguard (Optimiser ou une correction du bilan) puis coupée est
+  une alerte élevée ; les blocages de base, la protection réseau et PUA sont proposés, chaque correction annulable ;
+  rien n'est dit « qui bloque » quand la protection en temps réel est coupée, ni sain quand rien ne bloque. macOS
+  gagne la règle des mots de passe et le blocage des comptes (pwpolicy, MAC-CPT-002), la sécurité du démarrage (bputil
+  ou puce T2, MAC-DEM-001), les éléments d'ouverture et de fond (sfltool, en administrateur, MAC-PRS-002), les
+  crochets de connexion et les extensions d'autorisation (MAC-PRS-003) ; les réglages de root illisibles sans sudo
+  rendent le crochet de connexion non vérifié, jamais « aucun crochet ». Les règles fourre-tout sont scindées : le
+  durcissement de Windows en cinq (WIN-DUR-001 à 005), plus Windows Update coupé ou en pause (WIN-MAJ-003) et la
+  session ouverte toute seule (WIN-SES-002) ; les réglages sysctl en trois (LNX-NOY-003, LNX-NOY-007, LNX-RES-003),
+  dont les corrections s'ajoutent au fichier au lieu de se réécrire l'une l'autre. Un choix « c'est normal » sur
+  l'ancienne alerte groupée du noyau Linux vaut pour les trois nouvelles ; au premier bilan après la mise à jour,
+  l'historique peut encore la montrer réglée puis nouvelle. Chaque règle de la machine cite au moins une référence du
+  CIS, de Microsoft ou de l'ANSSI (exigé par un test pour les trois systèmes), donnée aussi dans le JSON du bilan
+  (« reference »). Un inventaire des logiciels, gardé scellé sur l'ordinateur et jamais envoyé, dit pendant une
+  semaine chaque logiciel installé depuis le dernier bilan (COM-LOG-001) : effacé ou changé hors de Vanguard, il ne
+  tait plus ce qui s'est installé entre-temps (tout est redit) ; une mise à jour dont le nom affiché porte la version
+  (« Outil 1.3 (x64) ») n'est plus un nouveau logiciel ; une source qui ne se lit pas (Flatpak muet, ~/Applications
+  illisible) ou une borne atteinte (sous-clés, entrées d'un dossier, 20 000 logiciels, clés sans nom en nombre) rend
+  le bilan non vérifié au lieu de faire oublier des logiciels ou de les tronquer en silence ; les logiciels des autres
+  sessions Windows ouvertes ne comptent plus. Enfin, chaque règle a son délai (10 min, 30 pour les mises à jour) :
+  celle qui le dépasse est dite non vérifiée, les autres continuent. Rien de cela n'a encore tourné sur un vrai
+  Windows ni sur un vrai Mac : tests sous Wine, clippy pour macOS.
+- **Chaîne de confiance des mises à jour.** Une clé de secours, gardée hors ligne et chiffrée dès sa création, signe
+  aussi les versions : la principale perdue ou volée, la mise à jour continue, et la clé de secours peut révoquer la
+  principale (« revoque principale » à la fin du manifeste, qui reste lisible par les 0.85) ; retenue dans l'état
+  scellé, la principale n'est alors plus jamais acceptée, et la plus haute version vue repart. La clé principale peut
+  être chiffrée, sa phrase demandée une fois par publication (`outils/signer-versions.sh`, `--secours`, qui refuse une
+  clé de secours en clair). Vanguard retient la plus haute version signée déjà vue et refuse un manifeste plus vieux ;
+  une dernière version signée de plus de 45 jours, une horloge en retard qui ferait passer un vieux manifeste pour
+  frais, ou une copie d'ici plus récente que la dernière version signée sur GitHub (un ancien manifeste a pu être
+  remis en place) ne sont plus dites « à jour » ni « rien de plus récent », mais non vérifiées. Le programme macOS ne
+  vient que d'une compilation de master, sans cache (une étiquette nommée master n'en reprend pas), et il est contrôlé
+  avant d'être signé (commit, empreinte du journal de sa compilation, Mach-O universel, version). La copie locale de
+  la surveillance passe par la mise à jour (jamais vers une version plus ancienne), et une nouvelle copie est essayée
+  avant de remplacer l'ancienne (Linux et macOS) ; en root, un programme posé dans un dossier modifiable par d'autres
+  n'est plus remplacé. Historique signé des versions : `vanguard verifier-moi [programme]` vérifie aussi une copie qui
+  n'est plus la dernière, sans rien changer pour les copies déjà installées ; lancé sans terminal, il ne pose plus la
+  question de l'historique, qui quittait avant l'avertissement final, et la 0.85 n'est plus dite absente de
+  l'historique.
+- **État de Vanguard scellé.** `appris.json`, `integrite.json`, `surveillance-botnets.txt`, les versions déjà vues,
+  l'état de la machine au dernier passage de la surveillance, les changements déjà signalés par la surveillance
+  d'intégrité, le temps réel et son rappel, l'audit, les sites et la passerelle déjà signalés, l'heure du dernier
+  regard sur Téléchargements et les menaces non bloquées déjà signalées portent une empreinte BLAKE3 : changés hors de
+  Vanguard (par un programme qui voudrait faire taire son alerte, ou couper la protection), ils ne comptent plus et le
+  bilan le dit (COM-ETA-001) ; abîmés, ils ne font jamais taire une alerte. Ils ne se lisent que s'ils sont de simples
+  fichiers de taille bornée (un tube nommé figeait la surveillance pour toujours) ; l'écriture ne suit plus de lien,
+  et root n'écrit plus dans le dossier d'un compte. `sceaux.json` effacé ne fait plus accepter les fichiers d'état
+  tels quels : ils restent « adoptés », dits au bilan, et les versions déjà vues ne sont alors pas crues ; la
+  référence d'intégrité adoptée sert encore à comparer et reste signalée tant qu'elle n'est pas acceptée (un écart
+  avec elle reste un écart, et le passage de version ne coupe pas la surveillance), jamais refaite sans accord.
+  Effacés avec les sceaux, les fichiers d'état sont « inconnus » et tout est redit, et le bilan dit les sceaux
+  refaits ; effacer l'historique en même temps ne fait plus un premier passage, et une 0.85 mise à jour n'a pas l'air
+  de sceaux effacés. Un fichier critique rechangé est renotifié.
+- **Deux campagnes d'attaque contre Vanguard lui-même**, le 23 octobre : 18 faiblesses corrigées par la première, puis
+  10 contournements et régressions de ces corrections, et 12 par la seconde, chacune avec son essai. Celles qui
+  touchent un sujet ci-dessus y sont décrites ; voici les autres. La clé USB : son menu Ventoy et ses images ISO (par
+  leur taille) entrent dans le manifeste ; une clé reconnue dont le numéro de série a changé est signalée, une clé
+  VANGUARD sans référence, là où d'autres clés ont la leur, est un avertissement moyen (changer aussi son jeton ne la
+  ramène plus à une information), et seule une référence qui porte son jeton l'accuse d'un identifiant changé (un
+  identifiant illisible n'accuse plus rien). Réseau local : l'UPnP n'est lu qu'à la passerelle (un appareil qui se dit
+  box est signalé), jamais vers cette machine ni un autre hôte, et l'écoute continue après un datagramme trop gros,
+  sans le compter ; le DNS est aussi éprouvé sur des noms tirés au hasard. La liste de MalwareBazaar ne se décompresse
+  que jusqu'à sa taille annoncée, l'export de ThreatFox est borné de même, et le journal de sshd ne compte que les
+  lignes écrites par root. Le nom d'une pièce jointe d'un courriel suspect passe filtré (caractères de direction,
+  contrôles) dans le résultat, le journal et le rapport, comme tout message écrit d'un constat. La veille de nuit ne
+  dépose plus dans la VM le programme d'une branche écrite par l'IA (à lancer après relecture,
+  `vm-tester.sh --branche`), et ne transmet plus à l'IA qui corrige que le sujet, le fichier et la ligne d'une
+  proposition.
 - **Petits correctifs de sûreté.** Sous Windows, les programmes du système (netstat, netsh, powercfg, wevtutil,
   tasklist, schtasks, ipconfig, cmd, PowerShell…) sont lancés par leur chemin dans System32, demandé à Windows
   lui-même : un faux programme du même nom posé à côté de Vanguard (Téléchargements) ou dans le dossier courant ne
   peut plus cacher un port, un processus ou un réglage ; cmd ne cherche plus dans son dossier courant, et un test
-  refuse tout nouveau lancement par le seul nom. La liste des pilotes vulnérables (LOLDrivers) n'est remplacée que
-  par une réponse qui en est bien une : une page d'erreur ne coupe plus la vérification une semaine. Sous macOS,
-  l'empreinte d'un téléchargement est calculée en Rust, sans md5 ni shasum, et le Bilan de confidentialité lit la
-  base des autorisations par le lecteur SQLite de Vanguard, sans /usr/bin/sqlite3. Nettoyer : « Paquets
-  téléchargés » n'est plus recommandé sans paccache, et dit qu'il efface de quoi revenir en arrière. Le menu,
-  `--help` et le lanceur reprennent l'accroche de la vitrine (« Cyberdéfense portable des postes et des réseaux »).
-  Du code mort retiré et des dépendances allégées (une crate de moins sous Windows, moins de fonctions compilées
-  pour reqwest, tokio et futures) : 9 à 14 bibliothèques de moins selon le système.
-
-- **Logiciels espions.** `vanguard logiciels-espions` (alias `spyware` ; menu Antivirus et protection, en dernier)
-  cherche les signes d'un logiciel espion posé par un proche : connexions en cours et noms demandés récemment vers les
-  serveurs et sites des logiciels espions connus (liste de l'association Échap, CC-BY 4.0, téléchargée à l'usage et
-  gardée un jour, jamais intégrée), logiciels de surveillance connus installés ou en marche (FlexiSPY, Spyrix, Refog,
-  Ardamax… ; contrôle parental et surveillance d'employés dits normaux s'ils ont été installés exprès), programmes qui
-  lisent le clavier (Linux : /dev/input ; reconnus : compositeur, remappage, Steam, OBS), autorisations Surveillance de
-  l'entrée, Accessibilité et Enregistrement de l'écran (macOS, lues par un lecteur SQLite écrit pour Vanguard). Tout
-  est lu en Rust, sans commande externe. Lecture seule : rien n'est retiré, car celui qui l'a posé pourrait le voir ;
-  l'écran dit de garder des captures et de demander de l'aide d'abord. Ce qui n'a pas pu être vérifié est compté, et
-  le verdict n'est jamais « aucun logiciel espion ». Au bilan aussi, sans réseau.
-- **Logiciels pas à jour.** `vanguard logiciels-perimes` (alias `outdated-software` ; menu Antivirus et protection, en
-  dernier ; au bilan sous Windows et macOS) compare la version installée des navigateurs (Chrome, y compris le canal
-  Extended, Edge, Firefox et ESR, Brave), d'Office, d'Acrobat et Reader, de Java, de 7-Zip, de PuTTY et de Slack à la
-  dernière publiée : fichiers publics des éditeurs, d'endoflife.date et de Homebrew (formula.json, pris sous Windows
-  aussi pour 7-Zip et PuTTY, dont les formules suivent l'amont), téléchargés en entier une fois par jour, les mêmes pour
-  tous (la liste de tes logiciels ne sort jamais ; Paramètres › Versions des logiciels pour couper). Version lue dans le
-  fichier même (lecteur de la ressource de version des .exe écrit pour Vanguard, Info.plist, dossier du Cellar de
-  Homebrew), tous les comptes en administrateur ; Slack par compte, dans son dossier de version, pas son lanceur.
-  Firefox : chaque faille exploitée du catalogue de la CISA vérifiée contre ta version (avis de sécurité de Mozilla) ;
-  Edge Stable de même, d'après les failles que Microsoft dit corrigées par chaque version ; une version antérieure au
-  correctif est critique. Les autres : le nombre de failles exploitées du produit au catalogue, sans conclure pour ta
-  version (Slack embarque Chromium, mais ses failles ne se reportent pas sur lui). Ce qui n'a pas de source (Edge
-  Extended Stable, Acrobat 2020 et 2024, App Store) est dit non vérifié, comme une réponse de Slack d'une forme
-  inattendue (son API n'est pas documentée), une formule de Homebrew désactivée ou obsolète, ou une liste de failles
-  d'Edge d'une autre forme ; un navigateur qui ne se compare pas garde le contrôle des 60 jours sans mise à jour, qui
-  quitte la fin de support. Sous Linux, la commande renvoie au gestionnaire de paquets. Le lecteur zip
-  (guide des commandes) écarte une entrée dont le contenu n'a pas la taille annoncée, qui pouvait dépasser sa borne ;
-  gzip et zip passent au banc de fuzzing.
-- **Chaîne de confiance des mises à jour.** Une clé de secours, gardée hors ligne, signe aussi les versions (la
-  principale perdue ou volée, la mise à jour continue) ; la clé principale peut être chiffrée, sa phrase demandée une
-  fois par publication (`outils/signer-versions.sh`, `--secours`). Vanguard retient la plus haute version signée déjà
-  vue et refuse un manifeste plus vieux ; une dernière version signée de plus de 45 jours n'est plus dite « à jour »,
-  mais non vérifiée. Le programme macOS est contrôlé avant d'être signé (commit, empreinte du journal de sa
-  compilation, Mach-O universel, version). La copie locale de la surveillance passe par la mise à jour (jamais vers
-  une version plus ancienne), et une nouvelle copie est essayée avant de remplacer l'ancienne (Linux et macOS).
-- **État de Vanguard scellé.** `appris.json`, `integrite.json`, `surveillance-botnets.txt` et les versions déjà
-  vues portent une empreinte BLAKE3 : changés hors de Vanguard (par un programme qui voudrait faire taire son
-  alerte), ils ne comptent plus et le bilan le dit (COM-ETA-001) ; abîmés, ils ne font jamais taire une alerte.
-- **Chaîne de confiance, seconde relecture.** Une copie d'ici plus récente que la dernière version signée sur GitHub
-  (passée par la clé) n'affiche plus « rien de plus récent » mais « non vérifié » : un ancien manifeste a pu être
-  remis en place. Une horloge en retard ne fait plus passer un vieux manifeste pour frais : « non vérifié ».
-  `sceaux.json` effacé ne fait plus accepter en silence les fichiers d'état tels quels : ils restent « adoptés »,
-  dits au bilan (COM-ETA-001), et les versions déjà vues ne sont alors pas crues ; la référence d'intégrité sert
-  encore à comparer (un écart avec elle reste un écart, et le passage de version ne coupe pas la surveillance),
-  jamais refaite sans accord.
-  L'état de la machine au dernier passage de la surveillance et la liste des changements déjà signalés par la
-  surveillance d'intégrité sont scellés à leur tour. `signer-versions.sh --secours` refuse une clé de secours en
-  clair.
-- **CI.** `/dev/root` lu par son numéro comme findmnt, liens d'activation d'unités systemd disparues écartés comme
-  systemctl, borne de temps du client HTTP local adaptée à Windows ; `claude-journal.yml` en analyse seule.
-- **Qualité et livraison.** `outils/verifier.sh` compile le banc de fuzzing et passe quelques secondes sur chaque
-  cible (deux de plus : le lecteur SQLite et la liste YAML d'Échap) ; la CI y passe cinq minutes par cible chaque
-  nuit. Les tests qui ne peuvent pas tourner sur un ordinateur (outil absent, root d'un espace de noms) se disent «
-  sautés » : `verifier.sh` les compte à côté des tests passés et en donne les raisons. La vérification des textes et
-  un essai des menus au clavier, dans un vrai pseudo-terminal, sont dans le dépôt. La CI lance `verifier.sh` lui-même
-  (une seule logique), les vraies distributions comptent, Windows tourne à chaque envoi, et le .exe livré (MinGW) est
-  essayé sur un vrai Windows. Une page de version n'est publiée que si la VM a fait tourner ce .exe-là, et un .exe
-  sans son manifeste (UTF-8, asInvoker) ne se compile plus. Une seule table d'outils pour le menu et la ligne de
-  commande, comparée par des tests au README, à `--help`, au mode d'emploi de la clé et au tableau Structure ;
-  `vanguard optimiser` (dont `annuler`) rejoint la ligne de commande, et l'aide du veilleur, des sites dangereux et
-  des dernières failles retrouve sa commande. Historique signé des versions : `vanguard verifier-moi [programme]`
-  vérifie aussi une copie qui n'est plus la dernière, sans rien changer pour les copies déjà installées. Chaîne Rust
-  épinglée (`rust-toolchain.toml`) et recette de compilation commune (`outils/compiler-version.sh`) : deux
-  compilations dans deux dossiers donnent le même programme. Extensions : isolement sous macOS aussi (sandbox-exec),
-  et auteur vérifié par une signature Ed25519 du dossier, dont la clé est retenue à l'approbation. Programme de test
-  Windows ramené de 520 à 314 Mo. Un vert qui n'a rien vérifié ne passe plus : sous `verifier.sh --seulement` (l'audit
-  de nuit de la CI), une étape sautée ou non lancée échoue et un nom d'étape inconnu est refusé
-  (`outils/essais-verifier.sh` l'essaie) ; les tests sautés sur le vrai Windows et le Mac de la CI y sont comptés et
-  montrés ; un banc de fuzzing sans cible échoue ; sans `.github/hors-code.txt`, la nuit teste Windows et le Mac au
-  lieu de les sauter. Un téléchargement raté de l'historique signé d'avant ne le remet plus à zéro avant d'effacer les
-  pages d'avant : rien n'est signé ni publié (`signer-versions.sh --premier` pour la toute première fois). `vanguard
-  verifier-moi` lancé sans terminal ne pose plus la question de l'historique, qui quittait avant l'avertissement
-  final, et la 0.85 n'est plus dite absente de l'historique. Isolement sous macOS : ni `open`, ni Apple Events, ni
-  presse-papiers, ni disques branchés (/Volumes), par où une extension sortait du bac à sable (profil non vérifié sur
-  un Mac).
+  refuse tout nouveau lancement par le seul nom. La liste des pilotes vulnérables (LOLDrivers) n'est remplacée que par
+  une réponse qui en est bien une : une page d'erreur ne coupe plus la vérification une semaine. Sous macOS,
+  l'empreinte d'un téléchargement est calculée en Rust, sans md5 ni shasum, et le Bilan de confidentialité lit la base
+  des autorisations par le lecteur SQLite de Vanguard, sans /usr/bin/sqlite3. Nettoyer : « Paquets téléchargés » n'est
+  plus recommandé sans paccache, et dit qu'il efface de quoi revenir en arrière. Le menu, `--help` et le lanceur
+  reprennent l'accroche de la vitrine (« Cyberdéfense portable des postes et des réseaux »). Du code mort retiré et
+  des dépendances allégées (une crate de moins sous Windows, moins de fonctions compilées pour reqwest, tokio et
+  futures) : 9 à 14 bibliothèques de moins selon le système.
 - **Socle commun, sans doublons.** Ce que tout Vanguard partage vit dans `src/socle/`, une fois, testé une fois :
   dossier de Vanguard, écriture atomique et verrou (sortis du module réseau), cache des listes téléchargées (sorti
   d'abuse.ch), portée d'une adresse IP selon les RFC, dossier personnel, processus de Linux et macOS, JSON avec
   commentaires, os-release, empreintes ; l'inventaire des paquets quitte Gaming pour `machine/linux/paquets.rs`, et
   `sha1_smol` et le MD5 écrit à la main laissent la place à sha1 et md-5 de RustCrypto, déjà liés par YARA-X (aucune
   crate de plus). Des copies étaient fausses : une tentative SSH notée « ::ffff:192.168.1.5 » passait pour venue
-  d'Internet ; une stratégie de Chrome avec « 1, // commentaire » devant « } » était dite illisible ; un paquet
-  retenu (« hold ») n'avait pas de version ; un dossier ou un fichier non exécutable du même nom passait pour un
-  programme installé avant une commande sudo ; un HOME vide faisait lire et écrire depuis le dossier courant. /proc
-  illisible n'est plus compté comme vérifié (logiciels espions, lecteurs du clavier, caméra, prise de contrôle à
-  distance), et un /proc monté avec hidepid est dit. Les listes de menaces et tldr s'écrivent par l'écriture
-  atomique (sous Windows, Defender qui tenait l'ancienne copie la laissait en place). Les clés Run se lisent d'une
-  seule façon, la plus sûre : « Quelqu'un contrôle mon ordi ? » et « Logiciels espions » voient aussi RunOnce et
-  les noms mal formés, et « Logiciels espions » dit une clé illisible. Le bilan lit le Wi-Fi par nl80211 et
-  wlanapi, comme l'audit du réseau (nmcli et netsh en secours), et juge les réseaux ouverts enregistrés de la même
-  façon que lui : la protection retenue est celle que Windows a négociée (une borne WPA2/WPA3 jointe en WPA2 reste
-  en WPA2), deux bornes du même nom aux protections différentes sans émetteur connu renvoient à nmcli, et les
-  profils de NetworkManager se lisent aussi dans /run (netplan) et /usr/lib, avec nmcli en secours quand un
-  fichier est refusé.
+  d'Internet ; une stratégie de Chrome avec « 1, // commentaire » devant « } » était dite illisible ; un paquet retenu
+  (« hold ») n'avait pas de version ; un dossier ou un fichier non exécutable du même nom passait pour un programme
+  installé avant une commande sudo ; un HOME vide faisait lire et écrire depuis le dossier courant. /proc illisible
+  n'est plus compté comme vérifié (logiciels espions, lecteurs du clavier, caméra, prise de contrôle à distance), et
+  un /proc monté avec hidepid est dit. Les listes de menaces et tldr s'écrivent par l'écriture atomique (sous Windows,
+  Defender qui tenait l'ancienne copie la laissait en place). Les clés Run se lisent d'une seule façon, la plus sûre :
+  « Quelqu'un contrôle mon ordi ? » et « Logiciels espions » voient aussi RunOnce et les noms mal formés, et
+  « Logiciels espions » dit une clé illisible. Le bilan lit le Wi-Fi par nl80211 et wlanapi, comme l'audit du réseau
+  (nmcli et netsh en secours), et juge les réseaux ouverts enregistrés de la même façon que lui : la protection
+  retenue est celle que Windows a négociée (une borne WPA2/WPA3 jointe en WPA2 reste en WPA2), deux bornes du même nom
+  aux protections différentes sans émetteur connu renvoient à nmcli, et les profils de NetworkManager se lisent aussi
+  dans /run (netplan) et /usr/lib, avec nmcli en secours quand un fichier est refusé.
+- **Qualité et livraison.** `outils/verifier.sh` compile le banc de fuzzing et passe quelques secondes sur chaque
+  cible (deux de plus : le lecteur SQLite et la liste YAML d'Échap) ; la CI y passe cinq minutes par cible chaque
+  nuit, et un banc sans cible échoue. Les tests qui ne peuvent pas tourner sur un ordinateur (outil absent, root d'un
+  espace de noms) se disent « sautés » : `verifier.sh` les compte à côté des tests passés et en donne les raisons, et
+  ceux sautés sur le vrai Windows et le Mac de la CI y sont comptés et montrés. Un vert qui n'a rien vérifié ne passe
+  plus : sous `verifier.sh --seulement` (l'audit de nuit de la CI), une étape sautée ou non lancée échoue et un nom
+  d'étape inconnu est refusé (`outils/essais-verifier.sh` l'essaie). La vérification des textes et un essai des menus
+  au clavier, dans un vrai pseudo-terminal, sont dans le dépôt. La CI lance `verifier.sh` lui-même (une seule
+  logique), les vraies distributions comptent, Windows tourne à chaque envoi, et le .exe livré (MinGW) est essayé sur
+  un vrai Windows ; sans `.github/hors-code.txt`, la nuit teste Windows et le Mac au lieu de les sauter, et chaque
+  nuit, même l'ordinateur de l'auteur éteint, les vraies sources téléchargées sont relues par leur lecteur (canaris de
+  format). CI : `/dev/root` lu par son numéro comme findmnt, liens d'activation d'unités systemd disparues écartés
+  comme systemctl, borne de temps du client HTTP local adaptée à Windows ; `claude-journal.yml` en analyse seule. Une
+  page de version n'est publiée que si la VM a fait tourner ce .exe-là, et un .exe sans son manifeste (UTF-8,
+  asInvoker) ne se compile plus ; un téléchargement raté de l'historique signé d'avant ne le remet plus à zéro avant
+  d'effacer les pages d'avant : rien n'est signé ni publié (`signer-versions.sh --premier` pour la toute première
+  fois). Une seule table d'outils pour le menu et la ligne de commande, comparée par des tests au README, à `--help`,
+  au mode d'emploi de la clé et au tableau Structure ; `vanguard optimiser` (dont `annuler`) rejoint la ligne de
+  commande, et l'aide du veilleur, des sites dangereux et des dernières failles retrouve sa commande. Chaîne Rust
+  épinglée (`rust-toolchain.toml`) et recette de compilation commune (`outils/compiler-version.sh`) : deux
+  compilations dans deux dossiers donnent le même programme. Extensions : isolement sous macOS aussi (sandbox-exec),
+  sans `open`, Apple Events, presse-papiers ni disques branchés (/Volumes), par où une extension sortait du bac à
+  sable (profil non vérifié sur un Mac), et auteur vérifié par une signature Ed25519 du dossier, dont la clé est
+  retenue à l'approbation. Programme de test Windows ramené de 520 à 314 Mo ; essais sans clic dans la VM Windows (une
+  file d'attente, `outils/vm-tester.sh`), menus compris, dans une vraie console. Veille continue (`outils/veille/`) :
+  chaque nuit, sans IA, vérification, fuzzing et sources ; sur alerte seulement, une correction proposée dans une
+  branche à part, jamais fusionnée ni envoyée d'elle-même.
 
 ## 22 octobre 2026, au soir : version 0.85
 
