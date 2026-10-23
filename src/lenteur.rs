@@ -695,7 +695,7 @@ pub fn menu() {
         }
         println!("   {TOUCHE}m{RESET}  {}", tr!("Mesurer de nouveau", "Measure again"));
         println!("   {TOUCHE}↵{RESET}  {}", tr!("Revenir", "Back"));
-        let choix = demander(tr!(
+        let choix = crate::selection::demander_ou_revenir(tr!(
             "\n  Choix (Entrée pour revenir) : ",
             "\n  Choice (Enter to go back): "
         ));

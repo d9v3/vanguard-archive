@@ -589,7 +589,7 @@ pub fn chemin(texte: &str) -> Option<usize> {
 pub fn ouvrir(n: usize) {
     if let Some(p) = n.checked_sub(1).and_then(|i| PARCOURS.get(i)) {
         suivre(p);
-        demander(&trf!(
+        crate::selection::attendre_retour(&trf!(
             "\n{GRIS}Entrée pour revenir…{RESET}",
             "\n{GRIS}Enter to go back…{RESET}"
         ));

@@ -450,7 +450,7 @@ pub fn resume(noms: &[impl AsRef<str>], max: usize, separateur: &str) -> String 
 /// La question telle qu'elle s'affiche : sa dernière ligne, réponse comprise, tient dans `LARGEUR`. Trop longue
 /// (une durée, un nom mis dedans), elle est coupée aux espaces, la suite sous son début ; les espaces de la fin, après
 /// lesquels la réponse se tape, sont gardés. `print!` ne passe pas par `mettre_en_lignes`, comme `trp!`.
-fn question_en_lignes(question: &str) -> String {
+pub(crate) fn question_en_lignes(question: &str) -> String {
     let corps = question.trim_end_matches(' ');
     let fin = &question[corps.len()..];
     let (avant, derniere) = match corps.rsplit_once('\n') {
@@ -493,6 +493,20 @@ fn question_en_lignes(question: &str) -> String {
     }
 }
 
+/// Vrai quand la dernière réponse au clavier a été « revenir » (Échap, ←, Entrée sur une ligne vide d'une question
+/// « Entrée pour revenir », liste à cocher laissée) : l'outil s'arrête alors à la demande, et la pause « Entrée pour
+/// revenir… » du menu serait un appui de trop. Toute autre réponse l'efface.
+static REVENU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn noter_retour(revenu: bool) {
+    REVENU.store(revenu, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// La dernière réponse a-t-elle été « revenir » ? Lu une fois : la réponse est oubliée.
+pub(crate) fn vient_de_revenir() -> bool {
+    REVENU.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Pose une question dans le terminal et retourne la réponse sans espaces autour.
 pub fn demander(question: &str) -> String {
     use std::io::Write;
@@ -505,6 +519,7 @@ pub fn demander(question: &str) -> String {
         println!();
         std::process::exit(0);
     }
+    noter_retour(false);
     s.trim().to_string()
 }
 

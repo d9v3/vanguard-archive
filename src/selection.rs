@@ -419,13 +419,17 @@ impl Drop for ModeClavier {
 /// Échap ou ←. `invite` : la question quand la réponse se lit ligne par ligne. `depart` : la touche de la ligne en
 /// surbrillance au départ (la dernière choisie). `echap` : ce que fait Échap (« revenir », « quitter »).
 pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Option<String> {
-    choisir_ou(lignes, invite, depart, echap, true)
+    let choix = choisir_ou(lignes, invite, depart, echap, true);
+    noter_retour(choix.is_none());
+    choix
 }
 
 /// Le menu principal : ← n'y quitte pas Vanguard (un appui de trop en revenant d'un sous-menu le fermerait), Échap
 /// et « q » si.
 pub fn choisir_au_sommet(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Option<String> {
-    choisir_ou(lignes, invite, depart, echap, false)
+    let choix = choisir_ou(lignes, invite, depart, echap, false);
+    noter_retour(choix.is_none());
+    choix
 }
 
 fn choisir_ou(lignes: &[Ligne], invite: &str, depart: &str, echap: &str, gauche_revient: bool) -> Option<String> {
@@ -693,6 +697,96 @@ fn choisir_ou(lignes: &[Ligne], invite: &str, depart: &str, echap: &str, gauche_
     }
 }
 
+/// Une pause « Entrée pour revenir… » : Entrée, ←, Échap ou Retour arrière reviennent d'un seul appui, comme dans les
+/// menus (une ligne lue au clavier écrivait « ^[[D » pour ←, et il fallait Entrée de plus). Hors d'un terminal, la
+/// ligne est lue comme avant.
+pub fn attendre_retour(question: &str) {
+    let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let mut sortie = std::io::stdout();
+    let _ = write!(sortie, "{}", question_en_lignes(question));
+    let _ = sortie.flush();
+    let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
+        demander("");
+        return;
+    };
+    noter_retour(false);
+    loop {
+        let Ok(Event::Key(k)) = event::read() else {
+            continue;
+        };
+        if k.kind == KeyEventKind::Release {
+            continue;
+        }
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && matches!(k.code, KeyCode::Char('c' | 'd')) {
+            let _ = terminal::disable_raw_mode();
+            println!();
+            std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });
+        }
+        if matches!(
+            k.code,
+            KeyCode::Enter | KeyCode::Left | KeyCode::Esc | KeyCode::Backspace
+        ) || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')))
+        {
+            let _ = sortie.write_all(b"\r\n");
+            return;
+        }
+    }
+}
+
+/// Une question dont la réponse vide revient en arrière (« Choix (Entrée pour revenir) : ») : ← ou Échap, sur une
+/// ligne encore vide, reviennent d'un seul appui, comme Entrée. Le reste se tape comme avant (numéro, lettre, chemin),
+/// corrigé par Retour arrière. Hors d'un terminal, la ligne est lue comme avant.
+pub fn demander_ou_revenir(question: &str) -> String {
+    let reponse = lire_ou_revenir(question);
+    noter_retour(reponse.is_empty());
+    reponse
+}
+
+fn lire_ou_revenir(question: &str) -> String {
+    let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let mut sortie = std::io::stdout();
+    let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
+        return demander(question);
+    };
+    // En mode clavier, le terminal ne revient plus seul au début de la ligne.
+    let _ = write!(sortie, "{}", question_en_lignes(question).replace('\n', "\r\n"));
+    let _ = sortie.flush();
+    let mut tape = String::new();
+    loop {
+        let Ok(Event::Key(k)) = event::read() else {
+            continue;
+        };
+        if k.kind == KeyEventKind::Release {
+            continue;
+        }
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && matches!(k.code, KeyCode::Char('c' | 'd')) {
+            let _ = terminal::disable_raw_mode();
+            println!();
+            std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });
+        }
+        let entree = k.code == KeyCode::Enter || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')));
+        if entree || (tape.is_empty() && matches!(k.code, KeyCode::Left | KeyCode::Esc)) {
+            let _ = sortie.write_all(b"\r\n");
+            return tape.trim().to_string();
+        }
+        match k.code {
+            KeyCode::Backspace => {
+                if tape.pop().is_some() {
+                    let _ = sortie.write_all(b"\x08 \x08");
+                }
+            }
+            KeyCode::Char(c) if !ctrl && !c.is_control() => {
+                tape.push(c);
+                let _ = write!(sortie, "{c}");
+            }
+            _ => continue,
+        }
+        let _ = sortie.flush();
+    }
+}
+
 /// Une ligne de choix d'une liste à cocher.
 pub struct Case {
     pub texte: String,
@@ -732,6 +826,12 @@ fn rendu_case(n: usize, c: &Case, cochee: bool, colonne: usize, en_cours: bool) 
 /// l'état final des cases, ou `None` pour Échap. Sans terminal, les numéros à inverser se tapent sur une ligne
 /// (« 1 4 », « r »), et un mot cherche. Une case `fixe` garde son état.
 pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
+    let etats = cocher_ou_revenir(titre, cases);
+    noter_retour(etats.is_none());
+    etats
+}
+
+fn cocher_ou_revenir(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
     let mut etats: Vec<bool> = cases.iter().map(|c| c.cochee).collect();
     if cases.is_empty() {
         return Some(etats);

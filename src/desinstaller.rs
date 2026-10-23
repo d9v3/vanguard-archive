@@ -1058,6 +1058,8 @@ fn defaire_d_abord(liste: bool) {
                 "↵",
                 tr!("continuer", "continue"),
             ) else {
+                // Échap ou ← continuent ici : la suite s'affiche, la pause du menu doit rester pour la lire.
+                crate::ui::noter_retour(false);
                 break;
             };
             let outils = outils_annulables(&a);
