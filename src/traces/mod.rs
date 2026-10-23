@@ -18,7 +18,7 @@ mod linux;
 mod macos;
 #[cfg(unix)]
 mod unix;
-mod vanguard;
+pub(crate) mod vanguard;
 #[cfg(windows)]
 mod windows;
 

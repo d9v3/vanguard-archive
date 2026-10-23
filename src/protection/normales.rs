@@ -108,8 +108,13 @@ pub(crate) fn cle_blocage(cle: &str) -> String {
 }
 
 /// Retient qu'une alerte est normale ici. `Err` : pourquoi rien n'a été retenu.
-pub(crate) fn declarer(cle: &str, genre: &str, titre: &str, texte: &str) -> Result<(), String> {
-    let mut n = charger().map_err(|r| raison(&r).to_string())?;
+pub(crate) fn declarer(cle: &str, genre: &str, titre: &str, texte: &str) -> Result<(), crate::modele::Echec> {
+    use crate::modele::{Echec, Raison};
+    const OU: &str = "normales/declarer";
+    let mut n = charger().map_err(|r| match r {
+        Refus::Falsifiee => Echec::new(OU, Raison::Falsifie).detail(raison(&r)),
+        Refus::Illisible => Echec::new(OU, Raison::Illisible(raison(&r).to_string())),
+    })?;
     n.alertes.insert(
         cle.to_string(),
         Normale {
@@ -119,7 +124,9 @@ pub(crate) fn declarer(cle: &str, genre: &str, titre: &str, texte: &str) -> Resu
             le: aujourd_hui().format("%Y-%m-%d").to_string(),
         },
     );
-    enregistrer(&n).map_err(|e| e.to_string())
+    enregistrer(&n).map_err(|e| Echec::ecriture(OU, &e))?;
+    noter_au_journal(cle, Some(titre));
+    Ok(())
 }
 
 fn raison(r: &Refus) -> &'static str {
@@ -290,12 +297,15 @@ pub(crate) fn section() {
     if choix.is_empty() {
         return;
     }
+    let mut faits = Vec::new();
     for c in &choix {
         if let Some((cle, _)) = declarees.get(c - 1) {
             n.alertes.remove(cle);
+            faits.push((cle.clone(), None));
         } else if let Some(a) = recentes.get(c - 1 - declarees.len())
             && let Some(cle) = &a.cle
         {
+            faits.push((cle.clone(), Some(a.titre.clone())));
             n.alertes.insert(
                 cle.clone(),
                 Normale {
@@ -308,17 +318,33 @@ pub(crate) fn section() {
         }
     }
     match enregistrer(&n) {
-        Ok(()) => afficher_aligne(
-            &format!("  {VERT}✔{RESET} "),
-            tr!(
-                "Retenu : une alerte normale n'est plus notée ni notifiée (celle du blocage : la menace n'est plus proposée ni bloquée, sauf une menace certaine), une alerte oubliée revient.",
-                "Saved: a normal alert is no longer logged or notified (a blocking one: the threat is no longer offered or blocked, unless it is certain), a forgotten one comes back."
-            ),
-            4,
-            "",
-        ),
+        Ok(()) => {
+            for (cle, titre) in &faits {
+                noter_au_journal(cle, titre.as_deref());
+            }
+            afficher_aligne(
+                &format!("  {VERT}✔{RESET} "),
+                tr!(
+                    "Retenu : une alerte normale n'est plus notée ni notifiée (celle du blocage : la menace n'est plus proposée ni bloquée, sauf une menace certaine), une alerte oubliée revient.",
+                    "Saved: a normal alert is no longer logged or notified (a blocking one: the threat is no longer offered or blocked, unless it is certain), a forgotten one comes back."
+                ),
+                4,
+                "",
+            );
+        }
         Err(e) => trp!("  ✖ Impossible d'enregistrer ({e}).", "  ✖ Could not save ({e})."),
     }
+}
+
+/// Le choix va au journal des événements (`Some(titre)` : déclarée normale ; `None` : oubliée) : une alerte qui
+/// cesse de sonner a sa raison datée, à côté des alertes qu'elle tait.
+fn noter_au_journal(cle: &str, titre: Option<&str>) {
+    use crate::modele::evenement::{Evenement, Genre, Source};
+    let quoi = match titre {
+        Some(t) => Genre::Normale { titre: t.to_string() },
+        None => Genre::NormaleOubliee,
+    };
+    crate::modele::journal::noter(Evenement::nouveau(Source::Utilisateur, quoi).cle(Some(cle)));
 }
 
 #[cfg(test)]
@@ -380,6 +406,7 @@ mod tests {
     #[test]
     fn alertes_recentes_a_declarer() {
         let ligne = |date: &str, cle: Option<&str>| crate::reseau::tableau::Alerte {
+            gravite: None,
             date: date.into(),
             genre: "veilleur".into(),
             titre: "t".into(),
@@ -406,6 +433,7 @@ mod tests {
     #[test]
     fn alerte_dont_le_genre_n_est_pas_celui_de_sa_cle_pas_proposee() {
         let ligne = |genre: &str, cle: &str| crate::reseau::tableau::Alerte {
+            gravite: None,
             date: "2026-10-22 10:00:00".into(),
             genre: genre.into(),
             titre: "Mise à jour de Firefox".into(),

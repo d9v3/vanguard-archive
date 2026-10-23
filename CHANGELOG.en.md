@@ -9,6 +9,17 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **A linked, sealed event log.** Alerts, the evidence recorded before each action, blocks, quarantines and fixes,
+  their undoing, alerts declared normal and version changes go into a single log (evenements/YYYY-MM.jsonl, on this
+  computer only), append-only: each line carries the fingerprint of the previous one, the head is sealed, and so is
+  each closed month, 13 months and 20 MB at most. A removed, changed or added line shows; an end that no longer
+  matches is recorded in the log itself. A botnet server's alert, the evidence, the block and its undoing are linked
+  (`vanguard events --incident <id>`), and a block can no longer be recorded without its evidence. The monitoring
+  dashboard and the incident traces read this log (and the old one, which an earlier version still writes); a flaw
+  from the KEV catalog is critical there. Spyware, outdated software and suspicious email return a result
+  (`--json`), kept for the report (“Latest tool examinations”); errors from blocking, quarantine and the versions
+  seen have a stable code. A broken chain is reported by the security check; neither a future month planted by hand
+  nor a clock running ahead empties the history, and a full month refuses to write rather than become unreadable.
 - **Check-up fixes can be undone, one by one.** Before each fix (Linux, Windows, macOS), Vanguard reads the previous
   state of what it changes (sysctl or sshd file written by Vanguard, kernel settings, service, network time, rights
   of a personal file, registry value, preference) and notes it, sealed, in reglages.json, like Optimize; each value

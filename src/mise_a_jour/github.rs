@@ -319,29 +319,32 @@ pub(super) fn age_jours(v: Version, maintenant: u64) -> Option<u64> {
 
 /// La plus haute version signée déjà vue ici. `Err` : l'état a été changé hors de Vanguard (`sceau`) ou ne se lit
 /// pas ; il ne peut alors ni protéger d'un vieux manifeste, ni être refait en silence.
-fn plus_haute_vue() -> Result<Option<Version>, String> {
+fn plus_haute_vue() -> Result<Option<Version>, crate::modele::Echec> {
     version_vue(crate::sceau::lire(crate::sceau::VERSIONS))
 }
 
 /// La plus haute version déjà vue, d'après ce que les sceaux en disent.
-fn version_vue(lu: crate::sceau::Lecture) -> Result<Option<Version>, String> {
+fn version_vue(lu: crate::sceau::Lecture) -> Result<Option<Version>, crate::modele::Echec> {
+    use crate::modele::{Echec, Raison};
     use crate::sceau::Lecture;
+    const OU: &str = "mise-a-jour/versions-vues";
     match lu {
         Lecture::Absent => Ok(None),
         Lecture::Intact(o) => Ok(std::str::from_utf8(&o).ok().and_then(|t| lire_version(t.trim()))),
         // Adoptées sans sceau d'avant : un plancher baissé juste avant que `sceaux.json` soit effacé ne doit pas
         // laisser passer un vieux manifeste en silence.
-        Lecture::Adopte(_) | Lecture::Inconnu => Err(tr!(
-            "les versions déjà vues ont été acceptées telles quelles, sans sceau d'avant : rien n'est cru",
-            "the versions already seen were accepted as they were, without an earlier seal: nothing is trusted"
-        )
-        .into()),
-        Lecture::Falsifie(_) => Err(tr!(
+        Lecture::Adopte(_) | Lecture::Inconnu => Err(Echec::refuse(
+            OU,
+            tr!(
+                "les versions déjà vues ont été acceptées telles quelles, sans sceau d'avant : rien n'est cru",
+                "the versions already seen were accepted as they were, without an earlier seal: nothing is trusted"
+            ),
+        )),
+        Lecture::Falsifie(_) => Err(Echec::new(OU, Raison::Falsifie).detail(tr!(
             "les versions déjà vues ont été changées hors de Vanguard : rien n'est cru",
             "the versions already seen were changed outside Vanguard: nothing is trusted"
-        )
-        .into()),
-        Lecture::Illisible(e) => Err(e),
+        ))),
+        Lecture::Illisible(e) => Err(Echec::new(OU, Raison::Illisible(e))),
     }
 }
 

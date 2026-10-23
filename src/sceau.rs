@@ -470,7 +470,7 @@ fn juger_refaits(adoptes: &[&str], depuis: &str, aujourd_hui: chrono::NaiveDate)
 }
 
 /// La catégorie du constat.
-const CAT: &str = "État de Vanguard";
+pub(crate) const CAT: &str = "État de Vanguard";
 
 /// Le constat d'après les fichiers falsifiés ; `copie_ancienne` : la copie de cet ordinateur (celle que lancent la
 /// surveillance et l'entretien) est plus ancienne que ce programme, et elle écrit encore ces fichiers sans sceau.

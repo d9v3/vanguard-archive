@@ -74,6 +74,8 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     scelle(sceau::REVOCATION, "mise_a_jour::github"),
     scelle(sceau::TELECHARGEMENTS, "protection::telechargement"),
     scelle(sceau::BLOCAGE_SIGNALEES, "protection::blocage"),
+    // La tête du journal des événements : retirer la fin du journal sans elle se voit.
+    scelle(crate::modele::journal::TETE, "modele::journal"),
     local("sceaux.json", "sceau"),
     local("sceaux.verrou", "sceau"),
     // Historique des bilans : schéma 2 depuis les clés des constats et leur seconde empreinte.
@@ -82,6 +84,9 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
         ..local("historique.json", "historique")
     },
     local("changements.jsonl", "changements"),
+    local(crate::modele::journal::DOSSIER, "modele::journal"),
+    local("evenements.verrou", "modele::journal"),
+    local(crate::modele::resultat::EXAMENS, "modele::resultat"),
     local("parametres.json", "parametres"),
     local("passage-restes", "passage"),
     local("reprise-version-d-avant", "passage"),

@@ -45,6 +45,7 @@ pub(crate) const OUTILS: &[Outil] = &[
     Outil { id: "PRO-LIE-001", module: "protection::lien", sujet: ("lien reçu examiné sans l'ouvrir", "received link examined without opening it") },
     Outil { id: "PRO-COU-001", module: "protection::courriel_suspect", sujet: ("courriel suspect lu comme une donnée", "suspicious email read as data") },
     Outil { id: "PRO-ESP-001", module: "protection::espions", sujet: ("signes d'un logiciel espion", "signs of stalkerware") },
+    Outil { id: "PRO-PER-001", module: "protection::perimes", sujet: ("logiciels pas à jour et failles exploitées", "outdated software and exploited flaws") },
     Outil { id: "PRO-TEL-001", module: "protection::telechargement", sujet: ("fichier téléchargé vérifié", "downloaded file checked") },
     Outil { id: "SUR-MAC-001", module: "reseau::surveillance", sujet: ("problème apparu sur cette machine", "problem appeared on this machine") },
     Outil { id: "SUR-FIC-001", module: "protection::integrite", sujet: ("fichier critique changé", "critical file changed") },

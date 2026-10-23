@@ -27,6 +27,9 @@ struct Changement {
     /// La date où elle a été défaite.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     defaite: Option<String>,
+    /// L'événement Action du journal commun (`modele::journal`) : l'annulation s'y relie.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    evenement: Option<String>,
 }
 
 /// Un blocage noté : de quoi le montrer, le reconnaître et l'annuler exactement.
@@ -55,6 +58,10 @@ pub(crate) struct Blocage {
     /// efface ce qui disparaît le plus vite, la preuve le garde. Absente des blocages d'avant la 0.86.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preuve: Option<crate::protection::preuve::Preuve>,
+    /// L'événement Action du journal commun : son annulation s'y relie, et le fil d'incident remonte de là à la
+    /// preuve et à l'alerte. Absent des blocages d'avant la 0.86.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evenement: Option<String>,
 }
 
 /// Ce qui défait un blocage, exactement.
@@ -126,16 +133,28 @@ pub(crate) fn noter_annulables(correctifs: &[Vec<String>], resultats: &[bool], a
 }
 
 fn noter_dans(chemin: &std::path::Path, correctifs: &[Vec<String>], resultats: &[bool], annulables: &[Option<String>]) {
+    use crate::modele::evenement::{Evenement, Genre, Source};
     let date = maintenant();
     let mut tous = lire_de(chemin);
     for (i, (commandes, &reussi)) in correctifs.iter().zip(resultats).enumerate() {
+        let annulable = annulables.get(i).cloned().flatten();
+        let mut ev = Evenement::action(
+            Source::Correction,
+            commandes.first().map_or("", String::as_str),
+            reussi,
+            commandes,
+        );
+        if let Genre::Action { annulable: a, .. } = &mut ev.quoi {
+            a.clone_from(&annulable);
+        }
         tous.push(Changement {
             date: date.clone(),
             commandes: commandes.clone(),
             reussi,
             blocage: None,
-            annulable: annulables.get(i).cloned().flatten(),
+            annulable,
             defaite: None,
+            evenement: crate::modele::journal::noter(ev),
         });
     }
     ecrire(chemin, tous);
@@ -151,6 +170,9 @@ fn marquer_defaite_dans(chemin: &std::path::Path, id: &str) {
     let date = maintenant();
     for c in tous.iter_mut().filter(|c| c.annulable.as_deref() == Some(id)) {
         c.defaite = Some(date.clone());
+    }
+    if let Some(c) = tous.iter().rev().find(|c| c.annulable.as_deref() == Some(id)) {
+        noter_annulation(id, c.evenement.as_deref(), false);
     }
     ecrire(chemin, tous);
 }
@@ -191,12 +213,64 @@ fn ecrire(chemin: &std::path::Path, tous: Vec<Changement>) {
     let _ = crate::socle::ecrire_atomique(chemin, texte);
 }
 
-/// Note un blocage : ses commandes (telles que lancées), sa réussite, et de quoi l'annuler.
-pub(crate) fn noter_blocage(commandes: Vec<String>, reussi: bool, blocage: Blocage) {
-    noter_blocage_dans(&fichier(), commandes, reussi, blocage);
+/// L'annulation d'un geste ou d'une correction (`objet` : l'identifiant du blocage ou de la note), reliée à son
+/// Action dans le journal commun quand elle est connue.
+fn noter_annulation(objet: &str, action: Option<&str>, supprime: bool) {
+    use crate::modele::evenement::{Evenement, Genre, Source};
+    crate::modele::journal::noter(
+        Evenement::nouveau(
+            Source::Utilisateur,
+            Genre::Annulation {
+                objet: objet.to_string(),
+                supprime,
+            },
+        )
+        .cause(action),
+    );
 }
 
+/// Note un blocage : ses commandes (telles que lancées), sa réussite, et de quoi l'annuler. Le jeton de preuve est
+/// exigé : on ne note pas un geste sans le relevé d'avant (`preuve::relever`), et le geste va au journal commun,
+/// relié à sa preuve.
+pub(crate) fn noter_blocage(
+    commandes: Vec<String>,
+    reussi: bool,
+    blocage: Blocage,
+    preuve: crate::protection::preuve::PreuveFaite,
+) {
+    use crate::modele::evenement::{Evenement, Genre, Source};
+    let mut ev = Evenement::action(Source::Blocage, &blocage.quoi, reussi, &commandes)
+        .cle(Some(&blocage.cle))
+        .cause(preuve.evenement());
+    if let Genre::Action {
+        automatique,
+        blocage: b,
+        ..
+    } = &mut ev.quoi
+    {
+        *automatique = blocage.automatique;
+        *b = Some(blocage.id.clone());
+    }
+    let evenement = crate::modele::journal::noter(ev);
+    ecrire_blocage(
+        &fichier(),
+        commandes,
+        reussi,
+        Blocage {
+            preuve: preuve.en_preuve(),
+            evenement,
+            ..blocage
+        },
+    );
+}
+
+/// Les essais notent un blocage dans leur propre relevé, preuve comprise, sans passer par le journal.
+#[cfg(test)]
 pub(crate) fn noter_blocage_dans(chemin: &std::path::Path, commandes: Vec<String>, reussi: bool, blocage: Blocage) {
+    ecrire_blocage(chemin, commandes, reussi, blocage);
+}
+
+fn ecrire_blocage(chemin: &std::path::Path, commandes: Vec<String>, reussi: bool, blocage: Blocage) {
     let mut tous = lire_de(chemin);
     tous.push(Changement {
         date: maintenant(),
@@ -209,6 +283,7 @@ pub(crate) fn noter_blocage_dans(chemin: &std::path::Path, commandes: Vec<String
         }),
         annulable: None,
         defaite: None,
+        evenement: None,
     });
     ecrire(chemin, tous);
 }
@@ -253,11 +328,16 @@ pub(crate) fn marquer_annule(id: &str) {
 fn marquer_annule_dans(chemin: &std::path::Path, id: &str, supprime: bool) {
     let mut tous = lire_de(chemin);
     let date = maintenant();
+    let mut trouve = None;
     for c in &mut tous {
         if let Some(b) = c.blocage.as_mut().filter(|b| b.id == id) {
             b.annule = Some(date.clone());
             b.supprime = supprime;
+            trouve = Some(b.evenement.clone());
         }
+    }
+    if let Some(action) = trouve {
+        noter_annulation(id, action.as_deref(), supprime);
     }
     ecrire(chemin, tous);
 }
@@ -525,6 +605,7 @@ mod tests {
             annulation,
             annule: None,
             supprime: false,
+            evenement: None,
             preuve: None,
         }
     }

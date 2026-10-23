@@ -13,6 +13,7 @@ pub(crate) mod corps;
 pub(crate) mod entetes;
 pub(crate) mod mime;
 pub(crate) mod pieces;
+pub(crate) mod resultat;
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -769,6 +770,7 @@ fn chemin_saisi(r: &str) -> Option<PathBuf> {
 
 /// Menu Antivirus et protection › Ce courriel est-il une arnaque ?, ou `vanguard courriel-suspect <fichier>`.
 pub fn verifier(fichier: Option<&Path>) {
+    let debut = (chrono::Utc::now(), std::time::Instant::now());
     titre(tr!("Ce courriel est-il une arnaque ?", "Is this email a scam?"));
     paragraphe(tr!(
         "Vanguard lit le fichier sans rien ouvrir : aucun lien n'est suivi, aucune image n'est chargée, aucune pièce jointe n'est lancée.",
@@ -884,6 +886,62 @@ pub fn verifier(fichier: Option<&Path>) {
     for l in envelopper(&verdict(pire, &c.manques), LARGEUR - 2) {
         println!("  {couleur_verdict}{l}{RESET}");
     }
+    crate::modele::resultat::verser(&resultat::resultat(&c, pire_en_ligne, debut));
+}
+
+/// `vanguard courriel-suspect --json` : l'examen sur l'ordinateur seulement, sans rien demander. La vérification en
+/// ligne (qui demande un accord) et l'analyse des pièces jointes (qui lance les moteurs) n'y sont pas faites : elles
+/// sont dites non vérifiées, jamais comptées saines.
+pub fn json(chemin: &Path) {
+    let debut = (chrono::Utc::now(), std::time::Instant::now());
+    let r = match lire_fichier(chemin) {
+        Err(refus) => resultat::refuse(&texte_refus(&refus), debut),
+        Ok(octets) => {
+            let m = mime::lire(&octets);
+            if est_un_courriel(&m, &octets) {
+                let (mut c, _) = examiner(&m);
+                if !c.pieces.is_empty() {
+                    c.manques.push(
+                        tr!(
+                            "l'analyse des pièces jointes (pas lancée avec --json)",
+                            "the attachments scan (not run with --json)"
+                        )
+                        .to_string(),
+                    );
+                }
+                if !domaines_en_ligne(&m, &c).is_empty() {
+                    c.manques.push(
+                        tr!(
+                            "l'âge des domaines et les listes publiques (pas demandés avec --json)",
+                            "the domains' age and the public lists (not asked with --json)"
+                        )
+                        .to_string(),
+                    );
+                }
+                resultat::resultat(&c, None, debut)
+            } else {
+                resultat::refuse(&texte_refus(&Refus::PasUnCourriel), debut)
+            }
+        }
+    };
+    crate::modele::resultat::verser(&r);
+    println!("{}", crate::modele::resultat::json(&r));
+}
+
+/// Pourquoi un fichier n'est pas examiné, en une phrase (le JSON ; l'écran en dit plus, `afficher_refus`).
+fn texte_refus(r: &Refus) -> String {
+    match r {
+        Refus::Introuvable => tr!("fichier introuvable", "file not found"),
+        Refus::Illisible => tr!("fichier illisible", "file unreadable"),
+        Refus::PasUnFichier => tr!("pas un fichier", "not a file"),
+        Refus::TropGros => tr!("fichier trop gros", "file too large"),
+        Refus::Msg => tr!(
+            "message Outlook (.msg), que Vanguard ne lit pas",
+            "Outlook message (.msg), which Vanguard does not read"
+        ),
+        Refus::PasUnCourriel => tr!("pas un courriel", "not an email"),
+    }
+    .to_string()
 }
 
 #[cfg(test)]

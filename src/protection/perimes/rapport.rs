@@ -50,7 +50,7 @@ impl Juge {
         !self.touche() && matches!(self.verdict, Verdict::AJour { .. })
     }
 
-    fn non_verifie(&self) -> bool {
+    pub(super) fn non_verifie(&self) -> bool {
         !self.touche() && self.vieux.is_none() && matches!(self.verdict, Verdict::NonVerifie(_))
     }
 }
@@ -352,7 +352,7 @@ fn mention_bilan() -> &'static str {
 }
 
 /// Les raisons de tout ce qui n'a pas été vérifié : logiciels non jugés, comptes et dossiers non lus.
-fn non_verifies(b: &Bilan) -> Vec<String> {
+pub(super) fn non_verifies(b: &Bilan) -> Vec<String> {
     b.juges
         .iter()
         .filter(|j| j.non_verifie())
@@ -488,7 +488,7 @@ pub(crate) fn constats_de(b: &Bilan) -> Vec<Constat> {
     constats
 }
 
-fn aucun() -> &'static str {
+pub(super) fn aucun() -> &'static str {
     tr!(
         "Aucun des logiciels suivis (navigateurs, Office, Acrobat, Java, 7-Zip, PuTTY, Slack) aux emplacements connus ; un logiciel portable ou installé ailleurs n'est pas vu.",
         "None of the followed programs (browsers, Office, Acrobat, Java, 7-Zip, PuTTY, Slack) in the usual places; a portable program or one installed elsewhere is not seen."
@@ -682,7 +682,20 @@ pub(crate) fn afficher() {
         2,
         GRIS,
     );
-    corps(&relever());
+    let debut = (chrono::Utc::now(), std::time::Instant::now());
+    let b = relever();
+    crate::modele::resultat::verser(&super::resultat::resultat(&b, debut));
+    corps(&b);
+}
+
+/// Le relevé jugé en résultat, versé au rapport et au journal (`--json`).
+#[cfg(any(windows, target_os = "macos"))]
+pub(super) fn resultat_verse(
+    debut: (chrono::DateTime<chrono::Utc>, std::time::Instant),
+) -> crate::modele::resultat::Resultat {
+    let r = super::resultat::resultat(&relever(), debut);
+    crate::modele::resultat::verser(&r);
+    r
 }
 
 /// Les constats du bilan : le même relevé que l'écran (téléchargé une fois par jour, sauf réglage coupé).

@@ -710,6 +710,53 @@ fn complements_scan_html(h: &mut String, r: &Rapport) {
     }
 }
 
+/// Les derniers examens des outils de protection (`modele::resultat`), relus de leur JSON : la date, le verdict et
+/// les problèmes. Un examen qui n'a pas tout vérifié le dit, jamais en vert.
+fn examens_html(h: &mut String, examens: &[crate::modele::resultat::Resultat]) {
+    if examens.is_empty() {
+        return;
+    }
+    h.push_str(tr!(
+        "<h2>Derniers examens des outils</h2><div class=carte>",
+        "<h2>Latest tool examinations</h2><div class=carte>"
+    ));
+    for r in examens {
+        let sujet = crate::modele::registre::OUTILS
+            .iter()
+            .find(|o| o.id == r.outil)
+            .map_or(r.outil.as_str(), |o| {
+                if crate::langue::anglais() { o.sujet.1 } else { o.sujet.0 }
+            });
+        let quand = chrono::DateTime::parse_from_rfc3339(&r.debut)
+            .map(|d| {
+                d.with_timezone(&chrono::Local)
+                    .format(tr!("%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M"))
+                    .to_string()
+            })
+            .unwrap_or_default();
+        let (badge_verdict, phrase) = match r.verdict() {
+            "probleme" => (badge(r.pire()), tr!("problème(s) trouvé(s)", "problem(s) found")),
+            "sain" => (badge(None), tr!("rien trouvé", "nothing found")),
+            _ => (badge_non_verifie(), tr!("pas tout vérifié", "not everything checked")),
+        };
+        let _ = write!(
+            h,
+            "<div class=ligne>{badge_verdict}<div><span class=cat>{}</span> {} <span class=meta>{}</span>",
+            esc(sujet),
+            phrase,
+            esc(&quand)
+        );
+        for c in r.constats.iter().filter(|c| c.etat == "probleme") {
+            let _ = write!(h, "<div>{} {}</div>", badge(c.niveau), esc(&c.message));
+        }
+        for n in &r.couverture.non_verifies {
+            let _ = write!(h, "<div class=meta>? {}</div>", esc(n));
+        }
+        h.push_str("</div></div>");
+    }
+    h.push_str("</div>");
+}
+
 /// Encodage base64, pour mettre une image dans la page elle-même (le rapport reste un seul fichier).
 pub(crate) fn base64(octets: &[u8]) -> String {
     const LETTRES: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -776,6 +823,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Option<&A
         );
     }
 
+    examens_html(&mut h, &crate::modele::resultat::derniers());
     h += &connexions(&crate::reseau::connexion::historique());
 
     if let Some(a) = audit {
@@ -916,6 +964,46 @@ pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les examens versés par les outils se lisent dans le rapport : un examen incomplet n'y est jamais « rien
+    /// trouvé », un problème y garde son message échappé.
+    #[test]
+    fn examens_des_outils_au_rapport() {
+        use crate::modele::resultat::{Couverture, Resultat};
+        let debut = (chrono::Utc::now(), std::time::Instant::now());
+        let incomplet = Resultat::nouveau(
+            "PRO-ESP-001",
+            debut,
+            &[crate::machine::ok("Logiciels espions", "Aucun signe.")],
+            Couverture {
+                verifies: 2,
+                non_verifies: vec!["mémoire DNS <illisible>".into()],
+            },
+        );
+        let grave = Resultat::nouveau(
+            "PRO-PER-001",
+            debut,
+            &[crate::machine::alerte(
+                "Logiciels pas à jour",
+                Niveau::Eleve,
+                "Firefox <128.0>",
+            )],
+            Couverture {
+                verifies: 5,
+                non_verifies: Vec::new(),
+            },
+        );
+        let mut h = String::new();
+        examens_html(&mut h, &[incomplet, grave]);
+        assert!(h.contains("pas tout vérifié") && !h.contains("rien trouvé"), "{h}");
+        assert!(
+            h.contains("Firefox &lt;128.0&gt;") && h.contains("mémoire DNS &lt;illisible&gt;"),
+            "{h}"
+        );
+        let mut vide = String::new();
+        examens_html(&mut vide, &[]);
+        assert_eq!(vide, "");
+    }
 
     #[test]
     fn les_plugins_ont_leur_section_a_part_sans_note() {

@@ -14,8 +14,9 @@ use std::path::Path;
 
 use chrono::TimeZone;
 
-use super::chronologie::{Evenement, Genre, Source};
+use super::chronologie::{Evenement, Genre as GenreChrono, Source};
 use super::{Bi, Partie, bi, champ, creer_fichier, entete, ouvrir_ordinaire};
+use crate::modele::evenement::Genre;
 
 /// Le fichier écrit.
 const NOM: &str = "07-vanguard.txt";
@@ -244,8 +245,31 @@ fn partie_de(dossier: &Path, donnees: &Path, appelant: bool) -> Partie {
             donnees.display()
         ));
     }
-    let alertes =
-        crate::reseau::tableau::alertes_du_texte(&texte_etat(donnees, "surveillance-alertes.jsonl", &mut autres));
+    // Les alertes du journal des événements, et celles de l'ancien journal qu'une version d'avant écrit encore.
+    let (evenements, manques) = crate::modele::journal::lire_sans_juger(donnees);
+    autres.extend(manques);
+    let alertes = crate::reseau::tableau::reunir(
+        crate::reseau::tableau::alertes_du_texte(&texte_etat(donnees, "surveillance-alertes.jsonl", &mut autres)),
+        crate::reseau::tableau::alertes_des_evenements(&evenements),
+    );
+    autres.extend(
+        evenements
+            .iter()
+            .filter(|e| {
+                !matches!(
+                    e.quoi,
+                    Genre::Alerte { .. } | Genre::Action { .. } | Genre::Preuve { .. }
+                )
+            })
+            .map(|e| {
+                format!(
+                    "evenement/event {} {} {}",
+                    e.date_locale().unwrap_or_default(),
+                    e.quoi.sorte(),
+                    e.resume()
+                )
+            }),
+    );
     let gestes = crate::changements::blocages_du_texte(&texte_etat(donnees, crate::changements::RELEVE, &mut autres));
     let mut faits = faits_des_alertes(&alertes);
     faits.extend(faits_des_gestes(&gestes));
@@ -270,6 +294,16 @@ fn partie_de(dossier: &Path, donnees: &Path, appelant: bool) -> Partie {
             ),
             Err(raison) => autres.push(format!("normales/normal : {raison}")),
         }
+        let lu = crate::modele::journal::lire_dans(donnees);
+        autres.push(format!(
+            "journal des événements / event log : {}{}",
+            lu.lecture.code(),
+            match &lu.lecture {
+                crate::modele::journal::Lecture::Incomplet(r) | crate::modele::journal::Lecture::Falsifie(r) =>
+                    format!(" ({r})"),
+                _ => String::new(),
+            }
+        ));
         // L'état de Vanguard changé hors de lui : à savoir avant de croire ce qui précède.
         autres.extend(
             crate::sceau::constat()
@@ -297,13 +331,16 @@ fn partie_de(dossier: &Path, donnees: &Path, appelant: bool) -> Partie {
     for nom in ETATS {
         recopier(&mut p, dossier, donnees, nom);
     }
+    for nom in crate::modele::journal::fichiers(donnees) {
+        recopier(&mut p, dossier, donnees, &nom);
+    }
     p.evenements = faits
         .iter()
         .filter_map(|f| {
             let genre = if f.geste {
-                Genre::GesteDeVanguard
+                GenreChrono::GesteDeVanguard
             } else {
-                Genre::AlerteDeVanguard
+                GenreChrono::AlerteDeVanguard
             };
             let detail = f.lignes.first()?.split_once("  ").map_or("", |(_, r)| r).to_string();
             Some(Evenement::new(secondes(&f.date)?, Source::Vanguard, genre, detail))
@@ -409,8 +446,22 @@ mod tests {
                     ],
                     ..Default::default()
                 }),
+                evenement: None,
             },
         );
+        // L'alerte du même geste, dans le journal des événements : elle rejoint le fil, et le journal est recopié.
+        crate::modele::journal::noter_dans(
+            &donnees,
+            crate::modele::evenement::Evenement::alerte(
+                crate::modele::evenement::Source::Blocage,
+                "blocage",
+                "Vanguard a bloqué une menace",
+                "outil offensif arrêté",
+            )
+            .cle(Some(&format!("blocage|{cle}"))),
+            chrono::Utc::now(),
+        )
+        .unwrap();
         let p = partie_de(&dossier, &donnees, false);
         let t = std::fs::read_to_string(dossier.join(NOM)).unwrap();
         assert!(
@@ -421,7 +472,13 @@ mod tests {
             std::fs::read(dossier.join("07-etat-quarantaine-quarantaine.json")).unwrap(),
             br#"{"fichiers":[]}"#
         );
-        assert!(p.evenements.iter().any(|e| e.genre == Genre::GesteDeVanguard));
+        assert!(p.evenements.iter().any(|e| e.genre == GenreChrono::GesteDeVanguard));
+        assert!(p.evenements.iter().any(|e| e.genre == GenreChrono::AlerteDeVanguard));
+        assert!(t.contains("outil offensif arrêté"), "{t}");
+        assert!(t.contains("journal des événements / event log : intact"), "{t}");
+        let mois = chrono::Utc::now().format("%Y-%m").to_string();
+        assert!(dossier.join(format!("07-etat-evenements-{mois}.jsonl")).exists());
+        assert!(dossier.join("07-etat-evenements.tete").exists());
         let _ = std::fs::remove_dir_all(&racine);
     }
     /// Sous sudo, la partie lit les données du compte qui l'a lancé, et le dit ; un tube nommé ou un lien à la

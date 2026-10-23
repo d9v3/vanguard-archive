@@ -124,7 +124,7 @@ pub fn etat_court() -> &'static str {
 
 /// L'état court de `lu` ; `coupee` : la protection en temps réel est coupée, et la protection active ne bloque donc
 /// rien toute seule.
-fn etat_court_de(lu: Result<Parametres, String>, coupee: bool) -> &'static str {
+fn etat_court_de(lu: Result<Parametres, crate::modele::Echec>, coupee: bool) -> &'static str {
     match lu {
         Ok(p) if p.actif() && coupee => tr!("en pause (temps réel coupé)", "paused (real-time off)"),
         Ok(p) if p.actif() => tr!("protection active", "active protection"),
@@ -592,14 +592,22 @@ fn bloquer_tout_seul(m: &Menace, ctx: &Contexte, signalees: Option<(&BTreeSet<St
 /// L'alerte d'un blocage fait tout seul, ou manqué. Une menace certaine n'est jamais tue (`menaces::chercher`) :
 /// son alerte non plus, même si sa clé a été déclarée normale, sans quoi elle serait bloquée sans que personne le
 /// sache.
+///
+/// L'alerte est reliée, dans le journal des événements, au geste qu'elle annonce (ou à son échec, noté aussi) : le
+/// fil va de l'alerte de détection à la preuve, au geste, puis à cette alerte, au lieu d'alertes sans lien.
 fn alerter_blocage(m: &Menace, titre: &str, texte: &str) {
     let cle = m.cle_normale();
-    if m.certaine {
-        crate::reseau::tableau::noter_alerte_cle(Genre::Blocage, Some(&cle), titre, texte);
-        crate::reseau::surveillance::notifier(titre, texte);
-    } else {
-        crate::reseau::surveillance::alerter_cle(Genre::Blocage, &cle, titre, texte);
+    if !m.certaine && crate::protection::normales::est_normale(&cle) {
+        return;
     }
+    let geste = crate::modele::journal::dernier(
+        |e| {
+            matches!(e.quoi, crate::modele::evenement::Genre::Action { .. }) && e.cle.as_deref() == Some(m.cle.as_str())
+        },
+        chrono::Duration::minutes(10),
+    );
+    crate::reseau::tableau::noter_alerte_liee(Genre::Blocage, Some(&cle), geste.as_deref(), titre, texte);
+    crate::reseau::surveillance::notifier(titre, texte);
 }
 
 /// Les menaces déjà signalées comme non bloquées, d'après les sceaux : intactes ou adoptées, leurs clés ; changées
@@ -972,7 +980,13 @@ mod tests {
             etat_court_de(Ok(Parametres::default()), false)
         );
         assert_eq!(
-            etat_court_de(Err("x".into()), true),
+            etat_court_de(
+                Err(crate::modele::Echec::new(
+                    "essai",
+                    crate::modele::Raison::Illisible("x".into())
+                )),
+                true
+            ),
             tr!("réglages illisibles", "settings unreadable")
         );
     }

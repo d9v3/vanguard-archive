@@ -138,8 +138,83 @@ impl Preuve {
     }
 }
 
+/// Ce qu'il faut relever avant un geste.
+#[derive(Clone, Copy)]
+pub(crate) enum Releve<'a> {
+    /// Le programme à arrêter (`pid`) et le fichier à isoler.
+    Programme {
+        pid: Option<u32>,
+        fichier: Option<&'a Path>,
+    },
+    /// Le processus à arrêter n'est plus celui de la détection : le fichier seul, et c'est dit.
+    ProgrammeParti { fichier: Option<&'a Path> },
+    /// Un fichier seul (quarantaine après une analyse, réglage réécrit, suppression).
+    Fichier(&'a Path),
+    /// Les connexions vers une adresse à bloquer.
+    Adresse(IpAddr),
+    /// Le geste n'efface aucune trace (un démarrage retiré se remet exactement, une liste de pilotes, un port
+    /// fermé) : rien à relever, et c'est écrit ici, pas oublié.
+    Rien,
+}
+
+/// Le jeton d'un relevé fait : la preuve (ou rien, quand le geste n'efface aucune trace) et l'événement qui la garde
+/// dans le journal commun. Ses champs sont privés : seul `relever` en fabrique un, et noter un geste
+/// (`changements::noter_blocage`, `quarantaine::isoler`) l'exige. Le compilateur impose ainsi le relevé avant le
+/// geste, au lieu d'un commentaire qu'un nouvel appel pourrait ignorer.
+pub(crate) struct PreuveFaite {
+    preuve: Option<Preuve>,
+    evenement: Option<String>,
+}
+
+impl PreuveFaite {
+    pub(crate) fn preuve(&self) -> Option<&Preuve> {
+        self.preuve.as_ref()
+    }
+
+    /// L'événement Preuve du journal, cause du geste.
+    pub(crate) fn evenement(&self) -> Option<&str> {
+        self.evenement.as_deref()
+    }
+
+    pub(crate) fn en_preuve(self) -> Option<Preuve> {
+        self.preuve
+    }
+}
+
+/// Relève ce que le geste va effacer, puis le note dans le journal des événements, relié à l'alerte qui parlait du
+/// même objet (`cle`, ces dernières 24 heures). Ce qui ne se lit pas est dit « impossible (raison) » dans la preuve,
+/// et le jeton est rendu quand même : on bloque (défensif d'abord), le rapport le dit.
+pub(crate) fn relever(quoi: Releve<'_>, cle: &str, source: crate::modele::evenement::Source) -> PreuveFaite {
+    use crate::modele::evenement::{Evenement, Genre};
+    let preuve = match quoi {
+        Releve::Programme { pid, fichier } => Some(relever_programme(pid, fichier)),
+        Releve::ProgrammeParti { fichier } => Some(relever_programme_parti(fichier)),
+        Releve::Fichier(f) => Some(relever_fichier(f)),
+        Releve::Adresse(ip) => Some(relever_adresse(ip)),
+        Releve::Rien => None,
+    };
+    let evenement = preuve.as_ref().and_then(|p| {
+        let objet = crate::traces::vanguard::objet(cle);
+        let alerte = crate::modele::journal::dernier(
+            |e| {
+                matches!(e.quoi, Genre::Alerte { .. })
+                    && e.cle
+                        .as_deref()
+                        .is_some_and(|c| crate::traces::vanguard::objet(c) == objet)
+            },
+            chrono::Duration::hours(24),
+        );
+        crate::modele::journal::noter(
+            Evenement::nouveau(source, Genre::Preuve { releve: p.clone() })
+                .cle(Some(cle))
+                .cause(alerte.as_deref()),
+        )
+    });
+    PreuveFaite { preuve, evenement }
+}
+
 /// Le relevé d'un programme à arrêter (`pid`) et du fichier à isoler (`fichier`), juste avant le geste.
-pub(crate) fn relever_programme(pid: Option<u32>, fichier: Option<&Path>) -> Preuve {
+fn relever_programme(pid: Option<u32>, fichier: Option<&Path>) -> Preuve {
     let mut p = Preuve::nouvelle();
     if let Some(pid) = pid {
         p.processus = Some(processus(pid, &mut p));
@@ -153,7 +228,7 @@ pub(crate) fn relever_programme(pid: Option<u32>, fichier: Option<&Path>) -> Pre
 
 /// Le relevé quand le processus à arrêter n'est plus celui de la détection (fini, ou son numéro repris par un autre
 /// programme) : le fichier seul, et c'est dit.
-pub(crate) fn relever_programme_parti(fichier: Option<&Path>) -> Preuve {
+fn relever_programme_parti(fichier: Option<&Path>) -> Preuve {
     let mut p = relever_programme(None, fichier);
     p.impossible(
         ("processus", "process"),
@@ -166,14 +241,14 @@ pub(crate) fn relever_programme_parti(fichier: Option<&Path>) -> Preuve {
 }
 
 /// Le relevé d'un fichier seul (quarantaine demandée après une analyse, réglage réécrit).
-pub(crate) fn relever_fichier(f: &Path) -> Preuve {
+fn relever_fichier(f: &Path) -> Preuve {
     let mut p = Preuve::nouvelle();
     p.fichier = Some(fichier_releve(f, &mut p));
     p
 }
 
 /// Le relevé des connexions vers une adresse, avant de la bloquer : quels programmes lui parlaient.
-pub(crate) fn relever_adresse(ip: IpAddr) -> Preuve {
+fn relever_adresse(ip: IpAddr) -> Preuve {
     let mut p = Preuve::nouvelle();
     let ip = ip.to_canonical();
     connexions_de(&mut p, |c| c.distante.to_canonical() == ip);
@@ -426,6 +501,55 @@ mod tests {
         let longue = "é".repeat(LIGNE_MAX + 10);
         assert_eq!(borner(&longue).chars().count(), LIGNE_MAX + 1);
     }
+
+    /// Le jeton ne se fabrique qu'ici : ses champs sont privés (le compilateur refuse `PreuveFaite { .. }` ailleurs),
+    /// et aucun autre fichier n'en écrit un littéral ni n'appelle un constructeur qui le contournerait. Un test de
+    /// compilation (`compile_fail`) ne tourne pas dans un programme ; la lecture des sources le remplace.
+    #[test]
+    fn jeton_fabrique_ici_seulement() {
+        fn parcourir(d: &std::path::Path, trouves: &mut Vec<String>) {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    parcourir(&p, trouves);
+                } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("protection/preuve.rs") {
+                    let texte = std::fs::read_to_string(&p).unwrap();
+                    if texte.contains("PreuveFaite {") {
+                        trouves.push(p.display().to_string());
+                    }
+                }
+            }
+        }
+        let mut trouves = Vec::new();
+        parcourir(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut trouves,
+        );
+        assert!(
+            trouves.is_empty(),
+            "PreuveFaite fabriqué hors de preuve.rs : {trouves:?}"
+        );
+        // Le relevé d'un geste qui n'efface rien rend un jeton sans preuve, sans rien noter.
+        let j = relever(
+            Releve::Rien,
+            "demarrage:essai",
+            crate::modele::evenement::Source::Blocage,
+        );
+        assert!(j.preuve().is_none() && j.evenement().is_none());
+        // Un relevé fait est noté au journal, et le jeton le porte : le geste s'y reliera.
+        let f = crate::socle::dossier_local().join(format!("essai-jeton-{}", std::process::id()));
+        std::fs::create_dir_all(crate::socle::dossier_local()).unwrap();
+        std::fs::write(&f, b"x").unwrap();
+        let j = relever(
+            Releve::Fichier(&f),
+            "fichier:essai",
+            crate::modele::evenement::Source::Analyse,
+        );
+        assert!(j.preuve().is_some_and(|p| p.fichier.is_some()));
+        assert!(j.evenement().is_some());
+        let _ = std::fs::remove_file(&f);
+    }
+
     /// Une lecture qui ne répond pas (WMI figé) ne retient pas le geste au-delà du délai ; une lecture rapide rend
     /// son résultat.
     #[test]

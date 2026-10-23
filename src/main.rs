@@ -23,6 +23,7 @@ mod donnees;
 mod entretien;
 #[cfg(test)]
 mod essais;
+mod evenements;
 mod fenetre;
 mod fiche;
 mod gaming;
@@ -347,15 +348,27 @@ enum Commande {
         /// Le courriel enregistré (.eml) : « Enregistrer sous » de Thunderbird, « Télécharger le message » de Gmail,
         /// « Télécharger » d'Outlook sur le web.
         fichier: std::path::PathBuf,
+        /// Le résultat en JSON, pour un script : l'examen sur l'ordinateur seulement (ni vérification en ligne,
+        /// ni analyse des pièces jointes, dites non vérifiées).
+        #[arg(long)]
+        json: bool,
     },
     /// Logiciels espions : serveurs et sites connus (liste d'Échap), programmes qui lisent le clavier, autorisations
     /// de surveillance, logiciels de surveillance connus. Lecture seule.
     #[command(name = "logiciels-espions", visible_alias = "spyware")]
-    LogicielsEspions,
+    LogicielsEspions {
+        /// Le résultat en JSON, pour un script.
+        #[arg(long)]
+        json: bool,
+    },
     /// Logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java, 7-Zip, PuTTY, Slack comparés à leur
     /// dernière version ; failles exploitées. Lecture seule.
     #[command(name = "logiciels-perimes", visible_alias = "outdated-software")]
-    LogicielsPerimes,
+    LogicielsPerimes {
+        /// Le résultat en JSON, pour un script.
+        #[arg(long)]
+        json: bool,
+    },
     /// Caméra et micro : qui s'en sert ? Sous Windows, chaque programme et la dernière fois ; sous Linux, ce qui les
     /// tient en ce moment. Lecture seule.
     #[command(name = "camera-micro", visible_alias = "camera-mic")]
@@ -469,6 +482,17 @@ enum Commande {
     /// Ce que Vanguard a changé : chaque correction lancée sur cet ordinateur, sa date et son résultat.
     #[command(visible_alias = "changes")]
     Changements,
+    /// Le journal des événements : alertes, preuves relevées avant un geste, gestes, annulations, alertes déclarées
+    /// normales et passages de version, reliés entre eux, avec l'état de sa chaîne scellée. Lecture seule.
+    #[command(visible_alias = "events")]
+    Evenements {
+        /// Le journal en JSON, pour un script.
+        #[arg(long)]
+        json: bool,
+        /// Le fil d'un incident : cet événement, ce qui l'a causé et ce qu'il a causé.
+        #[arg(long)]
+        incident: Option<String>,
+    },
     /// Sauvegarde automatique : mise en place avec l'outil du système (Déjà Dup ou rsync chaque jour, Time Machine,
     /// Historique des fichiers) vers un disque externe, après accord, annulable exactement.
     #[command(name = "sauvegarde-auto", visible_alias = "auto-backup")]
@@ -1973,6 +1997,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
     ("changements", "What Vanguard changed: each fix run on this computer, its date and its result"),
+    ("evenements", "The event log: alerts, evidence recorded before an action, actions, undos, alerts declared normal \
+                    and version changes, linked together, with the state of its sealed chain. Read only"),
     ("a-laisser", "Report to leave behind: a simple page for the person you just helped (grade, what is left to do, \
                    what is fine), put on their Desktop after consent and opened in the browser"),
     ("sauvegarde-auto", "Automatic backup: set up with the system's tool (Déjà Dup or rsync every day, Time Machine, \
@@ -2052,6 +2078,12 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("guide", "quoi", "A system (omarchy, arch, fedora, debian, windows, macos, all; linux: the common programs; tldr), \
                        a program (systemctl, winget, tar…) or words to look for"),
     ("fiche", "json", "The specs as JSON, for a script (without the serial numbers)"),
+    ("evenements", "json", "The log as JSON, for a script"),
+    ("logiciels-espions", "json", "The result as JSON, for a script"),
+    ("logiciels-perimes", "json", "The result as JSON, for a script"),
+    ("courriel-suspect", "json", "The result as JSON, for a script: the examination on the computer only (neither \
+                                  the online check nor the attachments scan, said not checked)"),
+    ("evenements", "incident", "One incident's thread: this event, what caused it and what it caused"),
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),
     ("verifier-cle", "dossier", "A folder of the drive or disk (default: chosen among the plugged-in disks)"),
@@ -2262,9 +2294,14 @@ async fn main() {
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
         }
-        Some(Commande::CourrielSuspect { fichier }) => protection::courriel_suspect::verifier(Some(&fichier)),
-        Some(Commande::LogicielsEspions) => protection::espions::afficher(),
-        Some(Commande::LogicielsPerimes) => protection::perimes::afficher(),
+        Some(Commande::CourrielSuspect { fichier, json: false }) => {
+            protection::courriel_suspect::verifier(Some(&fichier));
+        }
+        Some(Commande::CourrielSuspect { fichier, json: true }) => protection::courriel_suspect::json(&fichier),
+        Some(Commande::LogicielsEspions { json: false }) => protection::espions::afficher(),
+        Some(Commande::LogicielsEspions { json: true }) => protection::espions::json(),
+        Some(Commande::LogicielsPerimes { json: false }) => protection::perimes::afficher(),
+        Some(Commande::LogicielsPerimes { json: true }) => protection::perimes::json(),
         Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
         Some(Commande::Acces) => protection::acces::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),
@@ -2306,6 +2343,7 @@ async fn main() {
         Some(Commande::VerifierSauvegarde) => sauvegarde::verifier_sauvegarde(),
         Some(Commande::VerifierCle { dossier }) => verifier_cle::commande(dossier.as_deref()),
         Some(Commande::Changements) => changements::afficher(),
+        Some(Commande::Evenements { json, incident }) => evenements::afficher(json, incident.as_deref()),
         Some(Commande::ALaisser) => a_laisser::laisser(&machine::executer(false)),
         Some(Commande::SauvegardeAuto { annuler }) => {
             if annuler {
@@ -2553,6 +2591,10 @@ mod tests_menu {
             "le menu Données › Sauvegarder propose aussi la restauration",
         ),
         ("regles", "la liste des règles du bilan, pour un script ou un relecteur"),
+        (
+            "evenements",
+            "le journal relié, pour un script ou les traces ; le tableau de bord en montre les alertes",
+        ),
         ("demarrage", "dans le menu, l'écran de Pourquoi c'est lent ? le propose"),
         ("verifier-moi", "pour comparer l'empreinte à la page de la version"),
         ("plugin", "le menu Extensions les liste et les lance"),

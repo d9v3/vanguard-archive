@@ -2,8 +2,10 @@
 //! l'état de la surveillance horaire, ses alertes jour par jour, les appareils apparus sur le réseau et les connexions
 //! vers des serveurs de botnets. Rien n'est envoyé : la page est écrite dans le dossier de Vanguard de cet ordinateur.
 //!
-//! Le journal des alertes est tenu ici : la surveillance y ajoute chaque alerte au moment de la notifier. Une
-//! notification disparaît en quelques secondes ; sans ce journal, une alerte de la nuit était perdue.
+//! Chaque alerte est notée au moment d'être notifiée, dans le journal commun des événements (`modele::journal`). Une
+//! notification disparaît en quelques secondes ; sans ce journal, une alerte de la nuit était perdue. L'ancien journal
+//! des alertes (surveillance-alertes.jsonl) n'est plus écrit, mais il est encore lu : une version d'avant, lancée
+//! depuis la clé, peut y écrire.
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
@@ -115,6 +117,16 @@ impl Genre {
     }
 }
 
+/// La classe de couleur d'une gravité.
+fn classe_de(n: crate::risk::Niveau) -> &'static str {
+    match n {
+        crate::risk::Niveau::Critique => "critique",
+        crate::risk::Niveau::Eleve => "eleve",
+        crate::risk::Niveau::Moyen => "moyen",
+        crate::risk::Niveau::Info => "info",
+    }
+}
+
 /// Une alerte notifiée par la surveillance, une ligne JSON du journal.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub(crate) struct Alerte {
@@ -128,6 +140,10 @@ pub(crate) struct Alerte {
     /// preuve et le blocage. Absente des alertes d'avant la 0.86 et de celles qui ne se reconnaissent pas.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cle: Option<String>,
+    /// La gravité portée par l'événement (une faille KEV est critique) ; absente de l'ancien journal : celle du
+    /// genre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gravite: Option<crate::risk::Niveau>,
 }
 
 fn fichier_journal() -> PathBuf {
@@ -162,27 +178,56 @@ pub(crate) fn noter_alerte(genre: Genre, titre: &str, texte: &str) {
 
 /// Comme `noter_alerte`, avec la clé de ce dont parle l'alerte.
 pub(crate) fn noter_alerte_cle(genre: Genre, cle: Option<&str>, titre: &str, texte: &str) {
-    let maintenant = chrono::Local::now().naive_local();
-    let alerte = Alerte {
-        date: maintenant.format(FORMAT_DATE).to_string(),
-        genre: genre.nom().to_string(),
-        titre: tronquer(titre, TITRE_MAX),
-        texte: tronquer(texte, TEXTE_MAX),
-        cle: cle.map(|c| tronquer(c, TEXTE_MAX)),
+    noter_alerte_liee(genre, cle, None, titre, texte);
+}
+
+/// Comme `noter_alerte_cle`, avec l'événement qui l'a causée (le blocage dont elle prévient). Elle va au journal
+/// commun des événements (`modele::journal`), en ajout seul et chaîné, et plus à surveillance-alertes.jsonl, qui
+/// reste lu : une seule écriture, deux lectures, jamais d'alerte en double. Rend l'identifiant de l'événement.
+pub(crate) fn noter_alerte_liee(
+    genre: Genre,
+    cle: Option<&str>,
+    cause: Option<&str>,
+    titre: &str,
+    texte: &str,
+) -> Option<String> {
+    use crate::modele::evenement::{Evenement, Source};
+    let source = match genre {
+        Genre::Veilleur => Source::Veilleur,
+        Genre::Blocage => Source::Blocage,
+        _ => Source::Surveillance,
     };
-    if let Err(e) = ajouter(&fichier_journal(), alerte, maintenant) {
-        crate::journal::erreur("journal des alertes", &e.to_string());
+    let ev = Evenement::alerte(
+        source,
+        genre.nom(),
+        &tronquer(titre, TITRE_MAX),
+        &tronquer(texte, TEXTE_MAX),
+    )
+    .gravite(gravite(genre, texte))
+    .cle(cle)
+    .cause(cause);
+    crate::modele::journal::noter(ev)
+}
+
+/// La gravité d'une alerte, portée par son événement : celle de son genre, sauf une faille du catalogue KEV de la
+/// CISA (activement exploitée), critique même si elle arrive par l'alerte de la machine.
+fn gravite(genre: Genre, texte: &str) -> crate::risk::Niveau {
+    use crate::risk::Niveau;
+    if genre == Genre::Machine && texte.contains("KEV") {
+        return Niveau::Critique;
+    }
+    match genre.classe() {
+        "critique" => Niveau::Critique,
+        "eleve" => Niveau::Eleve,
+        "moyen" => Niveau::Moyen,
+        _ => Niveau::Info,
     }
 }
 
-/// Le journal relu, l'alerte ajoutée, le tout borné puis réécrit d'un coup (`ecrire_atomique`) : une coupure en
-/// pleine écriture laisse l'ancien journal ou le nouveau, jamais un journal tronqué. Sous verrou : la minuterie et
-/// un `vanguard surveiller` lancé à la main en même temps réécrivaient chacun le journal lu avant l'autre, et la
-/// seconde écriture effaçait l'alerte de la première.
+/// Ajoute une alerte à l'ancien journal (surveillance-alertes.jsonl) : les essais qui en préparent un comme une
+/// version d'avant l'écrivait.
+#[cfg(test)]
 fn ajouter(fichier: &Path, alerte: Alerte, maintenant: NaiveDateTime) -> std::io::Result<()> {
-    let _verrou = fichier
-        .parent()
-        .and_then(|d| crate::socle::Verrou::prendre_nomme(d, "alertes.verrou"));
     let mut alertes = lire_journal(fichier);
     alertes.push(alerte);
     let texte: String = borner(alertes, maintenant)
@@ -230,10 +275,37 @@ pub(crate) fn alertes_du_texte(texte: &str) -> Vec<Alerte> {
         .collect()
 }
 
-/// Les alertes du journal, de la plus ancienne à la plus récente, textes rendus inoffensifs : pour les traces
-/// d'incident et pour déclarer une alerte normale.
+/// Les alertes du journal des événements, en alertes du tableau, textes rendus inoffensifs. Un journal falsifié
+/// donne quand même ses alertes (on ne cache pas une alerte), mais il est dit par `vanguard evenements`, les traces
+/// et le bilan (COM-ETA-001, chaîne relue).
+pub(crate) fn alertes_des_evenements(evenements: &[crate::modele::evenement::Evenement]) -> Vec<Alerte> {
+    crate::modele::journal::alertes(evenements)
+        .filter_map(|(e, famille, titre, texte)| {
+            Some(Alerte {
+                date: e.date_locale()?,
+                genre: famille.to_string(),
+                titre: crate::ui::affichable(titre),
+                texte: crate::ui::affichable(texte),
+                cle: e.cle.clone(),
+                gravite: e.gravite,
+            })
+        })
+        .collect()
+}
+
+/// Les alertes de l'ancien journal et du journal des événements réunies, dans l'ordre du temps : une version d'avant
+/// lancée depuis la clé écrit encore l'ancien.
+pub(crate) fn reunir(mut anciennes: Vec<Alerte>, nouvelles: Vec<Alerte>) -> Vec<Alerte> {
+    anciennes.extend(nouvelles);
+    anciennes.sort_by(|a, b| a.date.cmp(&b.date));
+    anciennes
+}
+
+/// Les alertes des deux journaux, de la plus ancienne à la plus récente, textes rendus inoffensifs : pour le tableau
+/// et pour déclarer une alerte normale.
 pub(crate) fn alertes() -> Vec<Alerte> {
-    lire_journal(&fichier_journal())
+    let lu = crate::modele::journal::lire();
+    reunir(lire_journal(&fichier_journal()), alertes_des_evenements(&lu.evenements))
 }
 
 /// Le genre d'une alerte du journal, tel qu'il s'affiche (« VEILLEUR », « BOTNET »).
@@ -248,6 +320,8 @@ pub(crate) fn nom_genre(g: Genre) -> &'static str {
 
 /// Noté au début de chaque passe de la surveillance : le tableau dit quand elle a tourné pour la dernière fois.
 pub(crate) fn noter_passe() {
+    // Une mise à jour se lit dans le journal des événements à la première passe qui suit, pas à la prochaine alerte.
+    crate::modele::journal::noter_version();
     let maintenant = chrono::Local::now().format(FORMAT_DATE).to_string();
     let _ = crate::socle::ecrire_atomique(&fichier_passe(), maintenant);
 }
@@ -344,7 +418,7 @@ fn collecter() -> Donnees {
         maintenant: chrono::Local::now().naive_local(),
         active: reseau::surveillance::active(),
         derniere_passe: derniere_passe(),
-        alertes: lire_journal(&fichier_journal()),
+        alertes: borner(alertes(), chrono::Local::now().naive_local()),
         appareils: reseau::appareils_connus(),
         botnets_en_cours,
         botnets_vus,
@@ -586,7 +660,7 @@ fn alertes_par_jour(d: &Donnees) -> String {
                 h,
                 "<div class=ligne><span class=meta>{}</span><span class=\"badge {}\">{}</span><div><span class=cat>{}</span> {}</div></div>",
                 esc(heure),
-                genre.classe(),
+                a.gravite.map_or(genre.classe(), classe_de),
                 genre.libelle(),
                 esc(&a.titre),
                 esc(&a.texte)
@@ -785,6 +859,7 @@ mod tests {
             titre: titre.into(),
             texte: texte.into(),
             cle: None,
+            gravite: None,
         }
     }
 

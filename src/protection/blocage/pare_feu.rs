@@ -249,9 +249,23 @@ fn ufw_status() -> Option<std::process::Command> {
     None
 }
 
+/// Ni ufw actif ni nftables. Pas « absent » : ufw peut être installé mais coupé ; la phrase seule le dit
+/// (`Introuvable` montre son détail tel quel).
+#[cfg(target_os = "linux")]
+fn sans_pare_feu_linux() -> crate::modele::Echec {
+    crate::modele::Echec::new("blocage/pare-feu", crate::modele::Raison::Introuvable).detail(tr!(
+        "non disponible : ni ufw actif ni nftables sur cet ordinateur",
+        "not available: neither an active ufw nor nftables on this computer"
+    ))
+}
+
 /// Le pare-feu par lequel bloquer ici ; `Err` : pourquoi il n'y en a pas (« non disponible »).
 #[cfg_attr(windows, allow(clippy::unnecessary_wraps))] // même signature que sous Linux et macOS, où il peut manquer
-pub(crate) fn detecter() -> Result<PareFeu, String> {
+pub(crate) fn detecter() -> Result<PareFeu, crate::modele::Echec> {
+    #[cfg(target_os = "macos")]
+    use crate::modele::{Echec, Raison};
+    #[cfg(target_os = "macos")]
+    const OU: &str = "blocage/pare-feu";
     #[cfg(target_os = "linux")]
     {
         if crate::machine::linux::ufw_actif() {
@@ -263,11 +277,7 @@ pub(crate) fn detecter() -> Result<PareFeu, String> {
         if nft {
             return Ok(PareFeu::Nftables);
         }
-        Err(tr!(
-            "non disponible : ni ufw actif ni nftables sur cet ordinateur",
-            "not available: neither an active ufw nor nftables on this computer"
-        )
-        .to_string())
+        Err(sans_pare_feu_linux())
     }
     #[cfg(windows)]
     {
@@ -278,11 +288,7 @@ pub(crate) fn detecter() -> Result<PareFeu, String> {
         if std::path::Path::new("/sbin/pfctl").exists() {
             Ok(PareFeu::Pf)
         } else {
-            Err(trf!(
-                "non disponible : {} absent",
-                "not available: {} missing",
-                "/sbin/pfctl"
-            ))
+            Err(Echec::new(OU, Raison::Absente("/sbin/pfctl".into())))
         }
     }
 }
@@ -300,6 +306,18 @@ pub(crate) fn decrire_sortante(pf: PareFeu, ip: IpAddr) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ufw installé mais coupé, sans nftables : jamais « « ufw, nftables » absent », la phrase d'avant revient.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sans_pare_feu_dit_non_disponible() {
+        let e = sans_pare_feu_linux();
+        assert_eq!(e.code(), "introuvable");
+        assert_eq!(
+            e.to_string(),
+            "non disponible : ni ufw actif ni nftables sur cet ordinateur"
+        );
+    }
 
     fn ip(t: &str) -> IpAddr {
         t.parse().unwrap()
