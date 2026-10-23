@@ -148,8 +148,11 @@ fn raison(r: &Refus) -> &'static str {
 fn genre_de_la_cle(cle: &str, genre: &str) -> bool {
     use crate::reseau::tableau::{Genre, nom_genre};
     let attendus: &[Genre] = match cle.split_once('|').map(|(p, _)| p) {
-        // Le veilleur note aussi, avec sa clé, la connexion fermée avec un serveur de botnet.
-        Some("veilleur") => &[Genre::Veilleur, Genre::Botnet],
+        // Le veilleur note aussi, avec sa clé, la connexion fermée avec un serveur de botnet et les rafales de
+        // chiffrement (« veilleur|rancongiciel|… ») : sans ce genre, un outil de chiffrement voulu ne pouvait jamais
+        // être déclaré normal. Le garde-fou reste entier : une ligne forgée ne tait que la clé qu'elle nomme, jamais
+        // un blocage.
+        Some("veilleur") => &[Genre::Veilleur, Genre::Botnet, Genre::Rancongiciel],
         Some("blocage") => &[Genre::Blocage],
         Some("botnet") => &[Genre::Botnet],
         Some("site") => &[Genre::Telechargement],
@@ -452,5 +455,24 @@ mod tests {
         assert_eq!(cles, ["veilleur|203.0.113.8:443", "blocage|connexion:203.0.113.7"]);
         assert_eq!(concerne("blocage|x\x1b[2Jy"), affichable("blocage|x\x1b[2Jy"));
         assert!(concerne(&"a".repeat(400)).ends_with('…'));
+    }
+
+    /// Un outil de chiffrement voulu, alerté par la veille des fichiers : son alerte (genre « rancongiciel », clé du
+    /// veilleur) se propose ; la même clé sous le genre « blocage » reste écartée.
+    #[test]
+    fn alerte_rancongiciel_du_veilleur_proposee() {
+        let ligne = |genre: &str| crate::reseau::tableau::Alerte {
+            gravite: None,
+            date: "2026-10-22 10:00:00".into(),
+            genre: genre.into(),
+            titre: "t".into(),
+            texte: genre.into(),
+            cle: Some("veilleur|rancongiciel|/home/user/outil".into()),
+        };
+        let jour = NaiveDate::parse_from_str("2026-10-23", "%Y-%m-%d").unwrap();
+        let r = recentes(&[ligne("rancongiciel")], &Normales::default(), jour);
+        assert_eq!(r.len(), 1);
+        let r = recentes(&[ligne("blocage")], &Normales::default(), jour);
+        assert_eq!(r.len(), 0);
     }
 }

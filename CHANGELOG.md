@@ -139,6 +139,18 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   BitLocker, une ligne de `ss` illisible ou les unités du compte non lues donnent « non vérifié », pas « pareil »
   ni « sans objet » ; une lecture contredite reste annoncée, à sa date, tant qu'un essai ne l'a pas tranchée ;
   moins de 5 semaines de mesures, non vérifié aussi.
+- **Veilleur anti-rançongiciel.** Le veilleur peut maintenant surveiller en direct tes dossiers personnels : une
+  rafale de chiffrement (des dizaines de fichiers réécrits en quelques secondes, leur contenu qui ne ressemble plus à
+  leur format, une note de rançon, un fichier-piège touché) t'alerte en quelques secondes au lieu d'attendre la
+  vérification horaire. Sans droits d'administrateur et sans nouvelle dépendance (inotify par la crate déjà présente ;
+  « qui » par les compteurs d'écriture des processus). Avec la protection active et un cas quasi certain (piège touché
+  et rafale attribuée sans ambiguïté à un programme), Vanguard gèle le programme et sa descendance, relève la preuve,
+  puis l'arrête et le met en quarantaine, avec tous les garde-fous du blocage ; sinon, il alerte seulement. Proposé
+  dans le même accord que « vanguard veilleur on » (ou « vanguard veilleur rancongiciel on »), coupé par défaut ; un
+  programme malveillant de ton compte peut l'éteindre, ta sauvegarde reste la vraie protection. Surveillés : Documents,
+  Images, Bureau, Musique, Vidéos et Téléchargements. Retirer les pièges ne fait pas crier « rançongiciel possible »,
+  et une alerte d'un outil de chiffrement voulu peut se déclarer normale. Limite dite : un programme qui écrit par un
+  lien physique placé hors de ces dossiers échappe à la veille en direct (les pièges restent vérifiés chaque heure).
 - **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
   carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
   `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la

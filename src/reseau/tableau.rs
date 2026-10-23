@@ -47,11 +47,13 @@ pub(crate) enum Genre {
     Blocage,
     /// Un programme ou une connexion brève vus par le veilleur (Linux), entre deux passes de la surveillance.
     Veilleur,
+    /// Un rançongiciel repéré en direct par le veilleur (rafale de chiffrement, piège touché, copies effacées).
+    Rancongiciel,
     Autre,
 }
 
 impl Genre {
-    const TOUS: [Genre; 12] = [
+    const TOUS: [Genre; 13] = [
         Genre::Machine,
         Genre::Fichiers,
         Genre::Telechargement,
@@ -63,6 +65,7 @@ impl Genre {
         Genre::WiFi,
         Genre::Blocage,
         Genre::Veilleur,
+        Genre::Rancongiciel,
         Genre::Autre,
     ];
 
@@ -80,6 +83,7 @@ impl Genre {
             Genre::WiFi => "wifi",
             Genre::Blocage => "blocage",
             Genre::Veilleur => "veilleur",
+            Genre::Rancongiciel => "rancongiciel",
             Genre::Autre => "autre",
         }
     }
@@ -102,6 +106,7 @@ impl Genre {
             Genre::WiFi => tr!("WI-FI", "WI-FI"),
             Genre::Blocage => tr!("BLOCAGE", "BLOCKING"),
             Genre::Veilleur => tr!("VEILLEUR", "WATCHER"),
+            Genre::Rancongiciel => tr!("RANÇONGICIEL", "RANSOMWARE"),
             Genre::Autre => tr!("AUTRE", "OTHER"),
         }
     }
@@ -109,7 +114,9 @@ impl Genre {
     /// La classe de couleur du rapport HTML : rouge pour ce qui trahit une attaque en cours.
     fn classe(self) -> &'static str {
         match self {
-            Genre::Botnet | Genre::Passerelle | Genre::Empoisonneur | Genre::Blocage => "critique",
+            Genre::Botnet | Genre::Passerelle | Genre::Empoisonneur | Genre::Blocage | Genre::Rancongiciel => {
+                "critique"
+            }
             Genre::Appareil | Genre::Port | Genre::Fichiers | Genre::WiFi | Genre::Veilleur => "eleve",
             Genre::Machine | Genre::Telechargement => "moyen",
             Genre::Autre => "info",
@@ -193,7 +200,7 @@ pub(crate) fn noter_alerte_liee(
 ) -> Option<String> {
     use crate::modele::evenement::{Evenement, Source};
     let source = match genre {
-        Genre::Veilleur => Source::Veilleur,
+        Genre::Veilleur | Genre::Rancongiciel => Source::Veilleur,
         Genre::Blocage => Source::Blocage,
         _ => Source::Surveillance,
     };

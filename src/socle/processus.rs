@@ -108,9 +108,56 @@ pub(crate) fn pids() -> Option<Vec<u32>> {
     (!liste.is_empty()).then_some(liste)
 }
 
+/// Gèle un processus (SIGSTOP) : il cesse d'agir sans que rien ne soit effacé, sa mémoire reste. Réversible par
+/// `reprendre`. Rend `false` si l'envoi a échoué (numéro parti, pas les droits). Utilisé par le veilleur
+/// anti-rançongiciel (Linux).
+#[cfg(target_os = "linux")]
+pub(crate) fn geler(pid: u32) -> bool {
+    envoyer_signal(pid, libc::SIGSTOP)
+}
+
+/// Reprend un processus gelé (SIGCONT).
+#[cfg(target_os = "linux")]
+pub(crate) fn reprendre(pid: u32) -> bool {
+    envoyer_signal(pid, libc::SIGCONT)
+}
+
+/// Un processus est-il gelé ? (son état est « T » dans /proc/<pid>/stat) : sert à regeler ce qu'un SIGCONT d'un tiers
+/// aurait repris. `None` : parti ou illisible.
+#[cfg(target_os = "linux")]
+pub(crate) fn est_gele(pid: u32) -> Option<bool> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    etat_du_stat(&stat).map(|e| e == 'T' || e == 't')
+}
+
+/// Le champ « état » de /proc/<pid>/stat (3e champ), après le nom entre parenthèses — qui peut contenir des espaces
+/// et des parenthèses, d'où la recherche de la DERNIÈRE « ) ».
+#[cfg(target_os = "linux")]
+pub(crate) fn etat_du_stat(stat: &str) -> Option<char> {
+    let apres = &stat[stat.rfind(')')? + 1..];
+    apres.split_whitespace().next()?.chars().next()
+}
+
+#[cfg(target_os = "linux")]
+fn envoyer_signal(pid: u32, signal: libc::c_int) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY : kill n'envoie qu'un signal à un numéro de processus et ne touche aucune mémoire.
+    unsafe { libc::kill(pid, signal) == 0 }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn etat_dans_stat() {
+        assert_eq!(etat_du_stat("123 (bash) S 1 123 123 0 -1 4194304"), Some('S'));
+        // Un nom avec parenthèses et espaces : on lit après la dernière « ) ».
+        assert_eq!(etat_du_stat("123 (a b) c) T 1 1"), Some('T'));
+        assert_eq!(etat_du_stat("sans parenthese"), None);
+    }
 
     #[test]
     fn pids_d_un_proc_fabrique() {

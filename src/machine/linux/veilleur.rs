@@ -32,6 +32,8 @@ use crate::langue::Reponse;
 use crate::machine::chasse::{self, EnMarche};
 use crate::machine::regles::{Os, regle};
 use crate::machine::{Constat, alerte, impossible, ok};
+use crate::protection::rancongiciel::score::{self, Copies, Verdict};
+use crate::protection::rancongiciel::{Reglages, attribution::Attribution, reponse, veille};
 use crate::protection::sortantes::ServeursDeCommande;
 use crate::reseau::tableau::{self, Genre};
 use crate::risk::Niveau;
@@ -56,6 +58,9 @@ pub(crate) const UNITE: &str = "vanguard-veilleur.service";
 /// les garde si le veilleur reste alors que le dossier part.
 pub(crate) const ETAT: &str = "veilleur-etat.json";
 pub(crate) const VOULU: &str = "veilleur-voulu";
+/// La note du choix de surveiller aussi les dossiers personnels contre les rançongiciels (accord séparé, dans le même
+/// « on » que le veilleur) : présent = la veille anti-rançongiciel est voulue.
+pub(crate) const RANCON_VOULU: &str = "rancongiciel-voulu";
 /// La sortie d'un refus (noyau trop ancien, abonnement refusé, root) : l'unité ne le relance pas
 /// (RestartPreventExitStatus), puisque relancer n'y changerait rien.
 const SORTIE_REFUS: i32 = 77;
@@ -1319,6 +1324,21 @@ pub(crate) struct Etat {
     pub raison_arret: Option<String>,
     /// Les derniers partis avant lecture : (PID, parent s'il était connu).
     pub derniers_partis: Vec<(u32, Option<u32>)>,
+    // ── Veille anti-rançongiciel (dossiers personnels) ──
+    /// La surveillance des fichiers est allumée (accord donné) et en marche.
+    pub rancon_actif: bool,
+    /// Changements de fichiers vus en direct.
+    pub rancon_changements: u64,
+    /// Rafales jugées Grave ou plus.
+    pub rancon_rafales: u64,
+    /// Rançongiciels gelés (quasi certains).
+    pub rancon_gels: u64,
+    /// Débordements de la file de surveillance des fichiers.
+    pub rancon_perdus: u64,
+    /// Les PID restés gelés par le veilleur (un tiers peut les reprendre : la surveillance horaire le dit).
+    pub pids_geles: Vec<u32>,
+    /// Pourquoi la veille des fichiers ne tourne pas, alors qu'elle est voulue (notify indisponible, aucun dossier).
+    pub rancon_sans: Option<String>,
 }
 
 const DERNIERS_PARTIS: usize = 10;
@@ -1334,6 +1354,24 @@ fn fichier_voulu() -> PathBuf {
 
 pub(crate) fn voulu() -> bool {
     fichier_voulu().is_file()
+}
+
+/// Le fichier qui note le choix de surveiller les dossiers contre les rançongiciels.
+fn fichier_rancon_voulu() -> PathBuf {
+    crate::socle::dossier_local().join(RANCON_VOULU)
+}
+
+/// La veille anti-rançongiciel est-elle voulue ?
+pub(crate) fn rancon_voulu() -> bool {
+    fichier_rancon_voulu().is_file()
+}
+
+/// Parmi `pids`, ceux qui sont encore gelés (état « T ») : un PID mort ou repris par un autre processus ne l'est
+/// plus, et ne doit ni être dit gelé ni recevoir de SIGCONT.
+fn encore_geles(pids: Vec<u32>) -> Vec<u32> {
+    pids.into_iter()
+        .filter(|&p| crate::socle::processus::est_gele(p) == Some(true))
+        .collect()
 }
 
 fn lire_etat() -> Option<Etat> {
@@ -1378,6 +1416,10 @@ fn servir() -> i32 {
         pid: std::process::id(),
         depuis: maintenant(),
         battement: maintenant(),
+        // Un redémarrage (Restart=on-failure, mise à jour, « rancongiciel on ») ne doit pas oublier un programme resté
+        // gelé : seul ce fichier permet à « off » ou au retrait de le reprendre. Un PID mort, ou repris par un
+        // processus qui n'est pas gelé, est écarté.
+        pids_geles: encore_geles(lire_etat().map(|e| e.pids_geles).unwrap_or_default()),
         ..Etat::default()
     };
     let refuser = |etat: &mut Etat, raison: String| {
@@ -1425,6 +1467,9 @@ fn servir() -> i32 {
     let mut debit = Debit::default();
     let mut fichiers = crate::protection::sources::Fichiers::recentes();
     let mut empreintes_relues = Instant::now();
+    // La veille des dossiers personnels, si elle est voulue (accord séparé, dans le même « on »).
+    let mut rancon = construire_veille(&mut etat);
+    ecrire_etat(&etat);
     let (mut minute, mut quart) = (Instant::now(), Instant::now());
     let sortie = loop {
         if ARRET.load(Ordering::SeqCst) {
@@ -1445,7 +1490,17 @@ fn servir() -> i32 {
         // En pause, ce qui arrive est lu puis jeté : rien n'est noté ni notifié.
         if !etat.en_pause {
             for vu in vus {
+                // R7 : l'effacement des copies de secours, vu dans le flux des processus, nourrit la veille.
+                if let (Some(r), Vu::Lance(l)) = (rancon.as_mut(), &vu)
+                    && let Lecture::Complet(p) = &l.lecture
+                    && crate::protection::rancongiciel::copies::effacement(p, Os::Linux).is_some()
+                {
+                    r.noter_copies(Copies::SessionHorsRafale);
+                }
                 traiter(vu, &mut etat, &mut debit, &serveurs, &mut fichiers);
+            }
+            if let Some(r) = rancon.as_mut() {
+                tour_rancon(r, &mut etat, &mut debit);
             }
             if let Some(n) = debit.resume(maintenant()) {
                 tableau::noter_alerte(
@@ -1460,6 +1515,10 @@ fn servir() -> i32 {
                     ),
                 );
             }
+        } else if let Some(r) = rancon.as_mut() {
+            // En pause, les changements de fichiers sont jetés comme les lancements : le canal ne gonfle pas, et rien
+            // ne se tasse dans une même fenêtre au retour.
+            r.jeter();
         }
         if minute.elapsed() >= Duration::from_mins(1) {
             minute = Instant::now();
@@ -1488,6 +1547,211 @@ fn servir() -> i32 {
     etat.non_haches += fichiers.prendre_non_haches() as u64;
     ecrire_etat(&etat);
     sortie
+}
+
+// ───────────────────────────── Veille anti-rançongiciel ─────────────────────────────
+
+/// Construit la veille des dossiers personnels si elle est voulue ; met à jour l'état (en marche, ou pourquoi pas).
+fn construire_veille(etat: &mut Etat) -> Option<veille::Veille> {
+    if !rancon_voulu() {
+        return None;
+    }
+    let reglages = Reglages::charger();
+    let mut dossiers = crate::protection::pieges::dossiers_a_veiller();
+    for d in &reglages.dossiers_en_plus {
+        let p = PathBuf::from(d);
+        if p.is_dir() {
+            dossiers.push(p);
+        }
+    }
+    dossiers.sort();
+    dossiers.dedup();
+    let pieges: HashSet<PathBuf> = crate::protection::pieges::chemins_poses().into_iter().collect();
+    if let Some(v) = veille::Veille::demarrer(&dossiers, pieges) {
+        etat.rancon_actif = true;
+        etat.rancon_sans = None;
+        Some(v)
+    } else {
+        etat.rancon_actif = false;
+        etat.rancon_sans = Some(
+            tr!(
+                "surveillance des fichiers indisponible (aucun dossier à suivre, ou inotify saturé)",
+                "file watching unavailable (no folder to watch, or inotify exhausted)"
+            )
+            .to_string(),
+        );
+        None
+    }
+}
+
+/// Un tour de la veille des fichiers : vider le canal, juger la fenêtre, puis alerter ou (quasi certain) geler et
+/// arrêter.
+fn tour_rancon(v: &mut veille::Veille, etat: &mut Etat, debit: &mut Debit) {
+    v.absorber();
+    etat.rancon_changements = v.changements_vus;
+    etat.rancon_perdus += v.prendre_perdus();
+    let maintenant_i = Instant::now();
+    let (s, reecrits) = v.signaux(maintenant_i);
+    // L'attribution (deux relevés à ~1 s) n'a lieu que si tout le reste atteint déjà le quasi-certain : rare, et elle
+    // seule justifie son coût.
+    let (attribution_sure, groupe) = if score::juger(&s, true) == Verdict::QuasiCertain {
+        match veille::attribuer(v, &reecrits) {
+            Attribution::Une(g) => (true, Some(g)),
+            Attribution::Plusieurs | Attribution::Aucune => (false, None),
+        }
+    } else {
+        (false, None)
+    };
+    match score::juger(&s, attribution_sure) {
+        Verdict::Calme => {}
+        Verdict::QuasiCertain => {
+            if let Some(g) = groupe {
+                repondre_quasi_certain(g, &s, etat, debit);
+            }
+        }
+        verdict => alerter_rafale(verdict, &s, groupe, debit),
+    }
+}
+
+/// Le programme d'un groupe : son nom court et son chemin, lus maintenant.
+fn programme_du_groupe(pid: u32) -> (String, Option<PathBuf>) {
+    let nom = crate::socle::processus::nom_court(pid).unwrap_or_default();
+    let chemin = crate::socle::processus::programme(pid).map(|c| {
+        PathBuf::from(
+            c.to_string_lossy()
+                .strip_suffix(" (deleted)")
+                .unwrap_or(&c.to_string_lossy())
+                .to_string(),
+        )
+    });
+    (nom, chemin)
+}
+
+/// Quasi certain : gel + preuve + arrêt + quarantaine, si la protection active le permet ; sinon une alerte Grave avec
+/// « Bloquer » proposé au prochain bilan.
+fn repondre_quasi_certain(groupe: u32, s: &score::Signaux, etat: &mut Etat, debit: &mut Debit) {
+    let (nom, chemin) = programme_du_groupe(groupe);
+    let objet = chemin
+        .as_ref()
+        .map_or_else(|| format!("pid:{groupe}"), |c| c.to_string_lossy().into_owned());
+    let cle = format!("veilleur|rancongiciel|{objet}");
+    let nom_aff = crate::ui::affichable(&nom);
+    let detection = trf!(
+        "rançongiciel quasi certain : {} fichiers chiffrés dans {} dossiers, un piège touché",
+        "almost certain ransomware: {} files encrypted across {} folders, a decoy touched",
+        s.reecrits,
+        s.dossiers
+    );
+    // Si la personne l'a déjà déclaré normal (un outil de chiffrement voulu), rien tout seul.
+    let cle_normale = crate::protection::normales::cle_veilleur(&format!("rancongiciel|{objet}"));
+    if crate::protection::normales::est_normale(&cle_normale) {
+        return;
+    }
+    if !crate::protection::blocage::arret_automatique_programmes_permis() {
+        // Alerte Grave, « Bloquer » proposé au bilan ; jamais d'arrêt sans la protection active.
+        let titre = tr!("Vanguard : rançongiciel possible", "Vanguard: possible ransomware");
+        let texte = trf!(
+            "{nom_aff} a réécrit {} de tes fichiers dans {} dossiers, et leur contenu ne ressemble plus à leur format (chiffré). Coupe Internet et débranche tes disques de sauvegarde, puis ouvre Vanguard pour le bloquer.",
+            "{nom_aff} rewrote {} of your files across {} folders, and their content no longer matches their format (encrypted). Cut the Internet and unplug your backup drives, then open Vanguard to block it.",
+            s.reecrits,
+            s.dossiers
+        );
+        noter_rancon(debit, &cle, true, titre, &texte);
+        return;
+    }
+    let cible = reponse::Cible {
+        racine: groupe,
+        nom,
+        chemin: chemin.clone(),
+        fichier: chemin,
+        detection: detection.clone(),
+        cle: cle.clone(),
+    };
+    match reponse::geler_et_arreter(&cible, || veille::lignee_de(groupe)) {
+        reponse::Issue::Arrete(_) => {
+            etat.rancon_gels += 1;
+            etat.rancon_rafales += 1;
+            let titre = tr!("Vanguard : rançongiciel arrêté", "Vanguard: ransomware stopped");
+            let texte = trf!(
+                "{nom_aff} chiffrait tes fichiers et a touché un fichier-piège. Vanguard l'a gelé, a relevé la preuve, puis l'a arrêté et mis en quarantaine. {} fichiers ont été touchés avant l'arrêt : la liste est dans « Ce que Vanguard a changé ».",
+                "{nom_aff} was encrypting your files and touched a decoy file. Vanguard froze it, recorded the evidence, then stopped and quarantined it. {} files were touched before the stop: the list is in “What Vanguard changed”.",
+                s.reecrits
+            );
+            // Toujours notifier un arrêt automatique, même si la clé a été dite normale avant.
+            crate::reseau::surveillance::alerter_cle(crate::reseau::tableau::Genre::Rancongiciel, &cle, titre, &texte);
+        }
+        reponse::Issue::Gele { raison, geles } => {
+            // Ajoutés, pas remplacés : un second gel ne doit pas faire oublier le premier.
+            etat.pids_geles.extend(geles);
+            etat.pids_geles.sort_unstable();
+            etat.pids_geles.dedup();
+            let titre = tr!("Vanguard : rançongiciel gelé", "Vanguard: ransomware frozen");
+            // Seul ce qui existe est proposé : aucun écran n'offre encore « Reprendre » ni « Arrêter » à part.
+            let texte = trf!(
+                "{nom_aff} est gelé, pas arrêté : {raison}. Si c'est toi : vanguard veilleur rancongiciel off le reprend (et coupe la surveillance des fichiers).",
+                "{nom_aff} is frozen, not stopped: {raison}. If it was you: vanguard watcher ransomware off resumes it (and turns file watching off)."
+            );
+            crate::reseau::surveillance::alerter_cle(crate::reseau::tableau::Genre::Rancongiciel, &cle, titre, &texte);
+        }
+        reponse::Issue::Refuse(raison) => {
+            let titre = tr!("Vanguard : rançongiciel possible", "Vanguard: possible ransomware");
+            let texte = trf!(
+                "Des fichiers sont chiffrés en rafale, mais Vanguard ne peut pas geler le programme ({raison}) : rien n'est arrêté tout seul. Coupe Internet et ouvre Vanguard.",
+                "Files are being encrypted in a burst, but Vanguard cannot freeze the program ({raison}): nothing is stopped automatically. Cut the Internet and open Vanguard."
+            );
+            noter_rancon(debit, &cle, true, titre, &texte);
+        }
+    }
+}
+
+/// Suspect ou Grave sans attribution sûre : une alerte, nommée si un seul groupe est connu, « non attribué » sinon.
+fn alerter_rafale(verdict: Verdict, s: &score::Signaux, groupe: Option<u32>, debit: &mut Debit) {
+    let grave = verdict >= Verdict::Grave;
+    let (cle, texte) = match groupe.map(programme_du_groupe) {
+        Some((nom, chemin)) => {
+            let objet = chemin
+                .as_ref()
+                .map_or_else(|| "rafale".to_string(), |c| c.to_string_lossy().into_owned());
+            let nom_aff = crate::ui::affichable(&nom);
+            (
+                format!("veilleur|rancongiciel|{objet}"),
+                trf!(
+                    "{nom_aff} a réécrit {} de tes fichiers dans {} dossiers, et leur contenu ne ressemble plus à leur format (chiffré). Coupe Internet et débranche tes disques de sauvegarde, puis ouvre Vanguard pour le bloquer.",
+                    "{nom_aff} rewrote {} of your files across {} folders, and their content no longer matches their format (encrypted). Cut the Internet and unplug your backup drives, then open Vanguard to block it.",
+                    s.reecrits,
+                    s.dossiers
+                ),
+            )
+        }
+        None => (
+            "veilleur|rancongiciel|rafale".to_string(),
+            trf!(
+                "Des fichiers sont chiffrés en rafale ({} dans {} dossiers), mais Vanguard ne sait pas quel programme le fait (non vérifié) : rien n'est arrêté tout seul. Coupe Internet et ouvre Vanguard.",
+                "Files are being encrypted in a burst ({} across {} folders), but Vanguard cannot tell which program is doing it (not verified): nothing is stopped automatically. Cut the Internet and open Vanguard.",
+                s.reecrits,
+                s.dossiers
+            ),
+        ),
+    };
+    let titre = tr!("Vanguard : rançongiciel possible", "Vanguard: possible ransomware");
+    noter_rancon(debit, &cle, grave, titre, &texte);
+}
+
+/// Note une alerte de la veille des fichiers, au débit du veilleur ; notifie si grave.
+fn noter_rancon(debit: &mut Debit, cle: &str, grave: bool, titre: &str, texte: &str) {
+    use crate::reseau::tableau::Genre;
+    if crate::protection::normales::est_normale(cle) {
+        return;
+    }
+    match debit.decider(cle, grave, maintenant()) {
+        Decision::Noter { notifier: true } => {
+            crate::reseau::surveillance::alerter_cle(Genre::Rancongiciel, cle, titre, texte);
+        }
+        Decision::Noter { notifier: false } => {
+            tableau::noter_alerte_cle(Genre::Rancongiciel, Some(cle), titre, texte);
+        }
+        Decision::Repete | Decision::Taire => {}
+    }
 }
 
 /// Un événement vu : compté, puis jugé et noté selon le débit.
@@ -1576,11 +1840,11 @@ fn unite_dans(exe: &str, anglais: bool) -> String {
                    SystemCallFilter=@system-service\nRestrictAddressFamilies=AF_UNIX AF_NETLINK\n";
     if anglais {
         format!(
-            "{MARQUE_EN};\n# “vanguard watcher off” removes it.\n[Unit]\nDescription=Vanguard: watcher (observes, stops nothing)\nStartLimitIntervalSec=1h\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart={exe} veilleur --servir\n# One tokio worker: one per core would exceed TasksMax.\nEnvironment=TOKIO_WORKER_THREADS=1\n{durcissement}# 77: kernel too old or kernel refusal; a restart changes nothing.\n{limites}# No ProtectSystem, ProtectHome, PrivateTmp, ReadOnlyPaths,\n# ReadWritePaths, ProtectKernel*, ProtectControlGroups, PrivateDevices\n# or PrivateUsers: in a user unit, they create a user namespace where\n# the kernel ignores the connector subscription (measured: no ack).\n# No Nice: the later the watcher runs, the more a brief program is gone\n# before it is read.\n\n[Install]\nWantedBy=default.target\n"
+            "{MARQUE_EN};\n# “vanguard watcher off” removes it.\n[Unit]\nDescription=Vanguard: watcher\nStartLimitIntervalSec=1h\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart={exe} veilleur --servir\n# One tokio worker: one per core would exceed TasksMax.\nEnvironment=TOKIO_WORKER_THREADS=1\n{durcissement}# 77: kernel too old or kernel refusal; a restart changes nothing.\n{limites}# No ProtectSystem, ProtectHome, PrivateTmp, ReadOnlyPaths,\n# ReadWritePaths, ProtectKernel*, ProtectControlGroups, PrivateDevices\n# or PrivateUsers: in a user unit, they create a user namespace where\n# the kernel ignores the connector subscription (measured: no ack).\n# No Nice: the later the watcher runs, the more a brief program is gone\n# before it is read.\n\n[Install]\nWantedBy=default.target\n"
         )
     } else {
         format!(
-            "{MARQUE_FR} ;\n# « vanguard veilleur off » le retire.\n[Unit]\nDescription=Vanguard : veilleur (observe, n'arrête rien)\nStartLimitIntervalSec=1h\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart={exe} veilleur --servir\n# Un seul fil de travail pour tokio : un par cœur dépasserait TasksMax.\nEnvironment=TOKIO_WORKER_THREADS=1\n{durcissement}# 77 : noyau trop ancien ou refus du noyau ; relancer n'y change rien.\n{limites}# Ni ProtectSystem, ProtectHome, PrivateTmp, ReadOnlyPaths,\n# ReadWritePaths, ProtectKernel*, ProtectControlGroups, PrivateDevices\n# ni PrivateUsers : dans une unité de l'utilisateur, ils créent un\n# espace de noms d'utilisateur où le noyau ignore l'abonnement au\n# connecteur (mesuré : plus d'accusé).\n# Pas de Nice : plus le veilleur est servi tard, plus un programme bref\n# part avant d'être lu.\n\n[Install]\nWantedBy=default.target\n"
+            "{MARQUE_FR} ;\n# « vanguard veilleur off » le retire.\n[Unit]\nDescription=Vanguard : veilleur\nStartLimitIntervalSec=1h\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart={exe} veilleur --servir\n# Un seul fil de travail pour tokio : un par cœur dépasserait TasksMax.\nEnvironment=TOKIO_WORKER_THREADS=1\n{durcissement}# 77 : noyau trop ancien ou refus du noyau ; relancer n'y change rien.\n{limites}# Ni ProtectSystem, ProtectHome, PrivateTmp, ReadOnlyPaths,\n# ReadWritePaths, ProtectKernel*, ProtectControlGroups, PrivateDevices\n# ni PrivateUsers : dans une unité de l'utilisateur, ils créent un\n# espace de noms d'utilisateur où le noyau ignore l'abonnement au\n# connecteur (mesuré : plus d'accusé).\n# Pas de Nice : plus le veilleur est servi tard, plus un programme bref\n# part avant d'être lu.\n\n[Install]\nWantedBy=default.target\n"
         )
     }
 }
@@ -1620,8 +1884,8 @@ fn systemctl(args: &[&str]) -> bool {
 
 fn explication() -> &'static str {
     tr!(
-        "Le veilleur voit chaque programme lancé sur cet ordinateur, de tous les comptes, même s'il ne vit que quelques millisecondes, et chaque connexion TCP ou UDP au moment où elle se ferme. Il les juge comme le bilan (outil offensif connu, commande qui télécharge ou cache ce qu'elle lance) et contre les serveurs de commande de botnets déjà téléchargés par la surveillance ou le bilan. Il n'arrête rien, n'envoie rien, et ne garde que les alertes, au tableau de bord (vanguard tableau). Un programme parti avant d'être lu est compté tel quel, jamais jugé sain ; le programme d'une connexion fermée n'est pas connu (le noyau ne le donne pas). Il tourne pendant ta session ouverte, sans droits d'administrateur ni code chargé dans le noyau.",
-        "The watcher sees each program started on this computer, from every account, even one that lives only a few milliseconds, and each TCP or UDP connection as it closes. It judges them as the check does (known offensive tool, command that downloads or hides what it runs) and against the botnet command servers already downloaded by the monitoring or the check. It stops nothing, sends nothing, and keeps only the alerts, on the dashboard (vanguard dashboard). A program gone before it could be read is counted as such, never judged safe; the program of a closed connection is not known (the kernel does not give it). It runs while your session is open, without administrator rights or code loaded into the kernel."
+        "Le veilleur voit chaque programme lancé sur cet ordinateur, de tous les comptes, même s'il ne vit que quelques millisecondes, et chaque connexion TCP ou UDP au moment où elle se ferme. Il les juge comme le bilan (outil offensif connu, commande qui télécharge ou cache ce qu'elle lance) et contre les serveurs de commande de botnets déjà téléchargés par la surveillance ou le bilan. Il n'envoie rien, et garde les alertes au tableau de bord (vanguard tableau). Après l'allumage, il te propose aussi de surveiller tes dossiers personnels contre les rançongiciels : avec la protection active, il peut alors geler puis arrêter un rançongiciel quasi certain. Un programme parti avant d'être lu est compté tel quel, jamais jugé sain ; le programme d'une connexion fermée n'est pas connu (le noyau ne le donne pas). Il tourne pendant ta session ouverte, sans droits d'administrateur ni code chargé dans le noyau.",
+        "The watcher sees each program started on this computer, from every account, even one that lives only a few milliseconds, and each TCP or UDP connection as it closes. It judges them as the check does (known offensive tool, command that downloads or hides what it runs) and against the botnet command servers already downloaded by the monitoring or the check. It sends nothing, and keeps the alerts on the dashboard (vanguard dashboard). After it is turned on, it also offers to watch your personal folders against ransomware: with active protection, it can then freeze and stop an almost certain ransomware. A program gone before it could be read is counted as such, never judged safe; the program of a closed connection is not known (the kernel does not give it). It runs while your session is open, without administrator rights or code loaded into the kernel."
     )
 }
 
@@ -1744,6 +2008,8 @@ fn allumer() {
             "  ⚠ Watcher set up, not seen running yet: “vanguard watcher” tells again in a moment; journalctl --user -u {UNITE} tells why."
         );
     }
+    // Dans le même accord : proposer la surveillance des dossiers personnels contre les rançongiciels (point ouvert 6).
+    proposer_rancon();
 }
 
 /// Peut-on écrire notre unité, d'après ce qui est à sa place (`std::fs::read`) ? Seulement si rien n'y est, ou si
@@ -1847,6 +2113,12 @@ pub(crate) fn retirer_sans_question(chemin: &std::path::Path, arreter_l_etranger
     }
     // Lu avant l'arrêt : le service le réécrit tant qu'il tourne, et il dit quel processus vérifier ensuite.
     let avant = lire_etat();
+    // Couper le veilleur ne doit pas laisser un programme gelé : on dégèle ce qu'il avait gelé (« Reprendre »).
+    if let Some(e) = &avant
+        && !e.pids_geles.is_empty()
+    {
+        reponse::reprendre(&e.pids_geles);
+    }
     let arrete = systemctl(&["--user", "disable", "--now", UNITE]);
     let mut commandes = vec![format!("systemctl --user disable --now {UNITE}")];
     if a_nous {
@@ -1900,15 +2172,19 @@ fn oublier_le_choix(issue: &Retire, dossier: &std::path::Path) {
     if !matches!(issue, Retire::Echoue(_)) {
         let _ = std::fs::remove_file(dossier.join(VOULU));
         let _ = std::fs::remove_file(dossier.join(ETAT));
+        let _ = std::fs::remove_file(dossier.join(RANCON_VOULU));
     }
 }
 
 // ───────────────────────────── Commande, menu, bilan ─────────────────────────────
 
-/// `vanguard veilleur [on|off]`, et le service lui-même (`--servir`).
-pub(crate) fn commande(etat: Option<&str>, servir: bool) {
+/// `vanguard veilleur [on|off]`, `vanguard veilleur rancongiciel [on|off]`, et le service lui-même (`--servir`).
+pub(crate) fn commande(etat: Option<&str>, sous_etat: Option<&str>, servir: bool) {
     if servir {
         std::process::exit(self::servir());
+    }
+    if matches!(etat, Some("rancongiciel" | "ransomware")) {
+        return commande_rancon(sous_etat);
     }
     titre(tr!(
         "Veilleur : lancements et connexions",
@@ -1935,6 +2211,139 @@ pub(crate) fn commande(etat: Option<&str>, servir: bool) {
             }
         }
     }
+}
+
+// ───────────────────────────── Accord de la veille anti-rançongiciel ─────────────────────────────
+
+/// Le texte d'accord de la surveillance des fichiers (plan §5) : lu avant la question, dans la langue du bureau.
+fn texte_accord_rancon() -> &'static str {
+    tr!(
+        "Le veilleur surveillera aussi tes dossiers personnels en direct. Il lit au plus 12 Kio des fichiers qui viennent d'être réécrits, en mémoire, pour voir s'ils sont chiffrés ; rien ne quitte cet ordinateur. Avec la protection active, il peut geler puis arrêter tout seul un rançongiciel quasi certain (jusqu'ici le veilleur n'arrêtait rien). Un programme malveillant de ton compte peut l'éteindre : ce n'est pas un rempart, ta sauvegarde reste la vraie protection.",
+        "The watcher will also watch your personal folders live. It reads at most 12 KiB of files that were just rewritten, in memory, to see whether they are encrypted; nothing leaves this computer. With active protection, it can freeze then stop an almost certain ransomware by itself (until now the watcher stopped nothing). A malicious program in your account can switch it off: it is not a wall, your backup remains the real protection."
+    )
+}
+
+/// Après l'allumage du veilleur, propose d'ajouter la surveillance des fichiers (point ouvert 6 : même « on »). À
+/// quelqu'un qui peut répondre seulement.
+fn proposer_rancon() {
+    if rancon_voulu() || !std::io::stdin().is_terminal() {
+        return;
+    }
+    println!();
+    afficher_aligne("  ", texte_accord_rancon(), 2, "");
+    if !demander(tr!(
+        "\n  Surveiller aussi tes dossiers personnels contre les rançongiciels ? [o/N] : ",
+        "\n  Also watch your personal folders against ransomware? [y/N]: "
+    ))
+    .oui()
+    {
+        trp!(
+            "  La surveillance des fichiers reste coupée ; « vanguard veilleur rancongiciel on » l'allumera.",
+            "  File watching stays off; “vanguard watcher ransomware on” will turn it on."
+        );
+        return;
+    }
+    activer_rancon();
+}
+
+/// Note le choix, propose les pièges s'il n'y en a pas, et redémarre le service pour qu'il prenne la surveillance.
+fn activer_rancon() {
+    if let Some(d) = fichier_rancon_voulu().parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(fichier_rancon_voulu(), b"");
+    let _ = systemctl(&["--user", "try-restart", UNITE]);
+    trp!(
+        "  {VERT}✔{RESET} Surveillance des fichiers allumée : une rafale de chiffrement t'alerte en quelques secondes.",
+        "  {VERT}✔{RESET} File watching on: an encryption burst alerts you within seconds."
+    );
+    trp!(
+        "  Limite : un programme qui écrit par un lien physique placé hors de ces dossiers échappe à cette veille ; les pièges restent vérifiés chaque heure.",
+        "  Limit: a program writing through a hard link placed outside these folders escapes this watch; decoys are still checked hourly."
+    );
+    if crate::protection::pieges::chemins_poses().is_empty() {
+        trp!(
+            "  Aucun fichier-piège posé : « vanguard pieges » en pose (accord séparé) ; ils rendent l'arrêt automatique possible.",
+            "  No decoy file placed: “vanguard decoys” places some (separate consent); they make the automatic stop possible."
+        );
+    }
+}
+
+/// `vanguard veilleur rancongiciel [on|off]`.
+fn commande_rancon(sous_etat: Option<&str>) {
+    titre(tr!("Veilleur : rançongiciels", "Watcher: ransomware"));
+    match sous_etat {
+        Some("on") => {
+            if !voulu() && crate::machine::linux::natif::unite_activee(UNITE, true) != Some(true) {
+                trp!(
+                    "  Allume d'abord le veilleur : « vanguard veilleur on » (il propose la surveillance des fichiers).",
+                    "  Turn the watcher on first: “vanguard watcher on” (it offers file watching)."
+                );
+                return;
+            }
+            if rancon_voulu() {
+                trp!(
+                    "  {VERT}✔{RESET} La surveillance des fichiers est déjà allumée.",
+                    "  {VERT}✔{RESET} File watching is already on."
+                );
+                return;
+            }
+            afficher_aligne("  ", texte_accord_rancon(), 2, "");
+            if demander(tr!("\n  Allumer ? [o/N] : ", "\n  Turn it on? [y/N]: ")).oui() {
+                activer_rancon();
+            } else {
+                trp!("  Rien n'est changé.", "  Nothing is changed.");
+            }
+        }
+        Some("off") => couper_rancon(),
+        _ => {
+            let etat = lire_etat();
+            let message = if !rancon_voulu() {
+                tr!(
+                    "Surveillance des fichiers : coupée. « vanguard veilleur rancongiciel on » l'allume (le veilleur doit être allumé).",
+                    "File watching: off. “vanguard watcher ransomware on” turns it on (the watcher must be on)."
+                )
+                .to_string()
+            } else if let Some(e) = etat.filter(|e| vivant_d_apres(e, maintenant())) {
+                trf!(
+                    "Surveillance des fichiers : allumée. {} changement(s) vu(s), {} rafale(s), {} rançongiciel(s) arrêté(s).",
+                    "File watching: on. {} change(s) seen, {} burst(s), {} ransomware stopped.",
+                    e.rancon_changements,
+                    e.rancon_rafales,
+                    e.rancon_gels
+                )
+            } else {
+                tr!(
+                    "Surveillance des fichiers : voulue, mais le veilleur n'est pas vu en marche.",
+                    "File watching: wanted, but the watcher is not seen running."
+                )
+                .to_string()
+            };
+            afficher_aligne("  ", &message, 4, "");
+        }
+    }
+}
+
+/// Coupe la surveillance des fichiers (dégèle ce qui restait gelé), puis redémarre le service.
+fn couper_rancon() {
+    if !rancon_voulu() {
+        trp!(
+            "  {VERT}✔{RESET} La surveillance des fichiers est déjà coupée.",
+            "  {VERT}✔{RESET} File watching is already off."
+        );
+        return;
+    }
+    if let Some(e) = lire_etat()
+        && !e.pids_geles.is_empty()
+    {
+        reponse::reprendre(&e.pids_geles);
+    }
+    let _ = std::fs::remove_file(fichier_rancon_voulu());
+    let _ = systemctl(&["--user", "try-restart", UNITE]);
+    trp!(
+        "  {VERT}✔{RESET} Surveillance des fichiers coupée (le veilleur continue d'observer lancements et connexions).",
+        "  {VERT}✔{RESET} File watching off (the watcher keeps observing launches and connections)."
+    );
 }
 
 fn precision_de(activee: Option<bool>, vivant: bool, pause: bool) -> &'static str {
@@ -2085,6 +2494,28 @@ fn juger_etat(voulu: bool, activee: Option<bool>, etat: Option<&Etat>, vivant: b
                     )
                     .to_string(),
                 );
+            }
+            // La veille anti-rançongiciel : son état, ses rafales, les rançongiciels arrêtés.
+            if e.rancon_actif {
+                ajouter(trf!(
+                    "Veille anti-rançongiciel allumée : {} changement(s) de fichiers vu(s), {} rafale(s), {} rançongiciel(s) arrêté(s).",
+                    "Ransomware watch on: {} file change(s) seen, {} burst(s), {} ransomware stopped.",
+                    e.rancon_changements,
+                    e.rancon_rafales,
+                    e.rancon_gels
+                ));
+            } else if let Some(r) = &e.rancon_sans {
+                ajouter(trf!(
+                    "Veille anti-rançongiciel voulue mais inactive : {r}.",
+                    "Ransomware watch wanted but inactive: {r}."
+                ));
+            }
+            if !e.pids_geles.is_empty() {
+                ajouter(trf!(
+                    "{} programme(s) resté(s) gelé(s) : vanguard veilleur rancongiciel off les reprend.",
+                    "{} program(s) left frozen: vanguard watcher ransomware off resumes them.",
+                    e.pids_geles.len()
+                ));
             }
             // En pause, sans fins de prises, avec des pertes ou des listes manquantes : une partie n'est pas vérifiée.
             // Le signe n'est donc pas vert (la note ne change pas), comme pour la protection en temps réel coupée.

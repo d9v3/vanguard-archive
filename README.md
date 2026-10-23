@@ -303,8 +303,11 @@ Téléchargements, d'un dossier temporaire ou de la corbeille.
 chaque programme lancé, même de quelques millisecondes, et chaque connexion TCP ou UDP au moment où elle se ferme.
 Les programmes sont jugés comme au bilan, les connexions contre les serveurs de commande de botnets déjà
 téléchargés ; le grave va au tableau de bord et en notification. Sans root ni code chargé dans le noyau, il
-n'arrête rien. Un programme parti avant d'être lu est compté tel quel, jamais jugé sain, et le programme d'une
-connexion fermée n'est pas connu (le noyau ne le donne pas).
+n'arrête rien de ce côté. Un programme parti avant d'être lu est compté tel quel, jamais jugé sain, et le programme
+d'une connexion fermée n'est pas connu (le noyau ne le donne pas). À l'allumage, le veilleur propose aussi de
+**surveiller tes dossiers personnels contre les rançongiciels** : une rafale de chiffrement t'alerte en quelques
+secondes, et, avec la protection active, un rançongiciel quasi certain (fichier-piège touché et rafale attribuée sans
+ambiguïté) est gelé, sa preuve relevée, puis arrêté et mis en quarantaine.
 
 **Portes cachées de Windows et pilotes du noyau** — les DLL que Windows charge lui-même, souvent avec les droits du
 système : paquets de LSA (un filtre de mot de passe reçoit chaque nouveau mot de passe en clair), AppCertDlls,
@@ -747,7 +750,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard maj` | mises à jour |
 | `vanguard reparer` | réparations et nettoyage |
 | `vanguard surveillance on\|off` | surveillance horaire |
-| `vanguard veilleur [on\|off]` | veilleur (Linux 6.6 et plus) : programmes lancés et connexions fermées, vus sur le moment ; coupé par défaut |
+| `vanguard veilleur [on\|off]` | veilleur (Linux 6.6 et plus) : programmes lancés et connexions fermées, vus sur le moment ; surveille aussi les dossiers contre les rançongiciels ; coupé par défaut |
 | `vanguard tableau [--sans-ouvrir]` | tableau de bord de la surveillance : page locale ouverte dans le navigateur ; `--sans-ouvrir` l'écrit seulement |
 | `vanguard entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
 | `vanguard nommer <ip\|mac> <surnom>` | nommer un appareil |

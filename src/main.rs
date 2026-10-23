@@ -174,12 +174,16 @@ enum Commande {
         etat: Option<String>,
     },
     /// Veilleur (Linux 6.6 et plus) : chaque programme lancé et chaque connexion fermée, vus sur le moment et jugés
-    /// comme au bilan ; il observe et n'arrête rien. Coupé par défaut. Sans argument : son état, puis l'allumer ou le
-    /// couper, après accord.
+    /// comme au bilan ; avec la protection active, il peut geler et arrêter un rançongiciel quasi certain. Coupé par
+    /// défaut. Sans argument : son état, puis l'allumer ou le couper, après accord. « rancongiciel on|off » règle la
+    /// veille anti-rançongiciel des dossiers personnels.
     #[command(visible_alias = "watcher")]
     Veilleur {
-        #[arg(value_parser = ["on", "off"])]
+        #[arg(value_parser = ["on", "off", "rancongiciel", "ransomware"])]
         etat: Option<String>,
+        /// Pour « rancongiciel » : on ou off.
+        #[arg(value_parser = ["on", "off"])]
+        sous_etat: Option<String>,
         /// Le service lui-même, lancé par systemd.
         #[arg(long, hide = true)]
         servir: bool,
@@ -1618,12 +1622,12 @@ fn precision_veilleur() -> &'static str {
 }
 
 /// Le veilleur : il lit deux flux du noyau Linux ; ailleurs, la commande le dit.
-fn veilleur(etat: Option<&str>, servir: bool) {
+fn veilleur(etat: Option<&str>, sous_etat: Option<&str>, servir: bool) {
     #[cfg(target_os = "linux")]
-    machine::linux::veilleur::commande(etat, servir);
+    machine::linux::veilleur::commande(etat, sous_etat, servir);
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (etat, servir);
+        let _ = (etat, sous_etat, servir);
         trp!(
             "Le veilleur n'existe que sous Linux : il lit deux flux du noyau Linux (programmes lancés, connexions fermées). Ici, la surveillance horaire prend une photo par heure : vanguard surveillance on.",
             "The watcher exists only on Linux: it reads two Linux kernel streams (programs started, connections closed). Here, hourly monitoring takes one snapshot an hour: vanguard monitor on."
@@ -1856,7 +1860,7 @@ async fn executer(s: &mut Session, action: Action) {
         }
         Action::Surveillance => reseau::surveillance::activer(!reseau::surveillance::active()),
         Action::Tableau => reseau::tableau::ouvrir(false),
-        Action::Veilleur => veilleur(None, false),
+        Action::Veilleur => veilleur(None, None, false),
         Action::Connexion => reseau::connexion::tester().await,
         Action::ListesNoires => reseau::listes_noires::verifier(),
         Action::WifiCanaux => reseau::canaux::analyser(),
@@ -1946,8 +1950,9 @@ const AIDES_EN: &[(&str, &str)] = &[
                           (abuse.ch key), after your consent and with administrator rights; \"off\" removes them \
                           exactly. Without argument: their state"),
     ("veilleur", "Watcher (Linux 6.6 and later): each program started and each connection closed, seen as they \
-                   happen and judged as in the check; it observes and stops nothing. Off by default. Without \
-                   argument: its state, then turning it on or off, after your consent"),
+                   happen and judged as in the check; with active protection, it can freeze and stop an almost \
+                   certain ransomware. Off by default. Without argument: its state, then turning it on or off, after \
+                   your consent. \"ransomware on|off\" sets the personal-folder ransomware watch"),
     ("entretien", "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new \
                    problems, in one notification; nothing is changed. Without argument: what it would say now"),
     ("maj", "Updates: system, programs, drivers and firmware checked at once, then installed with your consent"),
@@ -2123,6 +2128,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("antivirus", "dossier", "A USB drive, external disk or folder to scan entirely"),
     ("isoler", "fichier", "Program or script to run"),
     ("pieges", "retirer", "Remove the decoy files placed"),
+    ("veilleur", "sous_etat", "For “ransomware”: on or off"),
     ("yara", "complet", "The whole home folder instead of the risky places"),
     ("yara", "dossier", "A USB drive, external disk or folder to scan entirely"),
     ("integrite", "accepter", "Take the current state as the new reference (after a system update)"),
@@ -2307,7 +2313,11 @@ async fn main() {
         Some(Commande::Antivirus { complet, dossier }) => protection::antivirus::analyser(portee(dossier, complet)),
         Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
         Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),
-        Some(Commande::Veilleur { etat, servir }) => veilleur(etat.as_deref(), servir),
+        Some(Commande::Veilleur {
+            etat,
+            sous_etat,
+            servir,
+        }) => veilleur(etat.as_deref(), sous_etat.as_deref(), servir),
         Some(Commande::SitesDangereux { etat }) => protection::sites_bloques::commande(etat.as_deref()),
         Some(Commande::DernieresFailles { jours }) => protection::kev::ecran(jours),
         Some(Commande::Surveiller) => reseau::surveillance::surveiller().await,
