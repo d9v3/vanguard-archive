@@ -82,3 +82,5 @@ serveur https://codeload.github.com/mozilla/foundation-security-advisories/
 protege https://www.microsoft.com/en-us/msrc/
 protege https://www.microsoft.com/en-us/wdsi/
 essai https://bugzilla.mozilla.org/enter_bug.cgi https://bugzilla.mozilla.org/enter_bug.cgi?product=Firefox
+# Exemple d'adresse dans un commentaire de src/protection/espions/echap.rs (forme d'une ligne de distribution), jamais ouvert.
+ignorer https://github.com/x/y
