@@ -353,6 +353,13 @@ pub const PROGRAMMES: &[Programme] = &[
                 true,
             ),
             traduite(
+                "vanguard wifi-public on",
+                "vanguard public-wifi on",
+                "Mode Wi-Fi public (café, hôtel) : entrées fermées, partages coupés, DNS protecteur ; « off » remet tout.",
+                "Public Wi-Fi mode (café, hotel): incoming closed, sharing off, protective DNS; “off” puts it all back.",
+                true,
+            ),
+            traduite(
                 "vanguard copier-fichiers",
                 "vanguard copy-files",
                 "Copier mes fichiers vers un disque externe : copie vérifiée, rien d'effacé.",

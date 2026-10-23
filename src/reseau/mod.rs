@@ -13,6 +13,7 @@ pub mod scan;
 pub mod surveillance;
 pub mod tableau;
 pub mod upnp;
+pub mod wifi_public;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;

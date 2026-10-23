@@ -1401,3 +1401,44 @@ fn protection_en_temps_reel_coupee_puis_remise() {
     assert!(lancer("en", &["settings", "--help"], "").contains("real-time no --for 1h|4h"));
     let _ = std::fs::remove_dir_all(&maison);
 }
+
+/// Mode Wi-Fi public, sans rien changer : sans argument, son état (éteint) et rien de lancé ; « off » sans état, rien
+/// à éteindre ; un état posé par un autre programme (sans sceau) n'est jamais remis : extinction sûre proposée,
+/// refusée, l'état reste.
+#[test]
+fn wifi_public_sans_rien_changer() {
+    let s = vanguard("fr", &["wifi-public", "off"], "", 30);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    assert!(sans_couleurs(&s.texte).contains("rien à éteindre"), "{}", s.texte);
+    let s = vanguard("en", &["public-wifi"], "\n", 60);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    assert!(
+        t.contains("Public Wi-Fi mode") && t.contains("Off.") && t.contains("Turn the mode on"),
+        "{t}"
+    );
+    let s = vanguard("fr", &["wifi-public", "demain"], "", 30);
+    assert_ne!(s.code, Some(0), "valeur hors de on, off, portail");
+    if cfg!(target_os = "linux") {
+        let maison = maison_jetable();
+        let donnees = maison.join("donnees/vanguard");
+        std::fs::create_dir_all(&donnees).unwrap();
+        let pose = r#"{"version":1,"etape":"allume","depuis":"2026-10-23 10:00","demarrage":"x",
+            "reseau":{"nom":"Café","interface":"wlan0","id":"0b8c2f4e-1a2b-4c3d-9e8f-001122334455"},
+            "elements":[{"genre":"nm","uuid":"0b8c2f4e-1a2b-4c3d-9e8f-001122334455","propriete":"connection.mdns","avant":"no"}]}"#;
+        std::fs::write(donnees.join("wifi-public.json"), pose).unwrap();
+        let s = vanguard_dans(
+            Path::new(env!("CARGO_BIN_EXE_vanguard")),
+            &maison,
+            "fr",
+            &["wifi-public", "off"],
+            "n\n",
+            30,
+        );
+        let t = sans_couleurs(&s.texte);
+        assert!(t.contains("Extinction sûre") && t.contains("Annulé"), "{t}");
+        assert!(!t.contains("nmcli"), "aucune valeur notée n'est proposée : {t}");
+        assert!(donnees.join("wifi-public.json").exists());
+        let _ = std::fs::remove_dir_all(&maison);
+    }
+}

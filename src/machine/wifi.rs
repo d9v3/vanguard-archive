@@ -18,7 +18,7 @@ pub(super) const CACHE: &str = "<redacted>";
 
 /// Un réseau Wi-Fi visible d'ici.
 #[derive(Debug, PartialEq)]
-pub(super) struct Visible {
+pub(crate) struct Visible {
     pub ssid: String,
     /// Protection telle que le système la nomme (« WPA2 », « WPA2-Personal », « Open », « Ouvert »…).
     pub securite: String,
@@ -29,7 +29,7 @@ pub(super) struct Visible {
 /// Force d'une protection : 0 ouverte, 1 faible (WEP, WPA, chiffrée sans mot de passe), 2 WPA2, 3 WPA3 ou entreprise
 /// (802.1X). Ce qui ne nomme aucune protection connue (« -- », « Open », « Ouvert », « None ») est ouvert, dans
 /// toutes les langues.
-pub(super) fn force(securite: &str) -> u8 {
+pub(crate) fn force(securite: &str) -> u8 {
     let s = securite.to_ascii_uppercase();
     if ["WPA3", "SAE", "802.1X", "ENTERPRISE", "ENTREPRISE"]
         .iter()
@@ -49,6 +49,11 @@ pub(crate) fn securite(ssid: &str, libelle: &str, admin: &[&str]) -> Constat {
     let routeur = tr!(
         "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »",
         "Open the router admin > Wi-Fi > Security: choose “WPA2/WPA3” or “WPA3”"
+    );
+    // Ouvert ou sans mot de passe : souvent un réseau public, que la box ne permet pas de régler.
+    let public = tr!(
+        "Sur un réseau public (café, hôtel) : « vanguard wifi-public on » ferme l'ordinateur à ce réseau ; chez toi, ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »",
+        "On a public network (café, hotel): “vanguard public-wifi on” closes the computer to this network; at home, open the router admin > Wi-Fi > Security: choose “WPA2/WPA3” or “WPA3”"
     );
     match force(libelle) {
         3 => ok("Wi-Fi", trf!("« {ssid} » en {libelle}.", "“{ssid}” uses {libelle}.")),
@@ -71,7 +76,7 @@ pub(crate) fn securite(ssid: &str, libelle: &str, admin: &[&str]) -> Constat {
                     "“{ssid}” is encrypted but has no password ({libelle}): anyone can join it."
                 ),
             )
-            .manuel(routeur, admin)
+            .manuel(public, admin)
         }
         1 => alerte(
             "Wi-Fi",
@@ -90,7 +95,7 @@ pub(crate) fn securite(ssid: &str, libelle: &str, admin: &[&str]) -> Constat {
                 "“{ssid}” is an open network: unencrypted traffic is visible."
             ),
         )
-        .manuel(routeur, admin),
+        .manuel(public, admin),
     }
 }
 
@@ -162,7 +167,7 @@ pub(super) fn jumeau(visibles: &[Visible]) -> Option<Constat> {
 /// contenir « : » ; un réseau caché (nom vide) est ignoré. Le nom, choisi par n'importe qui à portée, et la protection
 /// sont lus prêts à montrer (`affichable`), comme dans chaque lecture du Wi-Fi de ce fichier.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(super) fn lire_nmcli(sortie: &str) -> Vec<Visible> {
+pub(crate) fn lire_nmcli(sortie: &str) -> Vec<Visible> {
     sortie
         .lines()
         .filter_map(|l| {
@@ -203,7 +208,7 @@ pub(super) fn lire_netsh(sortie: &str) -> Vec<Visible> {
 /// Le réseau connecté, dans `netsh wlan show interfaces` : « SSID : Salon » et « Authentication : WPA2-Personal »
 /// (« Authentification » en français). `None` sans les deux : la carte n'est connectée à aucun réseau.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub(super) fn connexion_netsh(sortie: &str) -> Option<Visible> {
+pub(crate) fn connexion_netsh(sortie: &str) -> Option<Visible> {
     let champ = |cle: &str| {
         sortie
             .lines()
@@ -266,7 +271,7 @@ fn blocs_system_profiler(sortie: &str) -> Vec<BlocMac<'_>> {
 
 /// `system_profiler SPAirPortDataType` : la protection de chaque réseau (« Security: WPA2 Personal »).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(super) fn lire_system_profiler(sortie: &str) -> Vec<Visible> {
+pub(crate) fn lire_system_profiler(sortie: &str) -> Vec<Visible> {
     blocs_system_profiler(sortie)
         .into_iter()
         .map(|b| Visible {

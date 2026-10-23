@@ -88,6 +88,12 @@ pub(crate) fn administrateur_ou_inconnu() -> bool {
     gestes::administrateur_ou_inconnu()
 }
 
+/// Une session à distance (SSH, Bureau à distance) est-elle en cours ? `None` : les connexions ne se lisent pas.
+#[cfg(windows)]
+pub(crate) fn session_a_distance() -> Option<bool> {
+    gardes::sessions_a_distance().map(|s| !s.sessions.is_empty())
+}
+
 /// La protection active est-elle réglée (accord donné, une catégorie automatique) ? Ce que la coupure du temps réel
 /// arrêterait.
 pub(crate) fn protection_active() -> bool {

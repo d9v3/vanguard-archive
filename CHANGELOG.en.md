@@ -9,6 +9,24 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Public Wi-Fi mode** (`vanguard public-wifi`, Network and Internet › Public Wi-Fi mode). Turn it on when arriving
+  at a café, a hotel or an airport, turn it off when leaving: the computer no longer accepts any connection from that
+  network (an SSH session already open stays), file sharing and the announcement of its name are off (on macOS, the
+  firewall closes sharing; Bonjour and AirDrop stay), and the DNS switches to the Canadian Shield “Protected”,
+  encrypted on Linux when systemd-resolved answers (a resolver on the computer, such as NextDNS, or a DNS already
+  encrypted and filtering, is kept). Incoming connections that could not be closed (no nft, unreadable firewall) are
+  stated in the menu and the check, never “everything in place”. On Linux, a separate nftables table and services
+  masked until restart, then mDNS, LLMNR and encrypted DNS on the public network's profile only; on Windows, Public
+  category, firewall Public profile closed to incoming connections, NetBIOS off, in a single administrator prompt; on
+  macOS, firewall set to “block all” and stealth mode. Each change is shown with its previous value, noted and sealed
+  before the first command; turning off puts everything back in reverse order, read back, even after a crash or a
+  restart (the menu and the check say so). A state changed outside Vanguard is never put back: safe shutdown instead,
+  which only removes Vanguard's table. A firewall found off is turned on and never turned off again. `vanguard
+  public-wifi portal` reopens the network's login page: encrypted DNS is relaxed until Enter, ten minutes at most, and
+  the next launch makes it strict again if Vanguard was closed before. Nothing is sent to recognize a public network:
+  a suggestion only. Tried on Linux (table set then removed in a separate namespace, previews); Windows and macOS:
+  compiled and partly tested, not yet tried on a real system, nor encrypted DNS on a real public network.
+
 - **Small safety fixes.** On Windows, system programs (netstat, netsh, powercfg, wevtutil, tasklist, schtasks,
   ipconfig, cmd, PowerShell…) are started by their path in System32, asked from Windows itself: a fake program of the
   same name placed next to Vanguard (Downloads) or in the current folder can no longer hide a port, a process or a

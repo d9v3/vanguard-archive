@@ -402,6 +402,13 @@ impl Changement {
         })
     }
 
+    /// La commande qui pose la valeur `v` d'un réglage de DNS (mode Wi-Fi public).
+    pub fn commande_dns(&self, v: &str) -> Option<String> {
+        matches!(self, Changement::Dns { .. })
+            .then(|| self.commande(Some(v)))
+            .flatten()
+    }
+
     /// La connexion d'un réglage de DNS.
     pub fn identite_dns(&self) -> Option<&str> {
         match self {

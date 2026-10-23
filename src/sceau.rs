@@ -38,7 +38,20 @@ pub(crate) const MACHINE: &str = "surveillance-machine.json";
 /// qui y écrit d'avance le ~/.bashrc qu'il vient de changer tairait la notification.
 pub(crate) const INTEGRITE_SIGNALE: &str = "integrite-signale.json";
 
-const PROTEGES: [&str; 6] = [APPRIS, INTEGRITE, INTEGRITE_SIGNALE, BOTNETS, VERSIONS, MACHINE];
+/// L'état du mode Wi-Fi public (`reseau::wifi_public`) : ce qu'il a changé et les valeurs d'avant, remises en
+/// administrateur à l'extinction. Un programme qui y écrirait une valeur d'avant à lui la ferait poser avec les droits
+/// d'administrateur.
+pub(crate) const WIFI_PUBLIC: &str = "wifi-public.json";
+
+const PROTEGES: [&str; 7] = [
+    APPRIS,
+    INTEGRITE,
+    INTEGRITE_SIGNALE,
+    BOTNETS,
+    VERSIONS,
+    MACHINE,
+    WIFI_PUBLIC,
+];
 
 const REGISTRE: &str = "sceaux.json";
 const VERROU: &str = "sceaux.verrou";

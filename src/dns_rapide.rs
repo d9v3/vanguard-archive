@@ -45,6 +45,12 @@ const PUBLICS: [Public; 5] = [
         bloque: Bloque::Malveillants },
 ];
 
+/// Les adresses du Bouclier canadien « Protégé » (IPv4, IPv6) : le DNS protecteur du mode Wi-Fi public.
+pub(crate) fn bouclier_protege() -> (&'static [&'static str; 2], &'static [&'static str; 2]) {
+    let p = &PUBLICS[4];
+    (&p.v4, &p.v6)
+}
+
 /// Des sites très visités, que tout DNS a souvent déjà en mémoire, comme lors d'une vraie navigation.
 #[rustfmt::skip] // une ligne de noms, que rustfmt étalerait sur six
 const NOMS: [&str; 6] = [
