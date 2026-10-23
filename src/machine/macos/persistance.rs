@@ -77,7 +77,7 @@ fn lire_programme(reglages: &Valeur) -> Option<(String, String)> {
 }
 
 /// Ce qui rend un lancement suspect : dossier temporaire ou caché, script qui télécharge ou décode du code.
-fn soupcon(programme: &str, arguments: &str) -> Option<&'static str> {
+pub(super) fn soupcon(programme: &str, arguments: &str) -> Option<&'static str> {
     let p = programme.to_lowercase();
     if [
         "/tmp/",

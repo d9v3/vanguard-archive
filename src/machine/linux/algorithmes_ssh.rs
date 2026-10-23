@@ -16,7 +16,11 @@ regle!(
         "algorithmes cassés ou faibles du serveur SSH",
         "broken or weak SSH server algorithms"
     ),
-    &["OpenSSH : sshd_config(5)"],
+    &[
+        "CIS Controls v8 3.10",
+        "ANSSI, Recommandations pour un usage sécurisé d'(Open)SSH",
+        "OpenSSH : sshd_config(5)"
+    ],
     || algorithmes_ssh().into_iter().collect()
 );
 

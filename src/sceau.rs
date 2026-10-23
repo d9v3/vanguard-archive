@@ -82,6 +82,9 @@ pub(crate) const TELECHARGEMENTS: &str = "surveillance-telechargements.json";
 /// Les menaces que le blocage automatique n'a pas pu bloquer, déjà signalées (`protection::blocage`) : une clé de
 /// menace ajoutée d'avance taisait « Vanguard n'a pas pu bloquer ».
 pub(crate) const BLOCAGE_SIGNALEES: &str = "blocage-non-bloquees.txt";
+/// Les logiciels installés déjà vus (`machine::logiciels_vus`) : un programme qui s'y ajouterait d'avance ne serait
+/// jamais signalé comme arrivé.
+pub(crate) const LOGICIELS: &str = "logiciels-vus.json";
 /// La clé principale des versions révoquée par la clé de secours (`mise_a_jour::github`).
 pub(crate) const REVOCATION: &str = "versions/principale-revoquee.txt";
 

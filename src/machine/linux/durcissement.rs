@@ -204,15 +204,61 @@ pub(super) fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'sta
     trop_bas.chain(interdits).collect()
 }
 
-pub(super) fn durcissement_noyau() -> Constat {
+/// Les trois règles du noyau, chacune pour sa famille de réglages : la règle unique d'avant (LNX-NOY-003) en
+/// couvrait une vingtaine sous un seul identifiant, si bien que l'historique et le rapport ne pouvaient pas suivre
+/// un réglage précis ni citer sa référence.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Groupe {
+    /// LNX-NOY-003 : mémoire et processus (ASLR, adresses du noyau, ptrace, journal du noyau, compteurs, vidages).
+    Memoire,
+    /// LNX-NOY-007 : liens, tubes et fichiers des dossiers partagés comme /tmp.
+    FichiersPartages,
+    /// LNX-RES-003 : la pile réseau (inondations SYN, redirections ICMP, filtre des adresses d'origine).
+    Reseau,
+}
+
+impl Groupe {
+    pub(super) fn de(cle: &str) -> Groupe {
+        if cle.starts_with("fs/protected_") {
+            Groupe::FichiersPartages
+        } else if cle.starts_with("net/") {
+            Groupe::Reseau
+        } else {
+            Groupe::Memoire
+        }
+    }
+
+    fn sain(self) -> &'static str {
+        match self {
+            Groupe::Memoire => tr!(
+                "Réglages du noyau pour la mémoire et les processus corrects (ASLR, ptrace, dmesg, adresses du noyau…).",
+                "Kernel settings for memory and processes are correct (ASLR, ptrace, dmesg, kernel addresses…)."
+            ),
+            Groupe::FichiersPartages => tr!(
+                "Liens, tubes et fichiers de /tmp protégés par le noyau.",
+                "Links, pipes and files in /tmp protected by the kernel."
+            ),
+            Groupe::Reseau => tr!(
+                "Réglages réseau du noyau corrects (SYN, redirections ICMP, filtre d'origine).",
+                "Kernel network settings are correct (SYN, ICMP redirects, source filter)."
+            ),
+        }
+    }
+}
+
+pub(super) fn durcissement_noyau(groupe: Groupe) -> Constat {
     let mut faibles = reglages_faibles(|cle| {
+        if Groupe::de(cle) != groupe {
+            return None;
+        }
         std::fs::read_to_string(format!("/proc/sys/{cle}"))
             .ok()?
             .trim()
             .parse()
             .ok()
     });
-    let ipv6 = redirections_ipv6(&interfaces_ipv6());
+    let interfaces = interfaces_ipv6();
+    let ipv6 = groupe == Groupe::Reseau && redirections_ipv6(&interfaces);
     if ipv6 {
         let role = if crate::langue::anglais() {
             "network interfaces in IPv6 do not follow ICMP redirects"
@@ -222,13 +268,7 @@ pub(super) fn durcissement_noyau() -> Constat {
         faibles.push((REDIRECTIONS_IPV6, 1, 0, role));
     }
     if faibles.is_empty() {
-        return ok(
-            "Noyau durci",
-            tr!(
-                "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens, réseau…).",
-                "Kernel security settings are correct (ASLR, ptrace, dmesg, links, network…)."
-            ),
-        );
+        return ok("Noyau durci", groupe.sain());
     }
     let niveau = if faibles.iter().any(|f| f.0 == "kernel/randomize_va_space") {
         Niveau::Moyen
@@ -239,16 +279,6 @@ pub(super) fn durcissement_noyau() -> Constat {
         .iter()
         .map(|(c, v, _, r)| format!("{} = {v} ({r})", c.replace('/', ".")))
         .collect();
-    // Le fichier est réécrit en entier : on garde les réglages qu'une correction précédente y avait mis,
-    // sinon ils sauteraient au prochain redémarrage.
-    let lignes = fusion_sysctl(
-        &std::fs::read_to_string(SYSCTL_VANGUARD).unwrap_or_default(),
-        &faibles
-            .iter()
-            .map(|(c, _, m, _)| (c.replace('/', "."), *m))
-            .collect::<Vec<_>>(),
-    )
-    .replace('\n', "\\n");
     alerte(
         "Noyau durci",
         niveau,
@@ -259,17 +289,28 @@ pub(super) fn durcissement_noyau() -> Constat {
             "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-vanguard.conf, gardé au redémarrage)",
             "Apply the safe values (file /etc/sysctl.d/99-vanguard.conf, kept after restart)"
         ),
-        &[
-            format!("printf '{lignes}' | sudo tee {SYSCTL_VANGUARD} >/dev/null"),
-            "sudo sysctl --system >/dev/null".to_string(),
-        ]
-        .into_iter()
-        .chain(ipv6.then(|| {
-            "sudo sh -c 'for f in /proc/sys/net/ipv6/conf/*/accept_redirects; do echo 0 > \"$f\"; done'".to_string()
-        }))
-        .collect::<Vec<_>>(),
+        &commandes_noyau(&faibles, ipv6),
     )
-    .annulable(gestes_noyau(&faibles, &interfaces_ipv6()))
+    .annulable(gestes_noyau(&faibles, &interfaces))
+}
+
+/// Les commandes d'une correction du noyau. Ses lignes sont ajoutées au fichier, jamais le fichier réécrit : deux
+/// corrections du noyau appliquées ensemble (une par règle) ne s'effacent pas l'une l'autre, et sysctl retient la
+/// dernière valeur d'une clé écrite deux fois. Seules des constantes du code passent par printf.
+fn commandes_noyau(faibles: &[(&str, i64, i64, &str)], ipv6: bool) -> Vec<String> {
+    let lignes = faibles.iter().fold(String::new(), |mut texte, (c, _, sure, _)| {
+        let _ = write!(texte, "{} = {sure}\\n", c.replace('/', "."));
+        texte
+    });
+    [
+        format!("printf '{lignes}' | sudo tee -a {SYSCTL_VANGUARD} >/dev/null"),
+        "sudo sysctl --system >/dev/null".to_string(),
+    ]
+    .into_iter()
+    .chain(ipv6.then(|| {
+        "sudo sh -c 'for f in /proc/sys/net/ipv6/conf/*/accept_redirects; do echo 0 > \"$f\"; done'".to_string()
+    }))
+    .collect()
 }
 
 /// Ce que la correction du noyau change, pour la défaire : son fichier, chaque réglage faible, et la redirection IPv6
@@ -290,32 +331,6 @@ fn gestes_noyau(faibles: &[(&str, i64, i64, &str)], interfaces: &[(String, i64)]
         }
     }
     g
-}
-
-/// Contenu de 99-vanguard.conf : les réglages déjà présents, mis à jour ou complétés par les nouveaux.
-pub(super) fn fusion_sysctl(existant: &str, nouveaux: &[(String, i64)]) -> String {
-    let mut reglages: Vec<(String, String)> = existant
-        .lines()
-        .filter_map(|l| {
-            let (k, v) = l.split_once('=')?;
-            let (k, v) = (k.trim(), v.trim());
-            // Le contenu repasse par printf dans le shell : seuls des caractères sans effet y sont gardés.
-            let sur = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || " ._-/".contains(c));
-            // « * » : le motif des interfaces (REDIRECTIONS_IPV6), sans effet entre apostrophes pour le shell.
-            let cle_sure = !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || "._-/*".contains(c));
-            (cle_sure && sur(v)).then(|| (k.to_string(), v.to_string()))
-        })
-        .collect();
-    for (cle, valeur) in nouveaux {
-        match reglages.iter_mut().find(|(k, _)| k == cle) {
-            Some(r) => r.1 = valeur.to_string(),
-            None => reglages.push((cle.clone(), valeur.to_string())),
-        }
-    }
-    reglages.iter().fold(String::new(), |mut texte, (k, v)| {
-        let _ = writeln!(texte, "{k} = {v}");
-        texte
-    })
 }
 
 /// Module de sécurité obligatoire (AppArmor, SELinux) : actif par défaut sur Ubuntu, Debian et Fedora.
@@ -464,23 +479,32 @@ mod tests {
         assert_eq!(reglages_faibles(|_| None), [] as [(&str, i64, i64, &str); 0]);
     }
 
+    /// Chaque correction ajoute ses lignes (jamais le fichier réécrit) : deux règles corrigées ensemble ne
+    /// s'effacent pas. Les clés sont réparties sans reste entre les trois règles.
     #[test]
-    fn sysctl_garde_les_reglages_precedents() {
-        let existant = "# vanguard\nkernel.kptr_restrict = 1\nkernel.dmesg_restrict=0\nmauvais = $(rm -rf ~)\n";
-        let nouveaux = [
-            ("kernel.dmesg_restrict".to_string(), 1),
-            ("fs.protected_symlinks".to_string(), 1),
-        ];
-        assert_eq!(
-            fusion_sysctl(existant, &nouveaux),
-            "kernel.kptr_restrict = 1\nkernel.dmesg_restrict = 1\nfs.protected_symlinks = 1\n"
+    fn corrections_du_noyau_par_groupe() {
+        let c = commandes_noyau(
+            &[("kernel/dmesg_restrict", 0, 1, "x"), ("fs/protected_fifos", 0, 1, "y")],
+            false,
         );
-        assert_eq!(fusion_sysctl("", &nouveaux[..1]), "kernel.dmesg_restrict = 1\n");
-        // Le motif des interfaces IPv6 se garde d'une correction à l'autre.
         assert_eq!(
-            fusion_sysctl("net.ipv6.conf.*.accept_redirects = 0\n", &nouveaux[..1]),
-            "net.ipv6.conf.*.accept_redirects = 0\nkernel.dmesg_restrict = 1\n"
+            c,
+            [
+                format!(
+                    "printf 'kernel.dmesg_restrict = 1\\nfs.protected_fifos = 1\\n' | sudo tee -a {SYSCTL_VANGUARD} >/dev/null"
+                ),
+                "sudo sysctl --system >/dev/null".to_string()
+            ]
         );
+        assert_eq!(commandes_noyau(&[], true).len(), 3);
+        assert_eq!(Groupe::de("kernel/kptr_restrict"), Groupe::Memoire);
+        assert_eq!(Groupe::de("fs/suid_dumpable"), Groupe::Memoire);
+        assert_eq!(Groupe::de("fs/protected_regular"), Groupe::FichiersPartages);
+        assert_eq!(Groupe::de("net/ipv4/tcp_syncookies"), Groupe::Reseau);
+        assert_eq!(Groupe::de(REDIRECTIONS_IPV6), Groupe::Reseau);
+        for g in [Groupe::Memoire, Groupe::FichiersPartages, Groupe::Reseau] {
+            assert!(DURCISSEMENT.iter().any(|(c, _, _)| Groupe::de(c) == g) || g == Groupe::Reseau);
+        }
     }
 
     #[test]

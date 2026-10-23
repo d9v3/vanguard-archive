@@ -16,6 +16,7 @@ mod comptes;
 pub(crate) mod connexions;
 pub(crate) mod correctifs;
 pub(crate) mod corrections;
+mod defender;
 mod durcissement;
 pub(crate) mod ecoute;
 pub(crate) mod eleve;
@@ -39,6 +40,7 @@ pub(crate) mod processus;
 mod regles;
 pub(crate) mod securite;
 mod services;
+mod ssh;
 mod verrouillage;
 pub(crate) mod wmi;
 

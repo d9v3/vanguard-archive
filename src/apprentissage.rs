@@ -217,7 +217,11 @@ fn appliquer_le(appris: &Appris, constats: &mut [Constat], jour: NaiveDate) -> u
 fn choix_pour<'a>(appris: &'a Appris, c: &Constat) -> Option<(&'a Acceptee, Option<(String, String)>)> {
     let signature = signature(c.categorie, &c.message);
     let Some(cle) = c.cle().map(|k| k.to_string()) else {
-        return appris.acceptees.get(&signature).map(|a| (a, None));
+        return appris
+            .acceptees
+            .get(&signature)
+            .or_else(|| choix_du_noyau_groupe(appris, c))
+            .map(|a| (a, None));
     };
     // Une liste écrite avant `retenir` peut garder deux choix de la même clé : le plus récent l'emporte, jamais un
     // choix périmé qui ferait revenir l'alerte malgré celui du jour.
@@ -231,6 +235,28 @@ fn choix_pour<'a>(appris: &'a Appris, c: &Constat) -> Option<(&'a Acceptee, Opti
     }
     let a = appris.acceptees.get(&signature).filter(|a| a.cle.is_none())?;
     Some((a, Some((signature, cle))))
+}
+
+/// Le noyau Linux en une seule alerte avant ce lot (« Réglages faibles : a, b, c »), en trois maintenant (mémoire,
+/// fichiers partagés, réseau) : un ancien choix sans clé vaut pour chacune des trois si chaque réglage faible qu'elle
+/// cite y figurait déjà. Un réglage devenu faible depuis fait revenir l'alerte.
+fn choix_du_noyau_groupe<'a>(appris: &'a Appris, c: &Constat) -> Option<&'a Acceptee> {
+    const CAT: &str = "Noyau durci";
+    let prefixe = tr!("Réglages faibles : ", "Weak settings: ");
+    if c.categorie != CAT {
+        return None;
+    }
+    let reste = c.message.strip_prefix(prefixe)?.trim_end_matches('.');
+    let debut = signature(CAT, prefixe);
+    // Chaque réglage sans son « Noyau durci : » : la signature d'un réglage seul, telle qu'elle apparaît dans
+    // celle de l'ancien message.
+    let elements: Vec<String> = reste
+        .split(", ")
+        .map(|e| signature(CAT, e)[CAT.len() + 3..].to_string())
+        .collect();
+    appris.acceptees.iter().find_map(|(sig, a)| {
+        (a.cle.is_none() && sig.starts_with(&debut) && elements.iter().all(|e| sig.contains(e.as_str()))).then_some(a)
+    })
 }
 
 /// Complète les choix retrouvés par leur texte de la clé de leur alerte ; `true` s'il y a lieu de réécrire la liste.
@@ -546,6 +572,46 @@ mod tests {
         assert!(matches!(charger(), Err(Refus::Falsifiee(Some(l))) if l.acceptees.len() == 2));
         assert_eq!(nombre(), None);
         crate::sceau::effacer(crate::sceau::APPRIS).unwrap();
+    }
+
+    /// L'ancienne alerte du noyau, groupée et acceptée, tait chacune des trois nouvelles ; un réglage qu'elle ne
+    /// citait pas fait revenir la sienne.
+    #[test]
+    fn ancien_choix_du_noyau_groupe() {
+        let ancien = "Réglages faibles : kernel.randomize_va_space = 1 (adresses au hasard), \
+                      fs.protected_symlinks = 0 (liens de /tmp), net.ipv4.tcp_syncookies = 0 (SYN).";
+        let a = appris("Noyau durci", ancien, Niveau::Moyen, "2026-10-18");
+        let mut c = [
+            constat(
+                "Noyau durci",
+                Niveau::Moyen,
+                "Réglages faibles : kernel.randomize_va_space = 1 (adresses au hasard).",
+            ),
+            constat(
+                "Noyau durci",
+                Niveau::Info,
+                "Réglages faibles : fs.protected_symlinks = 0 (liens de /tmp).",
+            ),
+            constat(
+                "Noyau durci",
+                Niveau::Info,
+                "Réglages faibles : net.ipv4.tcp_syncookies = 0 (SYN).",
+            ),
+        ];
+        assert_eq!(appliquer_le(&a, &mut c, jour("2026-10-23")), 3);
+        let mut c = [constat(
+            "Noyau durci",
+            Niveau::Info,
+            "Réglages faibles : net.ipv4.tcp_syncookies = 0 (SYN), net.ipv4.conf.all.rp_filter = 0 (origine).",
+        )];
+        assert_eq!(appliquer_le(&a, &mut c, jour("2026-10-23")), 0);
+        // Ailleurs que dans le noyau, rien de tel.
+        let mut c = [constat(
+            "Groupes",
+            Niveau::Info,
+            "Réglages faibles : fs.protected_symlinks = 0 (liens de /tmp).",
+        )];
+        assert_eq!(appliquer_le(&a, &mut c, jour("2026-10-23")), 0);
     }
 
     #[test]

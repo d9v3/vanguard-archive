@@ -8,7 +8,7 @@ regle!(
     Os::Tous,
     500,
     ("DNS utilisé", "DNS in use"),
-    &[],
+    &["CIS Controls v8 4.9"],
     || super::dns::dns().into_iter().collect()
 );
 
@@ -17,7 +17,7 @@ regle!(
     Os::Tous,
     510,
     ("certificats racine ajoutés", "added root certificates"),
-    &[],
+    &["CIS Controls v8 3.10"],
     || super::certificats::certificats().into_iter().collect()
 );
 
@@ -26,7 +26,7 @@ regle!(
     Os::Tous,
     520,
     ("extensions des navigateurs", "browser extensions"),
-    &[],
+    &["CIS Controls v8 9.4"],
     || super::extensions::extensions().into_iter().collect()
 );
 
@@ -35,7 +35,7 @@ regle!(
     Os::Tous,
     530,
     ("réglages de sécurité des navigateurs", "browser security settings"),
-    &[],
+    &["CIS Controls v8 9.1"],
     || super::navigateur::navigateurs().into_iter().collect()
 );
 
@@ -47,7 +47,7 @@ regle!(
         "navigation détournée (proxy, hosts)",
         "hijacked browsing (proxy, hosts)"
     ),
-    &[],
+    &["CIS Controls v8 4.9"],
     || vec![super::navigation_detournee::constat()]
 );
 
@@ -59,7 +59,7 @@ regle!(
         "mots de passe gardés par le navigateur",
         "passwords kept by the browser"
     ),
-    &[],
+    &["CIS Controls v8 5.2"],
     || super::mots_de_passe::constats().into_iter().collect()
 );
 
@@ -68,7 +68,7 @@ regle!(
     Os::Tous,
     560,
     ("fichiers sensibles qui traînent", "sensitive files lying around"),
-    &[],
+    &["CIS Controls v8 3.2"],
     || super::sensibles::constats().into_iter().collect()
 );
 
@@ -77,7 +77,7 @@ regle!(
     Os::Tous,
     570,
     ("santé de l'ordinateur", "computer health"),
-    &[],
+    &["CIS Controls v8 11.1"],
     || super::sante::sante().into_iter().collect()
 );
 
@@ -86,20 +86,37 @@ regle!(
     Os::Tous,
     580,
     ("partages ouverts à tous", "shares open to everyone"),
-    &[],
+    &["CIS Controls v8 3.3"],
     || super::partages::partages().into_iter().collect()
 );
 
-regle!("COM-BLU-001", Os::Tous, 590, ("Bluetooth", "Bluetooth"), &[], || {
-    super::bluetooth::constats().into_iter().collect()
-});
+regle!(
+    "COM-BLU-001",
+    Os::Tous,
+    590,
+    ("Bluetooth", "Bluetooth"),
+    &["CIS Controls v8 4.8"],
+    || { super::bluetooth::constats().into_iter().collect() }
+);
+
+regle!(
+    "COM-LOG-001",
+    Os::Tous,
+    605,
+    (
+        "logiciels installés depuis le dernier bilan",
+        "software installed since the last check"
+    ),
+    &["CIS Controls v8 2.1", "CIS Controls v8 2.3"],
+    || vec![super::logiciels_vus::constat()]
+);
 
 regle!(
     "COM-CPT-001",
     Os::Tous,
     600,
     ("nouveaux administrateurs", "new administrators"),
-    &[],
+    &["CIS Controls v8 5.4"],
     || super::administrateurs::constat().into_iter().collect()
 );
 
@@ -108,7 +125,7 @@ regle!(
     Os::Tous,
     610,
     ("journaux effacés ou en erreur", "erased or failing logs"),
-    &[],
+    &["CIS Controls v8 8.2", "CIS Controls v8 8.3"],
     || super::journaux::journaux().into_iter().collect()
 );
 
@@ -117,7 +134,7 @@ regle!(
     Os::Tous,
     620,
     ("heure de l'ordinateur", "computer clock"),
-    &[],
+    &["CIS Controls v8 8.4"],
     || super::heure::constat().into_iter().collect()
 );
 
@@ -126,7 +143,7 @@ regle!(
     Os::Tous,
     630,
     ("fin de support", "end of support"),
-    &[],
+    &["CIS Controls v8 2.2"],
     || super::fin_de_support::constats().into_iter().collect()
 );
 
@@ -135,7 +152,7 @@ regle!(
     Os::Tous,
     640,
     ("comptes oubliés", "forgotten accounts"),
-    &[],
+    &["CIS Controls v8 5.3"],
     || super::comptes_oublies::constats().into_iter().collect()
 );
 
@@ -144,7 +161,10 @@ regle!(
     Os::Tous,
     650,
     ("intégrité des fichiers critiques", "critical file integrity"),
-    &[],
+    &[
+        "CIS Controls v8 10.7",
+        "ANSSI BP-028 (configuration d'un système GNU/Linux)"
+    ],
     || vec![crate::protection::integrite::constat()]
 );
 
@@ -153,7 +173,7 @@ regle!(
     Os::Tous,
     660,
     ("fichiers-pièges contre les rançongiciels", "ransomware decoy files"),
-    &[],
+    &["CIS Controls v8 10.7"],
     || crate::protection::pieges::constat().into_iter().collect()
 );
 
@@ -162,7 +182,7 @@ regle!(
     Os::Tous,
     670,
     ("prise de contrôle à distance", "remote takeover"),
-    &[],
+    &["CIS Controls v8 2.3"],
     || crate::protection::distance::constats().into_iter().collect()
 );
 
@@ -171,7 +191,7 @@ regle!(
     Os::Tous,
     675,
     ("logiciels espions", "spyware"),
-    &[],
+    &["CIS Controls v8 10.1"],
     crate::protection::espions::constats
 );
 
@@ -180,7 +200,7 @@ regle!(
     Os::Tous,
     680,
     ("manifeste de la clé VANGUARD", "VANGUARD key manifest"),
-    &[],
+    &["CIS Controls v8 2.5"],
     || crate::protection::manifeste::constat().into_iter().collect()
 );
 
@@ -189,7 +209,7 @@ regle!(
     Os::Tous,
     690,
     ("évolution depuis le dernier bilan", "changes since the last check"),
-    &[],
+    &["CIS Controls v8 4.1"],
     || crate::historique::constat().into_iter().collect()
 );
 
@@ -198,7 +218,7 @@ regle!(
     Os::Tous,
     695,
     ("état de Vanguard scellé", "Vanguard's sealed state"),
-    &[],
+    &["CIS Controls v8 4.1"],
     || crate::sceau::constat().into_iter().collect()
 );
 
@@ -207,7 +227,7 @@ regle!(
     Os::Tous,
     697,
     ("mode Wi-Fi public", "public Wi-Fi mode"),
-    &[],
+    &["CIS Controls v8 4.5"],
     || crate::reseau::wifi_public::constat()
 );
 
@@ -216,7 +236,7 @@ regle!(
     Os::Tous,
     700,
     ("surveillance de cette machine", "monitoring of this machine"),
-    &[],
+    &["CIS Controls v8 7.5"],
     || crate::reseau::surveillance::constat().into_iter().collect()
 );
 
@@ -225,7 +245,7 @@ regle!(
     Os::Tous,
     702,
     ("entretien du mois de cette machine", "monthly check-up of this machine"),
-    &[],
+    &["CIS Controls v8 7.1"],
     || crate::entretien::constat().into_iter().collect()
 );
 
@@ -237,7 +257,7 @@ regle!(
         "protection en temps réel de Vanguard",
         "Vanguard's real-time protection"
     ),
-    &[],
+    &["CIS Controls v8 10.7"],
     || vec![crate::protection::temps_reel::constat()]
 );
 
@@ -246,7 +266,7 @@ regle!(
     Os::Tous,
     710,
     ("données de la clé chiffrées", "encrypted key data"),
-    &[],
+    &["CIS Controls v8 3.9"],
     || crate::chiffrement::constat().into_iter().collect()
 );
 
@@ -258,7 +278,7 @@ regle!(
         "identité de la clé VANGUARD et son carnet",
         "VANGUARD key identity and its record"
     ),
-    &[],
+    &["CIS Controls v8 3.9"],
     crate::protection::cles_connues::constats
 );
 
@@ -267,7 +287,7 @@ regle!(
     Os::Tous,
     720,
     ("sauvegarde automatique", "automatic backup"),
-    &[],
+    &["CIS Controls v8 11.2"],
     || crate::sauvegarde::constats().into_iter().collect()
 );
 
@@ -276,7 +296,7 @@ regle!(
     Os::Tous,
     730,
     ("serveurs d'IA ouverts au réseau", "AI servers open to the network"),
-    &["OWASP Top 10 for LLM Applications"],
+    &["CIS Controls v8 4.8", "OWASP Top 10 for LLM Applications"],
     super::agents_ia::exposition
 );
 
@@ -288,6 +308,10 @@ regle!(
         "réglages des agents d'IA (permissions, serveurs MCP, clés en clair)",
         "AI agent settings (permissions, MCP servers, clear-text keys)"
     ),
-    &["OWASP Top 10 for LLM Applications", "MCP Security Best Practices"],
+    &[
+        "CIS Controls v8 3.11",
+        "OWASP Top 10 for LLM Applications",
+        "MCP Security Best Practices"
+    ],
     super::agents_ia::reglages
 );

@@ -921,6 +921,19 @@ pub(super) fn juger_sysmon(present: bool) -> Option<Constat> {
     })
 }
 
+/// Ce qu'une règle du durcissement dit quand aucun réglage n'est faible : chaque lecture qui n'a rien rendu est un
+/// réglage à sa valeur sûre (celle de Windows, ou absent), comme dans la règle unique d'avant ; une règle ne rend
+/// jamais rien (`regles::MUETTES_TOLEREES`).
+fn sain_si_vide(mut c: Vec<Constat>, sain: (&'static str, &'static str)) -> Vec<Constat> {
+    if c.is_empty() {
+        c.push(ok(DURCI, if crate::langue::anglais() { sain.1 } else { sain.0 }));
+    }
+    c
+}
+
+/// WIN-DUR-001 : ce qui protège les secrets de connexion et le noyau. Les autres réglages qu'elle regroupait ont
+/// chacun leur règle (WIN-DUR-002 à 005, WIN-MAJ-003, WIN-SES-002) : l'historique et le rapport suivent un réglage
+/// précis, et chaque règle cite sa référence.
 pub(super) fn durcissement() -> Vec<Constat> {
     let mut c = vec![
         juger_wdigest(lire_dword(WDIGEST, "UseLogonCredential")),
@@ -984,30 +997,16 @@ pub(super) fn durcissement() -> Vec<Constat> {
             .as_deref()
             .or_else(|| section(secours.as_deref(), "CG").and_then(|l| l.first().copied())),
     ));
-    c.extend(juger_assistance(lire_dword(
-        r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
-        "fAllowToGetHelp",
-    )));
-    c.extend(juger_ouverture_auto(
-        lire_texte(WINLOGON, "AutoAdminLogon").as_deref(),
-        lire_texte(WINLOGON, "DefaultPassword").is_some_and(|m| !m.is_empty()),
-    ));
-    c.extend(juger_smartscreen(
-        lire_texte(
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer",
-            "SmartScreenEnabled",
-        )
-        .as_deref(),
-        lire_dword(r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableSmartScreen"),
-    ));
-    c.extend(juger_jeton_distant(lire_dword(
-        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
-        "LocalAccountTokenFilterPolicy",
-    )));
     c.push(juger_integrite_memoire(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity",
         "Enabled",
     )));
+    c
+}
+
+/// WIN-DUR-002 : l'authentification par le réseau (NTLM, anciennes empreintes LM, connexions anonymes).
+pub(super) fn authentification_reseau() -> Vec<Constat> {
+    let mut c = Vec::new();
     c.extend(juger_ntlm(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\Lsa",
         "LmCompatibilityLevel",
@@ -1020,20 +1019,22 @@ pub(super) fn durcissement() -> Vec<Constat> {
         r"SYSTEM\CurrentControlSet\Control\Lsa",
         "NoLMHash",
     )));
-    c.extend(juger_registre_distant(lire_dword(
-        r"SYSTEM\CurrentControlSet\Services\RemoteRegistry",
-        "Start",
-    )));
+    sain_si_vide(
+        c,
+        (
+            "Aucun réglage faible parmi : NTLM, empreintes LM, accès anonyme.",
+            "No weak setting among: NTLM, LM hashes, anonymous access.",
+        ),
+    )
+}
+
+/// WIN-DUR-003 : le client de partage de fichiers (SMBv1, signature, connexions invité).
+pub(super) fn partage_smb() -> Vec<Constat> {
+    let mut c = Vec::new();
     c.extend(juger_client_smb1(lire_dword(
         r"SYSTEM\CurrentControlSet\Services\mrxsmb10",
         "Start",
     )));
-    c.extend(juger_wpad(lire_dword(WINHTTP, "DisableWpad"), compte_de_domaine()));
-    c.extend(juger_windows_update(
-        lire_dword(r"SYSTEM\CurrentControlSet\Services\wuauserv", "Start"),
-        lire_dword(r"SYSTEM\CurrentControlSet\Services\UsoSvc", "Start"),
-        lire_dword(r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU", "NoAutoUpdate"),
-    ));
     c.extend(juger_signature_smb(lire_dword(
         r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
         "RequireSecuritySignature",
@@ -1047,6 +1048,53 @@ pub(super) fn durcissement() -> Vec<Constat> {
             r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
             "AllowInsecureGuestAuth",
         ),
+    ));
+    sain_si_vide(
+        c,
+        (
+            "Aucun réglage faible parmi : client SMBv1, signature SMB, connexions invité.",
+            "No weak setting among: SMBv1 client, SMB signing, guest connections.",
+        ),
+    )
+}
+
+/// WIN-DUR-004 : les portes d'accès à distance hors du Bureau à distance (Assistance, Registre à distance, comptes
+/// locaux par le réseau, découverte du proxy).
+pub(super) fn acces_distant() -> Vec<Constat> {
+    let mut c = Vec::new();
+    c.extend(juger_assistance(lire_dword(
+        r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
+        "fAllowToGetHelp",
+    )));
+    c.extend(juger_registre_distant(lire_dword(
+        r"SYSTEM\CurrentControlSet\Services\RemoteRegistry",
+        "Start",
+    )));
+    c.extend(juger_jeton_distant(lire_dword(
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+        "LocalAccountTokenFilterPolicy",
+    )));
+    c.extend(juger_wpad(lire_dword(WINHTTP, "DisableWpad"), compte_de_domaine()));
+    sain_si_vide(
+        c,
+        (
+            "Aucun réglage faible parmi : Assistance à distance, Registre à distance, comptes locaux par le réseau, WPAD.",
+            "No weak setting among: Remote Assistance, Remote Registry, local accounts over the network, WPAD.",
+        ),
+    )
+}
+
+/// WIN-DUR-005 : ce qui laisse passer un programme ou un document piégé (SmartScreen, scripts PowerShell, macros
+/// Office, installations toujours élevées).
+pub(super) fn programmes_et_documents() -> Vec<Constat> {
+    let mut c = Vec::new();
+    c.extend(juger_smartscreen(
+        lire_texte(
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer",
+            "SmartScreenEnabled",
+        )
+        .as_deref(),
+        lire_dword(r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableSmartScreen"),
     ));
     let shell_ids = r"SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell";
     let strategies = r"SOFTWARE\Policies\Microsoft\Windows\PowerShell";
@@ -1086,6 +1134,23 @@ pub(super) fn durcissement() -> Vec<Constat> {
             .ok()
     };
     c.extend(juger_macros(&macros_ouvertes(vba), sid.as_deref()));
+    sain_si_vide(
+        c,
+        (
+            "Aucun réglage faible parmi : SmartScreen, stratégie des scripts PowerShell, macros Office, installations toujours élevées.",
+            "No weak setting among: SmartScreen, PowerShell script policy, Office macros, always-elevated installs.",
+        ),
+    )
+}
+
+/// WIN-MAJ-003 : Windows Update coupé (service désactivé, stratégie) ou en pause.
+pub(super) fn windows_update_bloque() -> Vec<Constat> {
+    let mut c = Vec::new();
+    c.extend(juger_windows_update(
+        lire_dword(r"SYSTEM\CurrentControlSet\Services\wuauserv", "Start"),
+        lire_dword(r"SYSTEM\CurrentControlSet\Services\UsoSvc", "Start"),
+        lire_dword(r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU", "NoAutoUpdate"),
+    ));
     let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
     c.extend(juger_pause(
         lire_texte(
@@ -1095,7 +1160,29 @@ pub(super) fn durcissement() -> Vec<Constat> {
         .as_deref(),
         &aujourd_hui,
     ));
-    c
+    sain_si_vide(
+        c,
+        (
+            "Windows Update n'est ni coupé ni en pause.",
+            "Windows Update is neither off nor paused.",
+        ),
+    )
+}
+
+/// WIN-SES-002 : la session qui s'ouvre toute seule, mot de passe gardé dans le registre.
+pub(super) fn ouverture_automatique() -> Vec<Constat> {
+    let mut c = Vec::new();
+    c.extend(juger_ouverture_auto(
+        lire_texte(WINLOGON, "AutoAdminLogon").as_deref(),
+        lire_texte(WINLOGON, "DefaultPassword").is_some_and(|m| !m.is_empty()),
+    ));
+    sain_si_vide(
+        c,
+        (
+            "La session ne s'ouvre pas toute seule.",
+            "The session does not open by itself.",
+        ),
+    )
 }
 
 #[cfg(test)]

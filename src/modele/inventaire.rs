@@ -74,6 +74,7 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     scelle(sceau::REVOCATION, "mise_a_jour::github"),
     scelle(sceau::TELECHARGEMENTS, "protection::telechargement"),
     scelle(sceau::BLOCAGE_SIGNALEES, "protection::blocage"),
+    scelle(sceau::LOGICIELS, "machine::logiciels_vus"),
     local("sceaux.json", "sceau"),
     local("sceaux.verrou", "sceau"),
     // Historique des bilans : schéma 2 depuis les clés des constats et leur seconde empreinte.

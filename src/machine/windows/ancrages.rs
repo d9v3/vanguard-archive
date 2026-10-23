@@ -60,6 +60,7 @@ regle!(
         "packages loaded by LSA (security, authentication, password filters)"
     ),
     &[
+        "CIS Controls v8 13.2",
         "MITRE ATT&CK T1547.002",
         "MITRE ATT&CK T1547.005",
         "MITRE ATT&CK T1556.002"
@@ -75,7 +76,7 @@ regle!(
         "DLL chargées à chaque lancement de programme (AppCertDlls)",
         "DLLs loaded at every program start (AppCertDlls)"
     ),
-    &["MITRE ATT&CK T1546.009"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1546.009"],
     appcert
 );
 
@@ -84,7 +85,7 @@ regle!(
     Os::Windows,
     228,
     ("moniteurs d'impression", "print monitors"),
-    &["MITRE ATT&CK T1547.010"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1547.010"],
     moniteurs_impression
 );
 
@@ -93,7 +94,7 @@ regle!(
     Os::Windows,
     229,
     ("fournisseurs de temps", "time providers"),
-    &["MITRE ATT&CK T1547.003"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1547.003"],
     fournisseurs_de_temps
 );
 
@@ -102,7 +103,7 @@ regle!(
     Os::Windows,
     229,
     ("catalogue Winsock", "Winsock catalog"),
-    &["MITRE ATT&CK T1547", "MITRE ATT&CK T1574"],
+    &["CIS Controls v8 13.2", "MITRE ATT&CK T1547", "MITRE ATT&CK T1574"],
     catalogue_winsock
 );
 

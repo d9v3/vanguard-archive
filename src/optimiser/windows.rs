@@ -356,6 +356,10 @@ impl Changement {
                     defaut: None,
                 }),
             ("alimentation", None, None, None, None) => Some(Changement::Alimentation),
+            // Une protection de Defender remise par une correction du bilan (machine::windows::defender).
+            ("defender", Some(cle), None, None, None) => {
+                defender::pref_de(cle).map(|pref| Changement::Defender { pref, cible: 1 })
+            }
             _ => None,
         }
     }

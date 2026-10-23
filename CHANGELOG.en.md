@@ -9,6 +9,33 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Check rule parity: SSH and Defender on Windows, passwords, startup and persistence on macOS, one reference per rule,
+  one time limit per rule.** Windows gains the OpenSSH server (service, %ProgramData%\ssh configuration, password
+  sign-in, administrators_authorized_keys rights, read in Rust: registry, WMI, files and their rights) and the keys in
+  %USERPROFILE%\.ssh (no passphrase, readable by others), WIN-SSH-001 and 002; the check re-reads the Defender
+  protections that “harden” turns on (ASR rules, network protection, PUA, controlled folders, WIN-ANV-003): a protection
+  Vanguard set and that was later turned off is a high alert, the basic blocking, network protection and PUA are
+  offered, each fix can be undone. macOS gains the password policy and account lockout (pwpolicy, MAC-CPT-002), startup
+  security (bputil or T2 chip, MAC-DEM-001), login and background items (sfltool, as administrator, MAC-PRS-002), login
+  hooks and authorization plugins (MAC-PRS-003). Catch-all rules are split: Windows hardening into five (WIN-DUR-001 to
+  005), plus Windows Update off or paused (WIN-MAJ-003) and automatic sign-in (WIN-SES-002); sysctl settings into three
+  (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), whose fixes append to the file instead of overwriting each other. Every
+  machine rule cites at least one CIS, Microsoft or ANSSI reference (required by a test for all three systems), also
+  given in the check's JSON (“reference”). A software inventory, kept sealed on the computer and never sent, tells for a
+  week each program installed since the last check (COM-LOG-001). Finally, each rule has its time limit (10 min, 30 for
+  updates): one that exceeds it is reported as not checked, the others go on. None of this has run on a real Windows or
+  a real Mac yet: tests under Wine, clippy for macOS. What is said is accurate: an inventory erased or changed outside
+  Vanguard no longer hides what was installed meanwhile (everything is reported again), an update whose displayed name
+  carries the version (“Tool 1.3 (x64)”) is no longer new software, and a source that cannot be read (silent Flatpak,
+  unreadable ~/Applications) makes the check not verified instead of forgetting its programs, reported as “new”
+  later; programs of other open Windows sessions no longer count. Defender: a protection set by a check fix and later
+  turned off is high, like one set by Optimize; nothing is said to “block” while real-time protection is off, nor
+  healthy when nothing blocks. OpenSSH: an uninstalled server whose configuration stayed is not applicable,
+  administrators_authorized_keys open to others is medium when StrictModes (the default) makes it refused, critical
+  without it, and its files are bounded before being read. macOS: root's settings unreadable without sudo make the
+  login hook not verified, never “no hook” again. A “this is normal” choice on the old grouped Linux kernel alert
+  applies to the three new ones; at the first check after the update, the history may still show it fixed then new.
+
 - **Check-up fixes can be undone, one by one.** Before each fix (Linux, Windows, macOS), Vanguard reads the previous
   state of what it changes (sysctl or sshd file written by Vanguard, kernel settings, service, network time, rights
   of a personal file, registry value, preference) and notes it, sealed, in reglages.json, like Optimize; each value

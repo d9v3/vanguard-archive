@@ -217,46 +217,8 @@ pub(super) fn sudo_sans_mot_de_passe(tout_permis: &str) -> Vec<Constat> {
     constats
 }
 
-/// La partie d'un fichier de configuration de sshd qui vaut pour toutes les connexions : un bloc « Match » ne
-/// s'applique qu'à certaines (un utilisateur, une adresse) et va jusqu'à la fin du fichier.
-pub(super) fn partie_globale_sshd(texte: &str) -> String {
-    texte
-        .lines()
-        .take_while(|l| {
-            !l.split_whitespace()
-                .next()
-                .is_some_and(|m| m.eq_ignore_ascii_case("match"))
-        })
-        .flat_map(|l| [l, "\n"])
-        .collect()
-}
-
-/// Première valeur d'un réglage de sshd, en minuscules. Le nom et la valeur se séparent par des espaces ou par un
-/// « = » (« PasswordAuthentication=no » est valable).
-pub(super) fn valeur_sshd(conf: &str, cle: &str) -> Option<String> {
-    conf.lines()
-        .map(str::trim)
-        .filter(|l| !l.starts_with('#'))
-        .find_map(|l| {
-            let (k, v) = l.split_once(|c: char| c.is_whitespace() || c == '=')?;
-            let v = v.trim().trim_start_matches('=').trim().trim_matches('"');
-            k.eq_ignore_ascii_case(cle).then(|| v.to_ascii_lowercase())
-        })
-}
-
-/// sshd accepte-t-il un mot de passe ? Par « PasswordAuthentication » (oui par défaut), ou, avec PAM, par le mode
-/// « clavier interactif » qui demande le même mot de passe (oui par défaut aussi).
-pub(super) fn mots_de_passe_sshd(conf: &str) -> bool {
-    let valeur = |cle: &str| valeur_sshd(conf, cle);
-    let clavier = valeur("KbdInteractiveAuthentication").or_else(|| valeur("ChallengeResponseAuthentication"));
-    valeur("PasswordAuthentication").as_deref() != Some("no")
-        || (valeur("UsePAM").as_deref() == Some("yes") && clavier.as_deref() != Some("no"))
-}
-
-/// sshd ouvre-t-il un compte sans mot de passe ? « PermitEmptyPasswords yes », quand les mots de passe sont permis.
-pub(super) fn mots_de_passe_vides_sshd(conf: &str) -> bool {
-    valeur_sshd(conf, "PermitEmptyPasswords").as_deref() == Some("yes") && mots_de_passe_sshd(conf)
-}
+// Lecture de sshd_config, la même sous Windows (OpenSSH de Microsoft) : `machine::sshd`.
+pub(super) use super::sshd::{mots_de_passe_vides_sshd, partie_globale_sshd, valeur_sshd};
 
 /// Configuration de sshd qui vaut pour toutes les connexions ; `None` si elle est réservée à root.
 pub(super) fn configuration_sshd() -> Option<String> {

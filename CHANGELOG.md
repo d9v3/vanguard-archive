@@ -9,6 +9,36 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Parité des règles du bilan : SSH et Defender sous Windows, mots de passe, démarrage et persistance sous macOS, une
+  référence par règle, un délai par règle.** Windows gagne le serveur OpenSSH (service, configuration de
+  %ProgramData%\ssh, connexion par mot de passe, droits de administrators_authorized_keys, lus en Rust : registre, WMI,
+  fichiers et leurs droits) et les clés de %USERPROFILE%\.ssh (sans phrase de passe, lisibles par d'autres), WIN-SSH-001
+  et 002 ; le bilan relit les protections de Defender que « durcir » active (règles ASR, protection réseau, PUA,
+  dossiers contrôlés, WIN-ANV-003) : une protection posée par Vanguard puis coupée est une alerte élevée, les blocages
+  de base, la protection réseau et PUA sont proposés, chaque correction annulable. macOS gagne la règle des mots de
+  passe et le blocage des comptes (pwpolicy, MAC-CPT-002), la sécurité du démarrage (bputil ou puce T2, MAC-DEM-001),
+  les éléments d'ouverture et de fond (sfltool, en administrateur, MAC-PRS-002), les crochets de connexion et les
+  extensions d'autorisation (MAC-PRS-003). Les règles fourre-tout sont scindées : le durcissement de Windows en cinq
+  (WIN-DUR-001 à 005), plus Windows Update coupé ou en pause (WIN-MAJ-003) et la session ouverte toute seule
+  (WIN-SES-002) ; les réglages sysctl en trois (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), dont les corrections s'ajoutent
+  au fichier au lieu de se réécrire l'une l'autre. Chaque règle de la machine cite au moins une référence du CIS, de
+  Microsoft ou de l'ANSSI (exigé par un test pour les trois systèmes), donnée aussi dans le JSON du bilan (« reference
+  »). Un inventaire des logiciels, gardé scellé sur l'ordinateur et jamais envoyé, dit pendant une semaine chaque
+  logiciel installé depuis le dernier bilan (COM-LOG-001). Enfin, chaque règle a son délai (10 min, 30 pour les mises à
+  jour) : celle qui le dépasse est dite non vérifiée, les autres continuent. Rien de cela n'a encore tourné sur un vrai
+  Windows ni sur un vrai Mac : tests sous Wine, clippy pour macOS. Ce qui est dit l'est juste : l'inventaire effacé
+  ou changé hors de Vanguard ne tait plus ce qui s'est installé entre-temps (tout est redit), une mise à jour dont le
+  nom affiché porte la version (« Outil 1.3 (x64) ») n'est plus un nouveau logiciel, et une source qui ne se lit pas
+  (Flatpak muet, ~/Applications illisible) rend le bilan non vérifié au lieu de faire oublier ses logiciels, redits
+  « nouveaux » ensuite ; les logiciels des autres sessions Windows ouvertes ne comptent plus. Defender : une
+  protection posée par une correction du bilan puis coupée est élevée comme celle d'Optimiser, rien n'est dit « qui
+  bloque » quand la protection en temps réel est coupée, ni sain quand rien ne bloque. OpenSSH : un serveur désinstallé
+  dont la configuration est restée est sans objet, administrators_authorized_keys ouvert est moyen quand StrictModes
+  (par défaut) le fait refuser, critique sans lui, et ses fichiers sont bornés avant d'être lus. macOS : les réglages
+  de root illisibles sans sudo rendent le crochet de connexion non vérifié, plus jamais « aucun crochet ». Un choix
+  « c'est normal » sur l'ancienne alerte groupée du noyau Linux vaut pour les trois nouvelles ; au premier bilan
+  après la mise à jour, l'historique peut encore la montrer réglée puis nouvelle.
+
 - **Les corrections du bilan s'annulent, une par une.** Avant chaque correction (Linux, Windows, macOS), Vanguard
   relève l'état d'avant de ce qu'elle change (fichier de sysctl ou de sshd posé par Vanguard, réglages du noyau,
   service, heure réseau, droits d'un fichier personnel, valeur du registre, préférence) et le note, scellé, dans

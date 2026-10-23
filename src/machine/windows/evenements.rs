@@ -724,10 +724,11 @@ regle!(
         "event logs of the last 7 days (sign-ins, accounts, services)"
     ),
     &[
+        "CIS Controls v8 8.11",
         "MITRE ATT&CK T1110",
         "MITRE ATT&CK T1070.001",
         "MITRE ATT&CK T1136.001",
-        "MITRE ATT&CK T1543.003",
+        "MITRE ATT&CK T1543.003"
     ],
     // 30 s : la lecture est bornée ; au-delà, PowerShell ou le service des journaux est bloqué.
     || juger_evenements(Some(&lire_journaux()))

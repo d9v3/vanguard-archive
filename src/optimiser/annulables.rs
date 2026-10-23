@@ -92,6 +92,11 @@ impl Geste {
         ))
     }
 
+    /// Une préférence de Defender réglée par Vanguard (« np », « pua », « cfa » ou une règle ASR de sa liste).
+    pub(crate) fn defender(cle: &str) -> Geste {
+        Geste(format!("defender|{cle}"))
+    }
+
     /// Le mode d'alimentation actif.
     pub(crate) fn alimentation() -> Geste {
         Geste("alimentation".into())

@@ -10,6 +10,7 @@ pub(crate) mod etat;
 pub(crate) mod id;
 pub(crate) mod inventaire;
 pub(crate) mod raison;
+pub(crate) mod reference;
 pub(crate) mod registre;
 
 pub(crate) use etat::{Absence, Etat, Precision};
