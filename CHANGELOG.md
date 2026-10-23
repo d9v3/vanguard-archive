@@ -102,6 +102,79 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   refaites depuis l'adresse, le port ou la valeur notés, et un blocage non reconnu est refusé et montré au lieu de
   partir en administrateur. Annuler ne remet qu'une copie de réglages de Claude Code faite par Vanguard, et remettre
   comme avant les réglages pour jouer ne réécrit en root que ce que Vanguard met dans /etc.
+- **Préparer un signalement à un éditeur (`vanguard signaler`, alias `disclose`).** L'assistant trie d'abord : une
+  faille déjà connue (CVE, catalogue de la CISA) se corrige par une mise à jour, un logiciel malveillant, une
+  détection ratée ou un site d'hameçonnage ne sont pas des failles de l'éditeur (où envoyer soi-même est nommé, rien
+  n'est préparé), un contournement d'AppLocker ou de l'accès contrôlé aux dossiers est dit non corrigé par défaut chez
+  Microsoft. Pour un comportement anormal, il prépare un brouillon au format du programme choisi (MSRC, Google,
+  Chrome, Mozilla, Apple, avis GHSA, CERT/CC, CERT-FR, Vanguard), avec le fil de l'incident ou l'examen d'un outil,
+  l'état du journal (falsifié : « non vérifié » ; adopté ou incomplet : « non prouvé »), et ce que seule la personne
+  sait (titré INCOMPLET tant qu'il manque ses étapes, ce qui s'est passé, ou la preuve de concept exigée par MSRC,
+  Apple et Chrome). Ce qui est personnel est retiré en trois couches : rien d'inutile (ni ligne de commande, ni compte
+  d'un proche, ni nom de fichier personnel), tout masqué (chemins, noms, adresses, requêtes des adresses web), puis un
+  contrôle final qui refuse d'écrire si un nom connu survit ; le décompte est montré. Un chemin coupé à gauche par
+  « … » est réduit en entier, un mot avant « : » (« fichier: », « file:// ») n'est plus pris pour un lecteur, et
+  l'examen des logiciels périmés n'emporte que le produit touché par une faille exploitée, jamais la liste des
+  logiciels installés. Un examen sain, non vérifié ou falsifié ne tranche rien, un tri tiré d'un journal non vérifié
+  le dit, et sans CVE citée le catalogue de la CISA est « non vérifié », jamais « absente ». Les valeurs venues de
+  l'extérieur vont dans des blocs de code, le reste est neutralisé (ni mention, ni image, ni lien). Le texte est
+  montré en entier, écrit après accord dans le dossier de cet ordinateur (fichier 0600), noté au journal sans son
+  contenu ; `--effacer` les retire, la désinstallation les compte avant. Rien n'est jamais envoyé : aucun code réseau
+  dans le module (vérifié par une liste fermée des appels), ni presse-papier ni courriel.
+- **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
+  carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
+  `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la
+  catégorie Public compte parmi ce qui ferme les entrées : un réseau resté en Privé, d'entreprise ou à la catégorie
+  illisible laisse le mode « allumé, entrées ouvertes », et un réglage qui ne se relit pas s'affiche non vérifié, jamais
+  ✔. Sous Linux, un DNS, un DNS chiffré, mDNS ou LLMNR défait par un programme du compte (NetworkManager le permet sans
+  mot de passe) se voit au bilan (Moyen), sur la ligne du menu et dans son en-tête, avec de quoi le reposer. Le DNS
+  n'est plus gardé « déjà chiffré et filtrant » quand un seul de ses serveurs filtre : il faut qu'ils filtrent tous,
+  sinon le Bouclier est posé ; le bilan ne dit plus non plus qu'un tel DNS bloque les sites dangereux.
+- **Campagne d'attaque n° 2 : huit faiblesses fermées.** « Tout remettre comme avant » ne rejoue plus jamais le
+  texte d'une commande lu dans changements.jsonl (que tout programme du compte peut écrire) : chaque blocage se défait
+  par les commandes refaites depuis ses champs typés, comme une annulation seule, et un blocage non reconnu est refusé
+  et montré, au lieu de partir en administrateur. Le journal des événements se lit borné en tout (mois, octets,
+  événements), les plus récents d'abord, et dit ce qu'il n'a pas lu ; des fichiers posés aux noms de mois à venir
+  (2099…) n'y comptent pas, ne sont plus suivis par l'écriture ni comptés par l'élagage, et ne font plus sortir le
+  vrai mois en cours de la lecture et des traces : ils sont dits. formula.json, cask.json et endoflife.date se
+  lisent en flux, avec un plafond d'entrées : un petit fichier hostile ne fait plus allouer des Gio. Le nom d'une pièce
+  jointe d'un courriel suspect passe filtré (caractères de direction, contrôles) dans le résultat, le journal et le
+  rapport, et tout message écrit d'un constat aussi. L'inventaire des logiciels dont une borne est atteinte (sous-clés,
+  entrées d'un dossier, 20 000 logiciels, clés sans nom en nombre) est non vérifié, jamais tronqué en silence. Les
+  résultats des outils (examens/*.json) sont scellés : un « rien trouvé » réécrit hors de Vanguard se montre non
+  vérifié, jamais vert. La veille de nuit ne dépose plus dans la VM le programme d'une branche écrite par l'IA (à
+  lancer après relecture, `vm-tester.sh --branche`), et ne transmet plus à l'IA qui corrige que le sujet, le fichier
+  et la ligne d'une proposition.
+- **Parité des règles du bilan : SSH et Defender sous Windows, mots de passe, démarrage et persistance sous macOS, une
+  référence par règle, un délai par règle.** Windows gagne le serveur OpenSSH (service, configuration de
+  %ProgramData%\ssh, connexion par mot de passe, droits de administrators_authorized_keys, lus en Rust : registre, WMI,
+  fichiers et leurs droits) et les clés de %USERPROFILE%\.ssh (sans phrase de passe, lisibles par d'autres), WIN-SSH-001
+  et 002 ; le bilan relit les protections de Defender que « durcir » active (règles ASR, protection réseau, PUA,
+  dossiers contrôlés, WIN-ANV-003) : une protection posée par Vanguard puis coupée est une alerte élevée, les blocages
+  de base, la protection réseau et PUA sont proposés, chaque correction annulable. macOS gagne la règle des mots de
+  passe et le blocage des comptes (pwpolicy, MAC-CPT-002), la sécurité du démarrage (bputil ou puce T2, MAC-DEM-001),
+  les éléments d'ouverture et de fond (sfltool, en administrateur, MAC-PRS-002), les crochets de connexion et les
+  extensions d'autorisation (MAC-PRS-003). Les règles fourre-tout sont scindées : le durcissement de Windows en cinq
+  (WIN-DUR-001 à 005), plus Windows Update coupé ou en pause (WIN-MAJ-003) et la session ouverte toute seule
+  (WIN-SES-002) ; les réglages sysctl en trois (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), dont les corrections s'ajoutent
+  au fichier au lieu de se réécrire l'une l'autre. Chaque règle de la machine cite au moins une référence du CIS, de
+  Microsoft ou de l'ANSSI (exigé par un test pour les trois systèmes), donnée aussi dans le JSON du bilan (« reference
+  »). Un inventaire des logiciels, gardé scellé sur l'ordinateur et jamais envoyé, dit pendant une semaine chaque
+  logiciel installé depuis le dernier bilan (COM-LOG-001). Enfin, chaque règle a son délai (10 min, 30 pour les mises à
+  jour) : celle qui le dépasse est dite non vérifiée, les autres continuent. Rien de cela n'a encore tourné sur un vrai
+  Windows ni sur un vrai Mac : tests sous Wine, clippy pour macOS. Ce qui est dit l'est juste : l'inventaire effacé
+  ou changé hors de Vanguard ne tait plus ce qui s'est installé entre-temps (tout est redit), une mise à jour dont le
+  nom affiché porte la version (« Outil 1.3 (x64) ») n'est plus un nouveau logiciel, et une source qui ne se lit pas
+  (Flatpak muet, ~/Applications illisible) rend le bilan non vérifié au lieu de faire oublier ses logiciels, redits
+  « nouveaux » ensuite ; les logiciels des autres sessions Windows ouvertes ne comptent plus. Defender : une
+  protection posée par une correction du bilan puis coupée est élevée comme celle d'Optimiser, rien n'est dit « qui
+  bloque » quand la protection en temps réel est coupée, ni sain quand rien ne bloque. OpenSSH : un serveur désinstallé
+  dont la configuration est restée est sans objet, administrators_authorized_keys ouvert est moyen quand StrictModes
+  (par défaut) le fait refuser, critique sans lui, et ses fichiers sont bornés avant d'être lus. macOS : les réglages
+  de root illisibles sans sudo rendent le crochet de connexion non vérifié, plus jamais « aucun crochet ». Un choix
+  « c'est normal » sur l'ancienne alerte groupée du noyau Linux vaut pour les trois nouvelles ; au premier bilan
+  après la mise à jour, l'historique peut encore la montrer réglée puis nouvelle.
+
 - **Un journal des événements relié et scellé.** Les alertes, la preuve relevée avant chaque geste, les blocages,
   quarantaines et corrections, leurs annulations, les alertes déclarées normales et les passages de version vont dans
   un seul journal (evenements/AAAA-MM.jsonl, sur cet ordinateur seulement), écrit en ajout seul : chaque ligne porte

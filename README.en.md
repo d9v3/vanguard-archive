@@ -688,6 +688,7 @@ Each menu entry is also a command.
 | `vanguard outbound` | who talks to the Internet: each program's connections (read-only) |
 | `vanguard spyware` | spyware: known servers and sites (Échap list), programs reading the keyboard, monitoring permissions, known monitoring software (read-only) |
 | `vanguard outdated-software` | outdated software (Windows, macOS): browsers, Office, Acrobat, Java, 7-Zip, PuTTY, Slack compared with their latest version; exploited flaws (read-only) |
+| `vanguard disclose [--incident id] [--outil id] [--programme name] [--langue fr\|en] [--json] [--effacer]` | prepare a report for a vendor (MSRC, Google, Chrome, Mozilla, Apple, GHSA advisory, CERT/CC, CERT-FR, Vanguard): sorted first, a draft in the program's format, what is personal removed, written on this computer and shown in full; nothing is ever sent |
 | `vanguard latest-flaws [--days N]` | latest exploited flaws: those CISA just added to its catalog, most recent first |
 | `vanguard dangerous-sites [on\|off]` | dangerous sites blocked by the hosts file (URLhaus, ThreatFox command servers), after your consent; `off` removes them exactly |
 | `vanguard self-check [program]` | check Vanguard itself: version, build date, SHA-256 checksum to compare with the release page; on the owner's key, the key manifest; after your consent, the signed history of published versions, which also checks another copy (`program`), even an earlier version |
@@ -728,7 +729,7 @@ Each menu entry is also a command.
 `a-laisser`, `changements`, `evenements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`,
 `desinstaller`, `regles`, `traces`, `depanner`, `proche`, `verifier-moi`, `labo`, `extensions`, `veilleur`,
 `sites-dangereux`, `dernieres-failles`, `wifi-public`, `optimiser`, `courriel-suspect`, `logiciels-espions`,
-`logiciels-perimes`).
+`logiciels-perimes`, `signaler`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,

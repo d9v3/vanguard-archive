@@ -729,6 +729,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
 | `vanguard logiciels-espions` | logiciels espions : serveurs et sites connus (liste d'Échap), programmes qui lisent le clavier, autorisations de surveillance, logiciels de surveillance connus (lecture seule) |
 | `vanguard logiciels-perimes` | logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java, 7-Zip, PuTTY, Slack comparés à leur dernière version ; failles exploitées (lecture seule) |
+| `vanguard signaler [--incident id] [--outil id] [--programme nom] [--langue fr\|en] [--json] [--effacer]` | préparer un signalement à un éditeur (MSRC, Google, Chrome, Mozilla, Apple, avis GHSA, CERT/CC, CERT-FR, Vanguard) : trié d'abord, brouillon au format du programme, ce qui est personnel retiré, écrit sur cet ordinateur et montré en entier ; rien n'est jamais envoyé |
 | `vanguard dernieres-failles [--jours N]` | dernières failles exploitées : celles que la CISA vient d'ajouter à son catalogue, les plus récentes d'abord |
 | `vanguard sites-dangereux [on\|off]` | sites dangereux bloqués par le fichier hosts (URLhaus, serveurs de commande de ThreatFox), après accord ; `off` les retire exactement |
 | `vanguard verifier-moi [programme]` | vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé ; après accord, l'historique signé des versions publiées, qui vérifie aussi une autre copie (`programme`), même une version d'avant |
@@ -768,7 +769,7 @@ Chaque entrée du menu existe aussi en commande.
 `specs`, `copy-files`, `check-copy`, `check-backup`, `check-drive`, `handout`, `changes`, `events`, `auto-backup`,
 `shortcut`, `computers`, `self-update`, `uninstall`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`,
 `lab`, `ext`, `watcher`, `dangerous-sites`, `latest-flaws`, `public-wifi`, `optimize`, `suspicious-email`, `spyware`,
-`outdated-software`).
+`outdated-software`, `disclose`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire

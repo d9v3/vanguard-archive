@@ -58,6 +58,7 @@ mod risk;
 mod sauvegarde;
 mod sceau;
 mod selection;
+mod signaler;
 mod socle;
 mod sqlite;
 mod traces;
@@ -368,6 +369,31 @@ enum Commande {
         /// Le résultat en JSON, pour un script.
         #[arg(long)]
         json: bool,
+    },
+    /// Préparer un signalement à un éditeur (MSRC, Google, Chrome, Mozilla, Apple, avis GHSA, CERT/CC, CERT-FR,
+    /// Vanguard) : trié d'abord (une faille connue se corrige par une mise à jour, un logiciel malveillant n'est pas une
+    /// faille), un brouillon au format du programme, ce qui est personnel retiré, écrit sur cet ordinateur et montré en
+    /// entier. Rien n'est jamais envoyé : la personne le relit, le copie et le soumet elle-même.
+    #[command(visible_alias = "disclose")]
+    Signaler {
+        /// L'identifiant d'un événement du journal (vanguard evenements) : son incident est repris.
+        #[arg(long)]
+        incident: Option<String>,
+        /// Le dernier examen d'un outil (PRO-ESP-001, PRO-PER-001, PRO-COU-001).
+        #[arg(long)]
+        outil: Option<String>,
+        /// Le programme : msrc, google, chrome, mozilla, apple, ghsa, cert-cc, cert-fr ou vanguard.
+        #[arg(long)]
+        programme: Option<String>,
+        /// La langue du brouillon (fr ou en) ; par défaut, celle que le programme lit.
+        #[arg(long)]
+        langue: Option<String>,
+        /// Le tri et le brouillon en JSON, pour un script : rien n'est écrit ni noté, aucune question.
+        #[arg(long)]
+        json: bool,
+        /// Liste les brouillons gardés et les efface après accord.
+        #[arg(long)]
+        effacer: bool,
     },
     /// Caméra et micro : qui s'en sert ? Sous Windows, chaque programme et la dernière fois ; sous Linux, ce qui les
     /// tient en ce moment. Lecture seule.
@@ -1160,6 +1186,7 @@ enum Action {
     CourrielSuspect,
     LogicielsEspions,
     LogicielsPerimes,
+    Signaler,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -1429,6 +1456,11 @@ const OUTILS: &[Outil] = &[
         precision: ["versions, failles exploitées", "versions, exploited flaws"],
         mots: "logiciel software version périmé outdated mise à jour update navigateur browser chrome edge \
                firefox brave office word excel acrobat reader java kev faille exploitée exploited" },
+    Outil { action: Action::Signaler, commande: "signaler", groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Signaler une faille à un éditeur", "Report a flaw to a vendor"],
+        precision: ["rien n'est envoyé, tu relis", "nothing is sent, you review"],
+        mots: "signaler disclose signalement report divulgation disclosure faille vulnerability bogue bug éditeur \
+               vendor msrc microsoft google chrome mozilla bugzilla apple ghsa github cert prime bounty" },
     Outil { action: Action::Logiciels, commande: "logiciels", groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
@@ -1838,6 +1870,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::CourrielSuspect => protection::courriel_suspect::verifier(None),
         Action::LogicielsEspions => protection::espions::afficher(),
         Action::LogicielsPerimes => protection::perimes::afficher(),
+        Action::Signaler => signaler::menu(),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
         Action::Quarantaine => protection::quarantaine::menu(),
         Action::SecretsGit => protection::secrets_git::analyser(),
@@ -1966,6 +1999,10 @@ const AIDES_EN: &[(&str, &str)] = &[
                            public files downloaded in full, nothing about this computer is sent), each product's \
                            exploited flaws in CISA's catalog, Firefox and Edge checked flaw by flaw (Mozilla \
                            advisories, Microsoft's list). Read-only"),
+    ("signaler", "Prepare a report for a vendor (MSRC, Google, Chrome, Mozilla, Apple, GHSA advisory, CERT/CC, \
+                  CERT-FR, Vanguard): sorted first (a known flaw is fixed by an update, malware is not a flaw), a \
+                  draft in the program's format, what is personal removed, written on this computer and shown in \
+                  full. Nothing is ever sent: you read it, copy it and submit it yourself"),
     ("camera-micro", "Camera and microphone: who uses them? On Windows, each program and the last time; on Linux, \
                       what holds them right now. Read-only"),
     ("acces", "Privacy check: the apps that have access to the location, contacts, camera and microphone, and their \
@@ -2081,6 +2118,12 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("evenements", "json", "The log as JSON, for a script"),
     ("logiciels-espions", "json", "The result as JSON, for a script"),
     ("logiciels-perimes", "json", "The result as JSON, for a script"),
+    ("signaler", "incident", "The identifier of a log event (vanguard events): its incident is used"),
+    ("signaler", "outil", "The last examination of a tool (PRO-ESP-001, PRO-PER-001, PRO-COU-001)"),
+    ("signaler", "programme", "The program: msrc, google, chrome, mozilla, apple, ghsa, cert-cc, cert-fr or vanguard"),
+    ("signaler", "langue", "The draft's language (fr or en); by default, the one the program reads"),
+    ("signaler", "json", "The sorting and the draft as JSON, for a script: nothing written or recorded, no question"),
+    ("signaler", "effacer", "List the kept drafts and erase them after your consent"),
     ("courriel-suspect", "json", "The result as JSON, for a script: the examination on the computer only (neither \
                                   the online check nor the attachments scan, said not checked)"),
     ("evenements", "incident", "One incident's thread: this event, what caused it and what it caused"),
@@ -2302,6 +2345,21 @@ async fn main() {
         Some(Commande::LogicielsEspions { json: true }) => protection::espions::json(),
         Some(Commande::LogicielsPerimes { json: false }) => protection::perimes::afficher(),
         Some(Commande::LogicielsPerimes { json: true }) => protection::perimes::json(),
+        Some(Commande::Signaler {
+            incident,
+            outil,
+            programme,
+            langue,
+            json,
+            effacer,
+        }) => signaler::commande(&signaler::Options {
+            incident,
+            outil,
+            programme,
+            langue,
+            json,
+            effacer,
+        }),
         Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
         Some(Commande::Acces) => protection::acces::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),
@@ -2472,12 +2530,14 @@ mod tests_menu {
         assert_eq!(lettres.len(), n);
     }
 
-    /// Les logiciels pas à jour : dernière ligne du groupe Protection, juste après les logiciels espions ; montrée sous
-    /// Windows et macOS seulement (sous Linux, le gestionnaire de paquets tient les versions).
+    /// Les logiciels pas à jour : juste après les logiciels espions, avant le signalement à un éditeur (ajouté à la fin
+    /// du groupe : aucune place annoncée ne bouge) ; montrée sous Windows et macOS seulement (sous Linux, le
+    /// gestionnaire de paquets tient les versions).
     #[test]
     fn logiciels_perimes_en_fin_de_protection() {
         let protection = Groupe::Protection.actions();
-        assert!(protection.ends_with(&[Action::LogicielsEspions, Action::LogicielsPerimes]));
+        assert!(protection.ends_with(&[Action::LogicielsEspions, Action::LogicielsPerimes, Action::Signaler]));
+        assert!(Action::Signaler.disponible());
         assert_eq!(
             Action::LogicielsPerimes.disponible(),
             cfg!(any(windows, target_os = "macos"))

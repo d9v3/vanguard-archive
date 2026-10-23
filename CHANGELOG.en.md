@@ -95,6 +95,74 @@ delivered just before it. Only the latest version has its download page; every v
   of the account can write): the commands are rebuilt from the noted address, port or value, and an unrecognized block
   is refused and shown instead of running as administrator. Undoing only puts back a copy of Claude Code settings made
   by Vanguard, and “put back as before” for the gaming settings only rewrites as root what Vanguard puts in /etc.
+- **Prepare a report for a vendor (`vanguard disclose`, French name `signaler`).** The assistant sorts first: an
+  already known flaw (CVE, CISA's catalog) is fixed by an update; malware, a missed detection or a phishing site are
+  not flaws of the vendor (where to send them yourself is named, nothing is prepared); a bypass of AppLocker or
+  controlled folder access is said not fixed by default by Microsoft. For abnormal behavior, it prepares a draft in
+  the chosen program's format (MSRC, Google, Chrome, Mozilla, Apple, GHSA advisory, CERT/CC, CERT-FR, Vanguard), with
+  the incident's thread or a tool's examination, the log's state (tampered: “not verified”; adopted or incomplete:
+  “not proven”), and what only the person knows (titled INCOMPLETE while its steps, what happened, or the proof of
+  concept required by MSRC, Apple and Chrome are missing). What is personal is removed in three layers: nothing
+  useless (no command line, no relative's account, no personal file name), everything masked (paths, names, addresses,
+  query strings of web addresses), then a final check that refuses to write if a known name survives; the count is
+  shown. A path cut on the left by “…” is reduced whole, a word before “:” (“fichier:”, “file://”) is no longer taken
+  for a drive, and the outdated software examination only carries the product hit by an exploited flaw, never the list
+  of installed programs. A healthy, unchecked or tampered examination settles nothing, a triage drawn from an
+  unverified log says so, and with no CVE cited CISA's catalog is “not checked”, never “not in it”. Values from
+  outside go into code blocks, the rest is neutralized (no mention, image or link). The text is shown in full, written
+  after consent in this computer's folder (file 0600), recorded in the log without its content; `--effacer` removes
+  them, uninstalling counts them first. Nothing is ever sent: no network code in the module (checked by a closed list
+  of calls), no clipboard, no email.
+- **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
+  adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
+  can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category
+  counts among what closes incoming connections: a network left Private, a company network or an unreadable category
+  leaves the mode “on, incoming open”, and a setting that cannot be re-read shows as not verified, never ✔. On Linux, a
+  DNS, encrypted DNS, mDNS or LLMNR undone by a program of the account (NetworkManager allows it without a password)
+  shows in the check (Medium), on the menu line and in its header, with a way to put it back. DNS is no longer kept as
+  “already encrypted and filtering” when only one of its servers filters: they must all filter, otherwise the Shield is
+  set; the check no longer says such a DNS blocks dangerous sites either.
+- **Attack campaign no. 2: eight weaknesses closed.** “Put everything back” never replays a command text read from
+  changements.jsonl (which any program of the account can write): each block is undone by the commands rebuilt from
+  its typed fields, like a single undo, and an unrecognized block is refused and shown instead of running as
+  administrator. The event log is read with an overall bound (months, bytes, events), most recent first, and says what
+  it did not read; files placed under the names of future months (2099…) do not count there, are no longer followed
+  by writing nor counted by pruning, and no longer push the real current month out of the read and the traces: they
+  are reported. formula.json, cask.json and endoflife.date are read as a stream, with a cap on entries: a small
+  hostile file no longer makes the program allocate gigabytes. The attachment name of a suspicious email goes filtered
+  (direction marks, control characters) into the result, the log and the report, and so does every written finding
+  message. A software inventory that hits a bound (subkeys, entries in a folder, 20,000 programs, many keys without a
+  name) is not verified, never silently truncated. Tool results (examens/*.json) are sealed: a “nothing found”
+  rewritten outside Vanguard shows as not verified, never green. The nightly watch no longer deposits into the VM the
+  program of a branch written by the AI (to run after review, `vm-tester.sh --branche`), and only passes the subject,
+  file and line of a proposal to the AI that fixes.
+- **Check rule parity: SSH and Defender on Windows, passwords, startup and persistence on macOS, one reference per rule,
+  one time limit per rule.** Windows gains the OpenSSH server (service, %ProgramData%\ssh configuration, password
+  sign-in, administrators_authorized_keys rights, read in Rust: registry, WMI, files and their rights) and the keys in
+  %USERPROFILE%\.ssh (no passphrase, readable by others), WIN-SSH-001 and 002; the check re-reads the Defender
+  protections that “harden” turns on (ASR rules, network protection, PUA, controlled folders, WIN-ANV-003): a protection
+  Vanguard set and that was later turned off is a high alert, the basic blocking, network protection and PUA are
+  offered, each fix can be undone. macOS gains the password policy and account lockout (pwpolicy, MAC-CPT-002), startup
+  security (bputil or T2 chip, MAC-DEM-001), login and background items (sfltool, as administrator, MAC-PRS-002), login
+  hooks and authorization plugins (MAC-PRS-003). Catch-all rules are split: Windows hardening into five (WIN-DUR-001 to
+  005), plus Windows Update off or paused (WIN-MAJ-003) and automatic sign-in (WIN-SES-002); sysctl settings into three
+  (LNX-NOY-003, LNX-NOY-007, LNX-RES-003), whose fixes append to the file instead of overwriting each other. Every
+  machine rule cites at least one CIS, Microsoft or ANSSI reference (required by a test for all three systems), also
+  given in the check's JSON (“reference”). A software inventory, kept sealed on the computer and never sent, tells for a
+  week each program installed since the last check (COM-LOG-001). Finally, each rule has its time limit (10 min, 30 for
+  updates): one that exceeds it is reported as not checked, the others go on. None of this has run on a real Windows or
+  a real Mac yet: tests under Wine, clippy for macOS. What is said is accurate: an inventory erased or changed outside
+  Vanguard no longer hides what was installed meanwhile (everything is reported again), an update whose displayed name
+  carries the version (“Tool 1.3 (x64)”) is no longer new software, and a source that cannot be read (silent Flatpak,
+  unreadable ~/Applications) makes the check not verified instead of forgetting its programs, reported as “new”
+  later; programs of other open Windows sessions no longer count. Defender: a protection set by a check fix and later
+  turned off is high, like one set by Optimize; nothing is said to “block” while real-time protection is off, nor
+  healthy when nothing blocks. OpenSSH: an uninstalled server whose configuration stayed is not applicable,
+  administrators_authorized_keys open to others is medium when StrictModes (the default) makes it refused, critical
+  without it, and its files are bounded before being read. macOS: root's settings unreadable without sudo make the
+  login hook not verified, never “no hook” again. A “this is normal” choice on the old grouped Linux kernel alert
+  applies to the three new ones; at the first check after the update, the history may still show it fixed then new.
+
 - **A linked, sealed event log.** Alerts, the evidence recorded before each action, blocks, quarantines and fixes,
   their undoing, alerts declared normal and version changes go into a single log (evenements/YYYY-MM.jsonl, on this
   computer only), append-only: each line carries the fingerprint of the previous one, the head is sealed, and so is

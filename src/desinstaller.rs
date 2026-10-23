@@ -1531,6 +1531,15 @@ fn accord_donnees(e: &Element, a: &Annulables, gardes: &[(PathBuf, String)]) -> 
         ));
         return false;
     }
+    // Un brouillon de signalement peut être le seul écrit d'une faille pas encore soumise : dit avant. Après
+    // le refus pour la quarantaine d'une version d'avant : là, le dossier est gardé et les brouillons avec lui.
+    let brouillons = crate::signaler::nombre_dans(d);
+    if brouillons > 0 {
+        dire(&trf!(
+            "{brouillons} brouillon(s) de signalement (signalements) seront effacés avec lui : copie-les d'abord s'ils ne sont pas encore soumis.",
+            "{brouillons} vulnerability report draft(s) (signalements) will be erased with it: copy them first if they are not submitted yet."
+        ));
+    }
     if quarantaine > 0 {
         dire(&trf!(
             "Il garde aussi {quarantaine} fichier(s) en quarantaine. Une détection peut se tromper : remets d'abord ceux qui sont à toi, ou garde le dossier.",

@@ -134,6 +134,8 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     local("feodo", "protection::sortantes"),
     local("threatfox", "protection::abuse_ch"),
     local("urlhaus", "protection::lien"),
+    // Brouillons de signalement (0600), jamais sur la clé : la désinstallation les compte avant de les effacer.
+    local(crate::signaler::DOSSIER, "signaler"),
     // Réseau et surveillance. Les copies « <nom>.illisible-<date>.json » (historique, appareils) sont des copies de
     // secours datées d'un fichier qui ne se lisait plus : rangées sous leur fichier d'origine, pas inventoriées à part.
     local("appareils.json", "reseau"),

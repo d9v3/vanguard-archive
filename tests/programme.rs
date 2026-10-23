@@ -1451,6 +1451,75 @@ fn wifi_public_sans_rien_changer() {
     }
 }
 
+/// `vanguard signaler --incident <id> --programme msrc --json` sur un journal écrit à la main (sans sa tête, donc
+/// « falsifie ») : un JSON aux clés stables, le brouillon dit les observations non vérifiées, rien de personnel n'y
+/// reste (chemin d'un autre compte, nom de fichier, ligne de commande), et rien n'est écrit ni noté.
+#[test]
+fn signaler_en_json_sur_un_journal_d_essai() {
+    let maison = maison_jetable();
+    let donnees = if cfg!(windows) {
+        maison.join("local")
+    } else {
+        maison.join("donnees")
+    };
+    let segment = donnees
+        .join("vanguard/evenements")
+        .join(format!("{}.jsonl", chrono::Utc::now().format("%Y-%m")));
+    std::fs::create_dir_all(segment.parent().unwrap()).unwrap();
+    let journal = concat!(
+        r#"{"v":1,"id":"a1","quand":"2026-10-23T10:00:00Z","source":"surveillance","cle":"port|8080","quoi":{"sorte":"alerte","famille":"port","titre":"Port 8080 ouvert par /home/bob/bin/srv","texte":"x`@bob <img src=x>"},"precedent":""}"#,
+        "\n",
+        r#"{"v":1,"id":"a2","quand":"2026-10-23T10:00:01Z","source":"blocage","cause":"a1","quoi":{"sorte":"preuve","releve":{"date":"x","processus":{"pid":4,"programme":"/home/bob/bin/srv","ligne":"--token=SECRET","compte":"bob"},"fichier":{"chemin":"/home/bob/Documents/CV-Zoé-Martin.pdf","sha256":"abab"}}},"precedent":""}"#,
+        "\n"
+    );
+    std::fs::write(&segment, journal).unwrap();
+    let s = vanguard_dans(
+        Path::new(env!("CARGO_BIN_EXE_vanguard")),
+        &maison,
+        "fr",
+        &["signaler", "--incident", "a1", "--programme", "msrc", "--json"],
+        "",
+        60,
+    );
+    assert_eq!(s.code, Some(0), "{}\n{}", s.texte, s.erreurs);
+    let v: serde_json::Value = serde_json::from_str(&s.texte).expect("signaler --json : JSON illisible");
+    assert_eq!(v["etat_journal"], "falsifie");
+    assert_eq!(v["tri"]["sorte"], "a-ecrire");
+    assert_eq!(v["programme"], "msrc");
+    assert_eq!(v["langue"], "en");
+    assert_eq!(v["ecrit"], false);
+    assert_eq!(v["incomplet"], true);
+    assert_eq!(
+        v["manque"],
+        serde_json::json!(["etapes", "observe", "preuve-de-concept"])
+    );
+    let brouillon = v["brouillon"].as_str().expect("brouillon absent");
+    assert!(
+        brouillon.starts_with("# INCOMPLETE") && brouillon.contains("not verified"),
+        "{brouillon}"
+    );
+    for absent in ["SECRET", "/home/bob", "Zoé-Martin", "account: bob"] {
+        assert!(!brouillon.contains(absent), "{absent} :\n{brouillon}");
+    }
+    assert!(!donnees.join("vanguard/signalements").exists());
+    assert_eq!(
+        std::fs::read_to_string(&segment).unwrap(),
+        journal,
+        "rien n'est noté au journal"
+    );
+    // Un identifiant inconnu est refusé, et c'est dit.
+    let s = vanguard_dans(
+        Path::new(env!("CARGO_BIN_EXE_vanguard")),
+        &maison,
+        "fr",
+        &["signaler", "--incident", "inconnu", "--json"],
+        "",
+        60,
+    );
+    assert!(s.texte.contains("aucun événement « inconnu »"), "{}", s.texte);
+    let _ = std::fs::remove_dir_all(&maison);
+}
+
 /// Le menu, l'interface principale, parcouru pour de vrai dans un pseudo-terminal (comme une personne au clavier,
 /// pas par un tube) : flèches, Entrée, Échap, puis « q » et Entrée. Les autres tests parlent au programme par un tube, où les
 /// menus lisent des lignes ; ici, le mode brut du terminal, les touches une à une et le retour au menu principal se
@@ -1533,12 +1602,13 @@ mod menus_dans_un_terminal {
         }
     }
 
-    #[test]
-    fn fleches_entree_echap_puis_quitter() {
-        let maison = maison_jetable();
+    /// Vanguard lancé dans un pseudo-terminal de 80 × 40, avec `args` et le dossier personnel `maison` : le processus,
+    /// le terminal, et le fil qui lit l'écran.
+    fn lancer(maison: &std::path::Path, args: &[&str]) -> (std::process::Child, Terminal, std::thread::JoinHandle<()>) {
         let (maitre, esclave) = ouvrir(80, 40);
         let mut commande = Command::new(env!("CARGO_BIN_EXE_vanguard"));
         commande
+            .args(args)
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("TERM", "xterm-256color")
@@ -1546,7 +1616,7 @@ mod menus_dans_un_terminal {
             .env("USER", "essai")
             .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
             .env("XDG_RUNTIME_DIR", maison.join("run"))
-            .env("HOME", &maison)
+            .env("HOME", maison)
             .env("XDG_DATA_HOME", maison.join("donnees"))
             .env("XDG_CONFIG_HOME", maison.join("config"))
             .env("XDG_CACHE_HOME", maison.join("cache"))
@@ -1566,7 +1636,7 @@ mod menus_dans_un_terminal {
                 Ok(())
             });
         }
-        let mut enfant = commande.spawn().expect("vanguard ne démarre pas");
+        let enfant = commande.spawn().expect("vanguard ne démarre pas");
         // L'esclave n'est plus ouvert ici (il a été donné à Command) : à la sortie de Vanguard, la lecture finit.
         drop(commande);
         let ecrit = Arc::new(Mutex::new(Vec::new()));
@@ -1581,12 +1651,18 @@ mod menus_dans_un_terminal {
                 copie.lock().unwrap().extend_from_slice(&tampon[..n]);
             }
         });
-        let mut t = Terminal {
+        let t = Terminal {
             ecrit,
             clavier: std::fs::File::from(maitre),
             vu: 0,
         };
+        (enfant, t, lecteur)
+    }
 
+    #[test]
+    fn fleches_entree_echap_puis_quitter() {
+        let maison = maison_jetable();
+        let (mut enfant, mut t, lecteur) = lancer(&maison, &[]);
         let menu = t.attendre("Quitter", 60);
         assert!(
             menu.contains("Bilan complet") && menu.contains("Cette machine"),
@@ -1622,6 +1698,36 @@ mod menus_dans_un_terminal {
         // Le côté programme de test fermé, le lecteur en fond s'arrête de lui-même.
         drop(t);
         let _ = lecteur.join();
+        let _ = std::fs::remove_dir_all(&maison);
+    }
+
+    /// L'assistant de signalement au clavier : « Rien de ce que Vanguard a vu » choisi par Entrée, la question du tri
+    /// montrée, puis Échap : on revient sans rien écrire.
+    #[test]
+    fn signaler_au_clavier_sans_rien_ecrire() {
+        let maison = maison_jetable();
+        let (mut enfant, mut t, lecteur) = lancer(&maison, &["signaler"]);
+        let ecran = t.attendre("Rien de ce que Vanguard a vu", 60);
+        assert!(ecran.contains("Il ne l'envoie jamais"), "{ecran}");
+        t.taper(ENTREE);
+        let tri = t.attendre("Un logiciel se comporte mal", 30);
+        assert!(tri.contains("Un lien ou courriel d'hameçonnage"), "{tri}");
+        t.taper(ECHAP);
+        let fin = Instant::now() + Duration::from_secs(30);
+        let statut = loop {
+            if let Some(s) = enfant.try_wait().unwrap() {
+                break s;
+            }
+            if Instant::now() > fin {
+                let _ = enfant.kill();
+                panic!("Échap n'a pas fermé l'assistant en 30 s :\n{}", t.attendre("", 0));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(statut.success(), "{statut:?}");
+        drop(t);
+        let _ = lecteur.join();
+        assert!(!maison.join("donnees/vanguard/signalements").exists());
         let _ = std::fs::remove_dir_all(&maison);
     }
 }

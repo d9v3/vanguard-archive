@@ -123,6 +123,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
          permissions (read-only; vanguard spyware)
        Outdated software (Windows, macOS): browsers, Office, Acrobat, Java, 7-Zip… and their exploited flaws
          (read-only; vanguard outdated-software)
+       Report a flaw to a vendor: a draft in the program's format (MSRC, Mozilla, GHSA advisory…), what is
+         personal removed; nothing is ever sent (vanguard disclose)
        Threat blocking: one-click "Block" for each threat found (action shown, written down, undoable);
          active protection, once enabled, blocks clear-cut threats by itself (vanguard blocking)
   7  Install and play ›
