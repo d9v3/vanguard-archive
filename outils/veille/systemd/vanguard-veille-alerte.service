@@ -1,0 +1,14 @@
+[Unit]
+Description=Vanguard : correction proposée sur alerte de la veille (claude -p, branche veille/*, jamais fusionnée)
+# Lancé par nuit.sh (systemctl --user start --no-block), jamais par une minuterie.
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/vanguard-veille/courante/alerte.sh
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=20
+Environment=CARGO_BUILD_JOBS=8
+# Correction (90 min au plus), verifier.sh (90 min au plus), relecture (90 min au plus), programme Windows (30 min
+# au plus) et VM (41 min au plus) : 5 h 45 au pire. Arrêtée, alerte.sh écrit quand même le rapport et notifie.
+TimeoutStartSec=6h

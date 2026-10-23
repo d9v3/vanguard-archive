@@ -1,0 +1,13 @@
+[Unit]
+Description=Vanguard : veille de nuit, chaque jour à 03 h 30
+
+[Timer]
+# Après le renouvellement du quota de Claude du vendredi à 3 h.
+OnCalendar=*-*-* 03:30
+RandomizedDelaySec=5min
+# Ordinateur éteint à 03 h 30 : pas de rattrapage en journée (il chargerait l'ordinateur pendant le travail ou un
+# jeu) ; la nuit manquée se voit dans le rapport suivant. À confirmer par l'auteur (true : rattrapée au démarrage).
+Persistent=false
+
+[Install]
+WantedBy=timers.target

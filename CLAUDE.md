@@ -112,6 +112,10 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   numéro de version ni envoi ; le Mac de GitHub et la VM ne voient que la version publiée (leurs minutes coûtent).
   CHANGELOG.md et CHANGELOG.en.md gagnent un paragraphe par jour publié ; seule la dernière version garde sa page.
   Relire `grep ^version Cargo.toml` après le changement : une autre session a pu avancer la version.
+- Veille continue (`outils/veille/LISEZMOI.md`) : chaque nuit, sans IA, verifier.sh, fuzz, proptest à graine du
+  jour, canaris des vraies sources et signaux KEV/RUSTSEC/Échap (rapport dans `~/.cache/vanguard-dev/veille/`) ;
+  sur alerte, une correction proposée par claude -p dans une branche `veille/AAAA-MM-JJ-<sujet>`, jamais fusionnée
+  ni poussée : la relire et la fusionner soi-même, ou `git branch -D` pour la refuser (une seule attend à la fois).
 - Enchaîner édition && vérification && commit, et regarder `git show --stat` avant de dire que c'est fait.
 - Tester pour de vrai ce qui peut l'être : menus dans un pseudo-terminal (pty + pyte), scripts PowerShell générés
   analysés par pwsh, commandes shell par `bash -n`, clé USB réelle.

@@ -1,0 +1,14 @@
+[Unit]
+Description=Vanguard : veille de nuit, sans IA (vérification, fuzz, failles, canaris des sources)
+# outils/veille/LISEZMOI.md. Lance la copie figée installée par outils/veille/installer.sh, jamais le dépôt : nuit.sh
+# remet lui-même le worktree de veille sur prochaine.
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/vanguard-veille/courante/nuit.sh
+Nice=19
+IOSchedulingClass=idle
+CPUWeight=20
+Environment=CARGO_BUILD_JOBS=8
+# ~1 h 45 sans la VM ; la VM est bornée à 51 min (nuit.sh).
+TimeoutStartSec=4h

@@ -1,0 +1,12 @@
+[Unit]
+Description=Vanguard : relecture de sécurité hebdomadaire des changements de prochaine (claude -p, lecture seule)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/vanguard-veille/courante/hebdo.sh
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=20
+Environment=CARGO_BUILD_JOBS=8
+# Relecture (90 min au plus) ; une proposition évidente enchaîne sur alerte.sh dans ce même service (6 h au plus).
+TimeoutStartSec=8h

@@ -65,6 +65,7 @@ A security flaw? No public issue or pull request: report it privately, see [SECU
 | `src/audit/appareils.rs`, `postes.rs` | Devices (IoT devices recognised from the scan, nothing probed beyond the camera search) and Computers (this computer as seen from the network: the report's network findings; the other computers from the scan) domains |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/modele/` | common findings model: `rule + object` key without translated text (`id.rs`), state healthy, not applicable, not checked with its reason, or problem (`etat.rs`, `raison.rs`), prefixes and tool identifiers (`registre.rs`), versioned inventory of state files from which `sceau` takes what it protects (`inventaire.rs`) |
+| `src/canaris.rs` | format canaries (tests only): each real source downloaded with the program's own request and read back by its reader; run by the night watch (`VANGUARD_CANARIS`), never by `cargo test` |
 | `src/sceau.rs` | seals of Vanguard's state (accepted alerts, integrity reference, reported botnets, versions seen, Optimize's previous values, alerts declared normal): changed outside Vanguard, it no longer counts and the check says so |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
 | `src/optimiser/` | privacy, performance and comfort settings, with exact undo; startup programs (`demarrage.rs`); Windows Defender blocking: ASR rules, network protection, PUA, controlled folder access (`defender.rs`) |

@@ -558,14 +558,9 @@ fn obtenir(source: &Source, adresse: &str, mode: &Mode) -> Result<Copie, String>
     let lieu = (SOUS_DOSSIER, source.id);
     let (brut, age, manque) = match mode {
         Mode::Telecharger => {
-            let mut demande = crate::http::Demande {
-                taille_max: source.taille_max,
-                ..crate::http::Demande::get(adresse, Duration::from_secs(source.delai))
-            };
-            if source.gzip.is_some() {
-                demande.entetes.push(("Accept-Encoding", "gzip".to_string()));
-            }
-            let liste = crate::socle::cache::liste_validee(demande, lieu, FRAICHE, &|o| contenu(source, o).is_some());
+            let liste = crate::socle::cache::liste_validee(demande(source, adresse), lieu, FRAICHE, &|o| {
+                contenu(source, o).is_some()
+            });
             let manque = liste.manque.map(raison);
             let (brut, age) = liste.resultat(false).map_err(raison)?;
             (brut, age, manque)
@@ -593,6 +588,19 @@ fn obtenir(source: &Source, adresse: &str, mode: &Mode) -> Result<Copie, String>
     Ok(Copie { octets, age, manque })
 }
 
+/// La demande d'une source, envoyée à `adresse` (un serveur local dans les tests) : la même pour le programme et pour
+/// les canaris de la veille de nuit (`canaris`), qui doivent voir ce que le programme verrait.
+pub(crate) fn demande<'a>(source: &Source, adresse: &'a str) -> crate::http::Demande<'a> {
+    let mut demande = crate::http::Demande {
+        taille_max: source.taille_max,
+        ..crate::http::Demande::get(adresse, Duration::from_secs(source.delai))
+    };
+    if source.gzip.is_some() {
+        demande.entetes.push(("Accept-Encoding", "gzip".to_string()));
+    }
+    demande
+}
+
 /// La copie gardée et son âge, sans rien demander.
 fn gardee((sous_dossier, nom): (&str, &str)) -> Option<(Vec<u8>, Duration)> {
     let fichier = crate::socle::dossier_local().join(sous_dossier).join(nom);
@@ -605,7 +613,7 @@ fn gardee((sous_dossier, nom): (&str, &str)) -> Option<(Vec<u8>, Duration)> {
 }
 
 /// Le contenu d'une réponse ou d'une copie, décompressé s'il le faut, et seulement s'il a la forme attendue.
-fn contenu(source: &Source, brut: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn contenu(source: &Source, brut: &[u8]) -> Option<Vec<u8>> {
     let octets = match source.gzip {
         Some(limite) if crate::archives::gzip::est_gzip(brut) => crate::archives::gzip::degzip_controle(brut, limite)?,
         _ => brut.to_vec(),

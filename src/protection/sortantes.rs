@@ -700,6 +700,24 @@ fn analyser_feodo(texte: &str) -> Option<BTreeSet<IpAddr>> {
 /// Au-delà, Feodo Tracker ne compte plus comme à jour : abuse.ch l'a laissée figée le 4 mars 2026, à une adresse.
 const FEODO_FIGEE_JOURS: i64 = 30;
 
+/// La demande de Feodo Tracker (sans clé) : la même pour le programme et pour les canaris de la veille de nuit
+/// (`canaris`).
+pub(crate) fn demande_feodo() -> crate::http::Demande<'static> {
+    crate::http::Demande {
+        taille_max: 256 << 20,
+        ..crate::http::Demande::get(
+            "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
+            Duration::from_secs(40),
+        )
+    }
+}
+
+/// La liste de Feodo Tracker se lit-elle comme le programme l'attend ? (canaris de la veille de nuit)
+#[cfg(test)]
+pub(crate) fn feodo_lisible(octets: &[u8]) -> bool {
+    analyser_feodo(&String::from_utf8_lossy(octets)).is_some()
+}
+
 /// La liste de Feodo Tracker, et le jour de sa dernière mise à jour si elle est figée (`figee_depuis`).
 fn analyser_feodo_datee(texte: &str) -> Option<(BTreeSet<IpAddr>, Option<chrono::NaiveDate>)> {
     Some((
@@ -958,14 +976,8 @@ fn botnets() -> (Botnets, Vec<String>) {
     let cle = abuse_ch::cle();
     let (feodo, export, api) = std::thread::scope(|s| {
         let feodo = s.spawn(|| {
-            let demande = Demande {
-                taille_max: 256 << 20,
-                ..Demande::get(
-                    "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
-                    Duration::from_secs(40),
-                )
-            };
-            let liste = crate::socle::cache::liste(demande, ("feodo", "botnets.txt"), URLHAUS_FRAICHE, |_| true);
+            let liste =
+                crate::socle::cache::liste(demande_feodo(), ("feodo", "botnets.txt"), URLHAUS_FRAICHE, |_| true);
             verifiee("Feodo Tracker", liste.resultat(false), en_texte(analyser_feodo_datee))
         });
         let api = s.spawn(|| {

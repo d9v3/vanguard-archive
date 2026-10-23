@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "constats"],
+  "properties": {
+    "verdict": {"enum": ["accepte", "refuse"]},
+    "constats": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fichier", "ligne", "gravite", "resume"],
+        "properties": {
+          "fichier": {"type": "string", "maxLength": 160},
+          "ligne": {"type": "integer", "minimum": 0},
+          "gravite": {"enum": ["bloquant", "important", "mineur"]},
+          "resume": {"type": "string", "maxLength": 400}
+        }
+      }
+    },
+    "injection_vue": {"type": "boolean"}
+  }
+}

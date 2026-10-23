@@ -530,24 +530,14 @@ pub(super) fn indicateurs_de(entrees: &[Entree]) -> Option<Indicateurs> {
 pub(crate) fn indicateurs(telecharger: bool, age_max: Duration) -> Result<(Indicateurs, Duration), String> {
     let (octets, age) = if telecharger && !crate::parametres::hors_ligne() {
         use crate::protection::abuse_ch::Echec;
-        let demande = crate::http::Demande {
-            taille_max: TAILLE_MAX,
-            meme_hote: true,
-            ..crate::http::Demande::get(ADRESSE, Duration::from_secs(30))
-        };
         // Validée avant de remplacer la copie : une page de blocage reçue avec un 200 ne l'efface pas.
-        crate::socle::cache::liste(demande, ("echap", "ioc.yaml"), FRAICHE, |o| {
-            std::str::from_utf8(o)
-                .ok()
-                .and_then(lire_yaml)
-                .is_some_and(|l| indicateurs_de(&l.entrees).is_some())
-        })
-        .resultat(false)
-        .map_err(|e| match e {
-            Echec::Reponse(code) => trf!("GitHub a répondu {code}", "GitHub answered {code}"),
-            Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
-            autre => autre.raison(),
-        })?
+        crate::socle::cache::liste(demande(), ("echap", "ioc.yaml"), FRAICHE, |o| du_fichier(o).is_some())
+            .resultat(false)
+            .map_err(|e| match e {
+                Echec::Reponse(code) => trf!("GitHub a répondu {code}", "GitHub answered {code}"),
+                Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
+                autre => autre.raison(),
+            })?
     } else {
         copie_gardee().ok_or_else(|| {
             if telecharger {
@@ -590,6 +580,27 @@ pub(crate) fn indicateurs(telecharger: bool, age_max: Duration) -> Result<(Indic
     let lecture = lire_yaml(texte).ok_or_else(illisible)?;
     let ind = indicateurs_de(&lecture.entrees).ok_or_else(illisible)?;
     Ok((ind, age))
+}
+
+/// La demande de la liste : la même pour le programme et pour les canaris de la veille de nuit (`canaris`).
+pub(crate) fn demande() -> crate::http::Demande<'static> {
+    crate::http::Demande {
+        taille_max: TAILLE_MAX,
+        meme_hote: true,
+        ..crate::http::Demande::get(ADRESSE, Duration::from_secs(30))
+    }
+}
+
+/// Les indicateurs d'un fichier reçu, s'il se lit en entier comme la liste d'Échap.
+fn du_fichier(octets: &[u8]) -> Option<Indicateurs> {
+    indicateurs_de(&lire_yaml(std::str::from_utf8(octets).ok()?)?.entrees)
+}
+
+/// Les comptes d'un fichier reçu (entrées, serveurs, adresses, sites), par le même lecteur que le programme : les
+/// canaris de la veille de nuit les comparent d'un jour à l'autre. `None` : le programme refuserait ce fichier.
+#[cfg(test)]
+pub(crate) fn comptes(octets: &[u8]) -> Option<[usize; 4]> {
+    du_fichier(octets).map(|i| [i.entrees, i.serveurs.len(), i.ips.len(), i.sites.len()])
 }
 
 /// La copie gardée par un téléchargement d'avant, et son âge.
