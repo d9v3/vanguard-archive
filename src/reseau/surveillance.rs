@@ -141,6 +141,16 @@ pub(crate) fn alerter(genre: Genre, titre: &str, texte: &str) {
     notifier(titre, texte);
 }
 
+/// Une alerte qui se reconnaît à sa clé (`protection::normales`) : déclarée normale ici, elle n'est ni notée ni
+/// notifiée ; sinon, notée avec sa clé (les traces d'incident la relient au blocage), puis notifiée.
+pub(crate) fn alerter_cle(genre: Genre, cle: &str, titre: &str, texte: &str) {
+    if crate::protection::normales::est_normale(cle) {
+        return;
+    }
+    tableau::noter_alerte_cle(genre, Some(cle), titre, texte);
+    notifier(titre, texte);
+}
+
 /// Appelé par le planificateur : scan silencieux, puis notification s'il y a du nouveau.
 /// Catégories surveillées sur cette machine : ce qui trahit une attaque ou une panne. Les mises à jour
 /// disponibles, qui changent tous les jours, n'en font pas partie.
@@ -639,11 +649,11 @@ async fn passe() {
     for (titre, texte) in crate::protection::telechargement::nouveaux_a_signaler() {
         alerter(Genre::Telechargement, &titre, &texte);
     }
-    for (titre, texte) in crate::protection::sortantes::botnets_a_signaler() {
-        alerter(Genre::Botnet, &titre, &texte);
+    for (cle, titre, texte) in crate::protection::sortantes::botnets_a_signaler() {
+        alerter_cle(Genre::Botnet, &cle, &titre, &texte);
     }
-    for (titre, texte) in crate::protection::sortantes::sites_dangereux_a_signaler() {
-        alerter(Genre::Telechargement, &titre, &texte);
+    for (cle, titre, texte) in crate::protection::sortantes::sites_dangereux_a_signaler() {
+        alerter_cle(Genre::Telechargement, &cle, &titre, &texte);
     }
     // Les extensions sans restrictions qui l'ont demandé (dans_la_surveillance) : leurs problèmes graves seulement.
     for (titre, texte) in crate::plugins::a_signaler() {
@@ -713,16 +723,28 @@ async fn passe() {
         } else {
             h.titre()
         };
-        alerter(
+        // L'appareil se reconnaît à son adresse MAC (son adresse IP change d'un bail à l'autre).
+        let cle = format!(
+            "appareil|{}",
+            h.mac.as_deref().map_or_else(|| h.ip.to_string(), str::to_lowercase)
+        );
+        alerter_cle(
             Genre::Appareil,
+            &cle,
             tr!("Nouvel appareil sur ton réseau", "New device on your network"),
             &format!("{} — {qui} {}", h.ip, h.mac.as_deref().unwrap_or("")),
         );
     }
     for h in r.hotes.iter().filter(|h| !h.nouvelle) {
         for p in h.ports.iter().filter(|p| p.nouveau && p.niveau >= Niveau::Eleve) {
-            alerter(
+            let cle = format!(
+                "port|{}:{}",
+                h.mac.as_deref().map_or_else(|| h.ip.to_string(), str::to_lowercase),
+                p.port
+            );
+            alerter_cle(
                 Genre::Port,
+                &cle,
                 &trf!("Port {} nouvellement ouvert", "Port {} newly opened", p.port),
                 &format!("{} ({}) : {} — {}", h.ip, h.titre(), p.service, p.conseil),
             );

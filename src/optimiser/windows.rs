@@ -337,6 +337,45 @@ impl Changement {
         }
     }
 
+    /// La valeur notée `v` a-t-elle une forme que ce changement peut écrire ? Elle est remise par la fenêtre
+    /// administrateur pour la plupart : un ensemble fermé ou une forme stricte (nombre, adresses IP, octets), jamais
+    /// un texte libre venu d'un fichier que tout programme du compte peut réécrire.
+    pub fn valeur_admise(&self, v: Option<&str>) -> bool {
+        match self {
+            Changement::Registre { cible, .. } => match (v.map(decoder), cible) {
+                (None, _) | (Some(Some(Lue::Dword(_))), Val::Dword(_)) => true,
+                (Some(Some(Lue::Texte(t))), Val::Texte(c)) => {
+                    t == *c || (t.len() <= 64 && t.chars().all(|x| x.is_ascii_alphanumeric() || " ._:-".contains(x)))
+                }
+                _ => false,
+            },
+            Changement::Cle { .. } => v.is_none_or(|v| v == "cle"),
+            Changement::Service { .. } => v.is_none_or(|v| {
+                v.strip_prefix("start:")
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .is_some_and(|n| n <= 4)
+            }),
+            Changement::Dns { carte, .. } => v.is_some_and(|v| {
+                v.split_once('\n').is_some_and(|(id, reste)| {
+                    id == carte
+                        && guid_valide(id)
+                        && reste
+                            .split_once('|')
+                            .is_some_and(|(quatre, six)| super::adresses_ip(quatre) && super::adresses_ip(six))
+                })
+            }),
+            // Les octets de StartupApproved (12 octets d'ordinaire) : de l'hexadécimal, court.
+            Changement::Demarrage { .. } => {
+                v.is_none_or(|v| v.len() <= 64 && v.len() % 2 == 0 && v.chars().all(|c| c.is_ascii_hexdigit()))
+            }
+            Changement::Defender { .. } => v.is_none_or(|v| {
+                v.strip_prefix("mp:")
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .is_some_and(|n| n <= 6)
+            }),
+        }
+    }
+
     /// La commande qui pose la valeur `v` d'un réglage de DNS (mode Wi-Fi public).
     pub fn commande_dns(&self, v: &str) -> Option<String> {
         matches!(self, Changement::Dns { .. })
@@ -1451,6 +1490,49 @@ mod tests {
         let arret = service.commande_admin(Some("start:4"), None).unwrap();
         assert!(arret.starts_with("Set-Service -Name 'Nom’’Q' "), "{arret}");
         assert!(arret.contains("Stop-Service -Name 'Nom’’Q' "), "{arret}");
+    }
+
+    /// Les valeurs notées remises par la fenêtre administrateur : seulement des formes fermées ou strictes. Une note
+    /// réécrite par un programme du compte (un texte dans une valeur DWORD, un état de service inventé, un DNS qui
+    /// n'est pas une adresse, du PowerShell glissé dans des octets) est refusée.
+    #[test]
+    fn valeurs_notees_validees() {
+        let registre = reg(
+            Racine::Hklm,
+            r"SOFTWARE\Essai",
+            "Valeur",
+            Val::Dword(0),
+            Some(Val::Dword(1)),
+        );
+        for bonne in [None, Some("dword:0"), Some("dword:4294967295")] {
+            assert!(registre.valeur_admise(bonne), "{bonne:?}");
+        }
+        for mauvaise in ["sz:1", "dword:-1", "dword:1; Remove-Item x", "1"] {
+            assert!(!registre.valeur_admise(Some(mauvaise)), "{mauvaise}");
+        }
+        let service = Changement::Service {
+            nom: "DiagTrack",
+            cible: 4,
+            defaut: 2,
+        };
+        assert!(service.valeur_admise(Some("start:3")) && !service.valeur_admise(Some("start:9")));
+        let carte = "{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}";
+        let dns = Changement::Dns {
+            carte: carte.into(),
+            cible: None,
+        };
+        assert!(dns.valeur_admise(Some(&format!("{carte}\n9.9.9.9|2620:fe::fe"))));
+        assert!(dns.valeur_admise(Some(&format!("{carte}\n|"))));
+        assert!(!dns.valeur_admise(Some(&format!("{carte}\nevil.example.com|"))));
+        assert!(!dns.valeur_admise(Some("{00000000-0000-0000-0000-000000000000}\n9.9.9.9|")));
+        let demarrage = Changement::Demarrage {
+            machine: true,
+            liste: "Run",
+            nom: "Essai".into(),
+            cible: None,
+        };
+        assert!(demarrage.valeur_admise(Some("030000000000000000000000")) && demarrage.valeur_admise(Some("")));
+        assert!(!demarrage.valeur_admise(Some("03'; Remove-Item x")));
     }
 
     #[test]

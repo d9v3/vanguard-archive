@@ -21,6 +21,7 @@ use std::collections::BTreeSet;
 use std::io::IsTerminal;
 
 use gestes::Contexte;
+pub(crate) use gestes::chemin_du_processus;
 use menaces::Menace;
 use parametres::{Categorie, Decision, Mode, Parametres, decider};
 
@@ -420,6 +421,21 @@ fn categories_actives(p: &Parametres) -> Vec<Categorie> {
         .collect()
 }
 
+/// Les menaces déclarées normales ici, laissées de côté : dites, pour qu'un choix oublié ne passe pas inaperçu.
+fn dire_normales(n: usize) {
+    if n > 0 {
+        afficher_aligne(
+            "  ",
+            &trf!(
+                "{n} menace(s) déclarée(s) normale(s) ici, ni proposée(s) ni bloquée(s) : Ce que Vanguard a appris.",
+                "{n} threat(s) declared normal here, neither offered nor blocked: What Vanguard has learned."
+            ),
+            2,
+            GRIS,
+        );
+    }
+}
+
 fn dire_non_verifie(non_verifie: &[String]) {
     if !non_verifie.is_empty() {
         let liste = non_verifie
@@ -456,6 +472,7 @@ fn chercher_et_proposer() {
     let interactif = std::io::stdin().is_terminal();
     let ctx = Contexte::lire(t.intouchables.clone(), interactif);
     proposer(t.menaces, &ctx);
+    dire_normales(t.normales);
     dire_non_verifie(&t.non_verifie);
 }
 
@@ -514,6 +531,7 @@ pub fn au_bilan() {
             "  {VERT}✔{RESET} No threat to block."
         );
     }
+    dire_normales(t.normales);
     dire_non_verifie(&t.non_verifie);
 }
 
@@ -535,8 +553,8 @@ fn bloquer_tout_seul(m: &Menace, ctx: &Contexte, signalees: Option<(&BTreeSet<St
                     "  {VERT}✔{RESET} Blocked by itself (active protection)."
                 );
             }
-            crate::reseau::surveillance::alerter(
-                Genre::Blocage,
+            alerter_blocage(
+                m,
                 tr!("Vanguard a bloqué une menace", "Vanguard blocked a threat"),
                 &trf!(
                     "{quoi}. Pour annuler : vanguard blocage annuler.",
@@ -561,13 +579,26 @@ fn bloquer_tout_seul(m: &Menace, ctx: &Contexte, signalees: Option<(&BTreeSet<St
                 None => true,
             };
             if nouvelle {
-                crate::reseau::surveillance::alerter(
-                    Genre::Blocage,
+                alerter_blocage(
+                    m,
                     tr!("Vanguard n'a pas pu bloquer", "Vanguard could not block"),
                     &trf!("{} : {raison}", "{}: {raison}", m.quoi),
                 );
             }
         }
+    }
+}
+
+/// L'alerte d'un blocage fait tout seul, ou manqué. Une menace certaine n'est jamais tue (`menaces::chercher`) :
+/// son alerte non plus, même si sa clé a été déclarée normale, sans quoi elle serait bloquée sans que personne le
+/// sache.
+fn alerter_blocage(m: &Menace, titre: &str, texte: &str) {
+    let cle = m.cle_normale();
+    if m.certaine {
+        crate::reseau::tableau::noter_alerte_cle(Genre::Blocage, Some(&cle), titre, texte);
+        crate::reseau::surveillance::notifier(titre, texte);
+    } else {
+        crate::reseau::surveillance::alerter_cle(Genre::Blocage, &cle, titre, texte);
     }
 }
 
@@ -720,7 +751,41 @@ fn proposer(menaces: Vec<Menace>, ctx: &Contexte) {
             }
         };
         montrer(&m, &pret);
-        if !demander(tr!("\n  Bloquer ? [o/N] : ", "\n  Block? [y/N]: ")).oui() {
+        // Une menace certaine ne se tait jamais (`menaces::chercher`) : « c'est normal » ne lui est pas proposé.
+        let reponse = demander(if m.certaine {
+            tr!("\n  Bloquer ? [o/N] : ", "\n  Block? [y/N]: ")
+        } else {
+            tr!(
+                "\n  Bloquer ? [o/N] ; « i » : c'est normal ici (90 jours) : ",
+                "\n  Block? [y/N]; “i”: this is normal here (90 days): "
+            )
+        });
+        if !m.certaine && reponse.trim().eq_ignore_ascii_case("i") {
+            match crate::protection::normales::declarer(
+                &m.cle_normale(),
+                crate::reseau::tableau::nom_genre(Genre::Blocage),
+                tr!("Menace déclarée normale", "Threat declared normal"),
+                &m.quoi,
+            ) {
+                Ok(()) => afficher_aligne(
+                    "  ",
+                    tr!(
+                        "Retenu pour 90 jours : ni proposée ni bloquée (Ce que Vanguard a appris l'oublie).",
+                        "Saved for 90 days: neither offered nor blocked (What Vanguard has learned forgets it)."
+                    ),
+                    2,
+                    GRIS,
+                ),
+                Err(e) => afficher_aligne(
+                    "  ✖ ",
+                    &trf!("Rien n'est retenu : {e}.", "Nothing is saved: {e}."),
+                    4,
+                    "",
+                ),
+            }
+            continue;
+        }
+        if !reponse.oui() {
             trp!("  Rien n'a été fait.", "  Nothing was done.");
             restantes.insert(i, m);
             continue;

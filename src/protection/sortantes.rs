@@ -1253,7 +1253,8 @@ pub(crate) fn connexions_botnets() -> Option<(Vec<VersBotnet>, Vec<String>)> {
 /// Pour la surveillance horaire : les programmes qui parlent à un serveur de commande connu, en (titre, texte) de
 /// notification. Sans les listes, rien n'est dit ici : l'écran dit, lui, ce qui n'a pas pu être vérifié. Une
 /// connexion déjà signalée à la passe d'avant ne l'est pas deux fois.
-pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
+/// Chaque alerte vient avec sa clé (`protection::normales`) : « botnet|programme → serveur ».
+pub(crate) fn botnets_a_signaler() -> Vec<(String, String, String)> {
     let Some(en_cours) = botnets_en_cours() else {
         return Vec::new();
     };
@@ -1263,6 +1264,7 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
         .into_iter()
         .map(|a| {
             (
+                format!("botnet|{a}"),
                 tr!(
                     "Vanguard : programme relié à un botnet",
                     "Vanguard: program connected to a botnet"
@@ -1304,7 +1306,8 @@ fn sites_dangereux(noms: &[String], hotes: &std::collections::HashSet<String>) -
 /// Pour la surveillance horaire : les sites qui distribuent des logiciels malveillants que l'ordinateur a demandés
 /// depuis la passe d'avant, en (titre, texte) de notification. Sans mémoire DNS ou sans liste, rien n'est dit ici :
 /// l'écran « Qui parle à Internet ? » dit ce qui n'a pas pu être vérifié.
-pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String)> {
+/// Chaque alerte vient avec sa clé (`protection::normales`) : « site|nom (URLhaus) ».
+pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String, String)> {
     let (Ok(noms), Ok((hotes, _))) = (
         crate::protection::memoire_dns::noms(),
         crate::protection::lien::hotes_urlhaus(),
@@ -1318,6 +1321,7 @@ pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String)> {
         .into_iter()
         .map(|site| {
             (
+                format!("site|{site}"),
                 tr!(
                     "Vanguard : site qui distribue des logiciels malveillants",
                     "Vanguard: site that distributes malware"

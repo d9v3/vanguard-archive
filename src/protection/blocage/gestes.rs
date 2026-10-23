@@ -10,6 +10,7 @@ use super::menaces::{Geste, Menace};
 use super::pare_feu::{self, PareFeu};
 use crate::changements::{self, Annulation, Blocage};
 use crate::machine::regles::Os;
+use crate::protection::preuve::{self, Preuve};
 use crate::ui::chemin_affichable;
 use crate::{tr, trf};
 
@@ -508,13 +509,18 @@ fn peut_deplacer(chemin: &Path) -> bool {
 /// Fait le geste préparé, puis le note avec de quoi l'annuler. `Ok` : ce qui a été fait ; `Err` : ce qui a échoué
 /// (noté aussi).
 pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String, String> {
-    let note = |annulation: Option<Annulation>| Blocage {
+    // La preuve d'abord, avant tout geste : ce que l'arrêt et la quarantaine vont effacer. Ce qui ne se lit pas y
+    // est dit « impossible », et le geste se fait quand même (défensif d'abord).
+    let preuve = releve(&m.geste, &pret.faire);
+    let note = |annulation: Option<Annulation>, preuve: Option<Preuve>| Blocage {
         id: changements::nouvel_id(),
         cle: m.cle.clone(),
         quoi: m.quoi.clone(),
         automatique,
         annulation,
         annule: None,
+        supprime: false,
+        preuve,
     };
     match pret.faire {
         Faire::Commandes { annulation, retenir } => {
@@ -531,7 +537,7 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                     );
                 }
             }
-            changements::noter_blocage(lancees, reussi, note(Some(annulation)));
+            changements::noter_blocage(lancees, reussi, note(Some(annulation), preuve));
             if reussi {
                 Ok(fait)
             } else {
@@ -549,7 +555,7 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                 if chemin_du_processus(a.pid).is_some_and(|c| meme_chemin(&c, &a.chemin)) {
                     let arrete = arreter(a, &pret.commandes, &mut lancees);
                     if !arrete {
-                        changements::noter_blocage(lancees, false, note(None));
+                        changements::noter_blocage(lancees, false, note(None, preuve));
                         return Err(tr!(
                             "l'arrêt du processus a échoué : rien d'autre n'a été fait",
                             "stopping the process failed: nothing else was done"
@@ -559,33 +565,32 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                     attendre_la_fin(a);
                 }
             }
-            let mut annulation = None;
-            if let Some((chemin, detection)) = &quarantaine {
-                lancees.push(format!("quarantaine : {}", chemin.display()));
-                match crate::protection::quarantaine::isoler(chemin, detection) {
-                    Ok(dest) => {
-                        annulation = dest.file_name().map(|n| Annulation::Quarantaine {
-                            nom: n.to_string_lossy().into_owned(),
-                        });
-                    }
-                    Err(e) => {
-                        changements::noter_blocage(lancees, false, note(None));
-                        return Err(trf!(
-                            "quarantaine impossible ({e}) : le fichier reste en place",
-                            "quarantine not possible ({e}): the file stays in place"
-                        ));
-                    }
-                }
+            let Some((chemin, detection)) = &quarantaine else {
+                changements::noter_blocage(lancees, true, note(None, preuve));
+                return Ok(m.quoi.clone());
+            };
+            // Le seul chemin vers la quarantaine : il note le geste, la preuve et de quoi l'annuler.
+            let demande = crate::protection::quarantaine::Demande {
+                cle: m.cle.clone(),
+                quoi: m.quoi.clone(),
+                automatique,
+                lancees,
+                preuve: preuve.unwrap_or_default(),
+            };
+            match crate::protection::quarantaine::isoler(chemin, detection, demande) {
+                Ok(_) => Ok(m.quoi.clone()),
+                Err(e) => Err(trf!(
+                    "quarantaine impossible ({e}) : le fichier reste en place",
+                    "quarantine not possible ({e}): the file stays in place"
+                )),
             }
-            changements::noter_blocage(lancees, true, note(annulation));
-            Ok(m.quoi.clone())
         }
         Faire::Demarrage { id } => match crate::optimiser::retirer_du_demarrage(&id) {
             Some(true) => {
                 changements::noter_blocage(
                     vec![trf!("retiré du démarrage : {id}", "removed from startup: {id}")],
                     true,
-                    note(Some(Annulation::Demarrage { id })),
+                    note(Some(Annulation::Demarrage { id }), preuve),
                 );
                 Ok(m.quoi.clone())
             }
@@ -623,9 +628,32 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
                 copie: copie.to_string_lossy().into_owned(),
                 empreinte: empreinte_texte(nouveau.as_bytes()),
             };
-            changements::noter_blocage(lancees, ecrit.is_ok(), note(Some(annulation)));
+            changements::noter_blocage(lancees, ecrit.is_ok(), note(Some(annulation), preuve));
             ecrit.map(|()| m.quoi.clone()).map_err(|e| e.to_string())
         }
+    }
+}
+
+/// Le relevé d'avant le geste : le processus et le fichier d'un programme, les connexions vers une adresse, le
+/// fichier réglé tel qu'il était. Rien pour ce qui ne fait disparaître aucune trace (un démarrage retiré se remet
+/// exactement, une liste de pilotes, un port fermé).
+fn releve(geste: &Geste, faire: &Faire) -> Option<Preuve> {
+    match (geste, faire) {
+        // Le numéro relu avant le relevé, comme avant l'arrêt : entre la question et la réponse, le processus a pu
+        // finir et son numéro être repris ; la preuve décrirait alors un autre programme.
+        (Geste::Programme { pid, fichier, .. }, Faire::Programme { arret, .. }) => {
+            let vivant = |a: &Arret| chemin_du_processus(a.pid).is_some_and(|c| meme_chemin(&c, &a.chemin));
+            Some(match (arret, pid) {
+                (Some(a), _) if vivant(a) => preuve::relever_programme(Some(a.pid), fichier.as_deref()),
+                // Plus là, ou son programme ne se lit plus : rien ne dit que ce numéro est encore le sien.
+                (Some(_), _) | (None, Some(_)) => preuve::relever_programme_parti(fichier.as_deref()),
+                (None, None) => preuve::relever_programme(None, fichier.as_deref()),
+            })
+        }
+        (Geste::Programme { pid, fichier, .. }, _) => Some(preuve::relever_programme(*pid, fichier.as_deref())),
+        (Geste::Adresse { ip }, _) => Some(preuve::relever_adresse(*ip)),
+        (_, Faire::Permissions { fichier, .. }) => Some(preuve::relever_fichier(fichier)),
+        _ => None,
     }
 }
 
@@ -1046,5 +1074,71 @@ mod tests {
         ctx.os = Os::actuel();
         assert!(preparer(&interpreteur, &ctx, false).is_err());
         let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Le blocage d'un fichier : la preuve (empreinte relevée avant le geste) est notée avec le blocage, par le seul
+    /// chemin de la quarantaine, et l'annulation le remet à sa place.
+    #[test]
+    fn preuve_relevee_avant_la_quarantaine() {
+        let d = std::env::temp_dir().join(format!("vanguard-gestes-preuve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let fichier = d.join("facture.pdf.exe");
+        std::fs::write(&fichier, b"MZ essai").unwrap();
+        let cle = format!("fichier:{}", fichier.display());
+        let m = Menace {
+            cle: cle.clone(),
+            categorie: super::super::parametres::Categorie::Programmes,
+            ..menace(Geste::Programme {
+                pid: None,
+                nom: "facture.pdf.exe".into(),
+                chemin: Some(fichier.clone()),
+                fichier: Some(fichier.clone()),
+                detection: "essai".into(),
+            })
+        };
+        let pret = preparer(&m, &contexte(true, true), true).unwrap();
+        faire(&m, pret, true).unwrap();
+        assert!(!fichier.exists());
+        let (_, reussi, b) = changements::blocages()
+            .into_iter()
+            .rev()
+            .find(|(_, _, b)| b.cle == cle)
+            .unwrap();
+        assert!(reussi && b.automatique);
+        let f = b.preuve.as_ref().and_then(|p| p.fichier.as_ref()).unwrap();
+        assert_eq!(f.sha256.as_deref(), Some(empreinte_texte(b"MZ essai").as_str()));
+        assert!(matches!(b.annulation, Some(Annulation::Quarantaine { .. })));
+        defaire(&b).unwrap();
+        assert_eq!(std::fs::read(&fichier).unwrap(), b"MZ essai");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    /// Le numéro du processus repris par un autre programme entre la question et le geste : la preuve ne décrit pas
+    /// ce programme-là, elle le dit ; toujours le même, elle le relève.
+    #[test]
+    fn preuve_d_un_numero_repris() {
+        let moi = std::process::id();
+        let geste = Geste::Programme {
+            pid: Some(moi),
+            nom: "outil".into(),
+            chemin: Some("/tmp/.x/outil".into()),
+            fichier: None,
+            detection: "outil offensif".into(),
+        };
+        let faire = |chemin: String| Faire::Programme {
+            arret: Some(Arret {
+                pid: moi,
+                chemin,
+                ici: false,
+            }),
+            quarantaine: None,
+        };
+        let repris = releve(&geste, &faire("/tmp/.x/outil".into())).unwrap();
+        assert!(repris.processus.is_none());
+        assert!(repris.impossible.iter().any(|l| l.contains("repris")), "{repris:?}");
+        if let Some(actuel) = chemin_du_processus(moi) {
+            let meme = releve(&geste, &faire(actuel)).unwrap();
+            assert_eq!(meme.processus.map(|p| p.pid), Some(moi));
+        }
     }
 }

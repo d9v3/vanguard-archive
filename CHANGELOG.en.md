@@ -33,6 +33,38 @@ delivered just before it. Only the latest version has its download page; every v
   applicable” finding no longer counts among the checks for the grade's reliability. `vanguard rules` also shows the
   network audit rules and the tools: a single registry of identifiers, checked by the tests, with the inventory of
   state files from which the seals take the list to protect.
+- **Evidence before the action, and what Vanguard did in the traces.** Before stopping a program, quarantining a file
+  or blocking an address, including on its own at night, Vanguard records what the action will erase: the program,
+  its command line, its parent, its account, the file's SHA-256 fingerprint, the current connections. What cannot be
+  read is noted "not possible (reason)", and the block happens anyway. The evidence is kept with the block ("What
+  Vanguard changed" summarizes it); the quarantine keeps each file's fingerprint. "vanguard traces" now includes what
+  Vanguard saw and did (07-vanguard.txt): its alerts, its blocks and quarantines with their evidence, and threads that
+  link the alert, the evidence and the action about the same program or address; these landmarks enter the timeline,
+  and Vanguard's state files are copied as they are so the MANIFEST covers them. A single path leads to the
+  quarantine: the antivirus and YARA ones are now noted and undone with "vanguard blocking undo", like blocking's.
+  The watcher judges programs with the same sources as blocking: it also recognizes MalwareBazaar's known
+  fingerprints (those of the last 48 hours, the full list does not fit in its memory). Installing ClamAV or a
+  third-party tool is noted like any fix.
+  **"This is normal" for monitoring, the watcher and blocking.** An alert that keeps coming back for no reason (a
+  development tool started from /tmp, a known device) can be declared normal for 90 days in What Vanguard has
+  learned, and a threat offered for blocking with "i". The choice is about what the alert is about (the program, the
+  address, the device), not its text, and is forgotten in the same place. The list is sealed: changed outside
+  Vanguard, it silences nothing.
+  **Optimize's previous values are sealed and checked.** reglages.json, whose values are put back as administrator to
+  undo a setting, is sealed like Vanguard's state: rewritten by another program, it is no longer trusted (it is set
+  aside, intact, and nothing from it is restored). Each value is also checked when put back: a known service state, a
+  boolean, a number, IP addresses, a simple word; a value of any other form brings back the fresh-system one, written
+  in the program.
+  **Reviewed and tightened before release.** "This is normal" no longer silences a certain threat, and the alert of
+  its block is never silenced; it keeps a program's reason and script (declaring python3 normal for a command that
+  downloads no longer silences python3 running something else); an alert is offered only if its kind matches its
+  key, and what it designates is shown before choosing. A reglages.json accepted without a seal is no longer resealed
+  on reading: the check-up keeps saying so. The same file downloaded again after a quarantine is offered for
+  blocking again. A file deleted from the Quarantine menu, or after a ClamAV scan, reads "deleted" in the traces,
+  with its fingerprint recorded. Traces run with sudo read the data of the account that ran them, and a named pipe
+  or a link in place of a state file no longer blocks them. The watcher no longer gets stuck on a file that does not
+  respond (not hashed, reported as not checked); on Windows, the evidence no longer waits more than 3 seconds for WMI
+  before stopping; a reused process number is no longer described in the evidence.
 - **Public Wi-Fi mode** (`vanguard public-wifi`, Network and Internet › Public Wi-Fi mode). Turn it on when arriving
   at a café, a hotel or an airport, turn it off when leaving: the computer no longer accepts any connection from that
   network (an SSH session already open stays), file sharing and the announcement of its name are off (on macOS, the

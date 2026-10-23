@@ -1,7 +1,7 @@
 //! Les menaces que le blocage sait arrêter, cherchées sur cet ordinateur : d'où elles viennent, certaines ou
 //! douteuses, et le geste qui les bloque. Rien n'est changé ici : seulement lu.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
@@ -9,6 +9,7 @@ use super::parametres::Categorie;
 use crate::machine::chasse::{self, EnMarche};
 use crate::machine::regles::Os;
 use crate::protection::empreintes::{self, Empreintes};
+use crate::protection::sources::Fichiers;
 use crate::ui::{affichable, chemin_affichable};
 use crate::{tr, trf};
 
@@ -62,59 +63,46 @@ pub(crate) struct Trouvees {
     pub non_verifie: Vec<String>,
     /// Les processus à ne jamais arrêter (Vanguard, ce qu'il a lancé, ce qui le fait tourner).
     pub intouchables: HashSet<u32>,
+    /// Les menaces déclarées normales ici (`protection::normales`) : ni proposées ni bloquées, comptées pour le dire.
+    pub normales: usize,
 }
 
-/// Au-delà, un fichier n'est pas haché : un logiciel malveillant connu est presque toujours bien plus petit, et la
-/// surveillance horaire ne doit pas relire des gigaoctets.
-const TAILLE_MAX: u64 = 256 << 20;
+impl Menace {
+    /// La clé de la menace d'un passage à l'autre, pour la déclarer normale. Un programme : sans son numéro de
+    /// processus (il change à chaque lancement), avec ce qui l'a désigné et le script qu'il lance ; déclarer python3
+    /// normal pour « commande qui télécharge » ne fait pas taire python3 qui lance autre chose. Le chemin reste en
+    /// dernier : les traces relient par lui l'alerte au geste (`traces::vanguard::objet`). Sans chemin lisible, la
+    /// clé garde son numéro : le choix ne se reconnaîtra plus (sens sûr), au lieu de taire tout processus du même
+    /// nom. Les autres menaces, telles quelles.
+    pub(crate) fn cle_normale(&self) -> String {
+        let cle = match &self.geste {
+            Geste::Programme {
+                pid: Some(_),
+                chemin: Some(c),
+                fichier,
+                detection,
+                ..
+            } => {
+                let script = fichier
+                    .as_ref()
+                    .filter(|f| *f != c)
+                    .map(|f| format!("{}|", f.to_string_lossy()))
+                    .unwrap_or_default();
+                format!("{detection}|{script}{}", c.to_string_lossy())
+            }
+            _ => self.cle.clone(),
+        };
+        crate::protection::normales::cle_blocage(&cle)
+    }
+}
+
 /// Les fichiers des Téléchargements arrivés depuis une semaine, jusqu'à 64 Mio et 300 fichiers.
 const TELECHARGES_MAX: u64 = 64 << 20;
 const TELECHARGES_NOMBRE: usize = 300;
 const SEMAINE: std::time::Duration = std::time::Duration::from_hours(7 * 24);
 
-/// Le jugement d'un programme en marche.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Jugement {
-    /// Seul le certain se bloque tout seul.
-    pub certaine: bool,
-    pub raison: String,
-    /// Le mot de la ligne de commande qui désigne le script, quand l'outil a été reconnu par un argument.
-    pub script: Option<String>,
-}
-
-/// Le jugement d'un programme en marche, ou `None`. Certain : un outil d'attaque connu reconnu au programme lui-même
-/// (son nom, son fichier, le premier mot de sa ligne), ou une empreinte connue de MalwareBazaar. Douteux : un outil
-/// reconnu seulement par un argument d'un interpréteur (`python3 laZagne.py` : le processus est Python), et le reste
-/// de COM-PRG-001 (commande qui télécharge ou se cache, dossier où rien ne s'installe).
-pub(crate) fn juger_programme(p: &EnMarche, os: Os, connu: &mut impl FnMut(&str) -> bool) -> Option<Jugement> {
-    if let Some((raison, origine)) = chasse::offensif(p) {
-        let (certaine, script) = match origine {
-            chasse::Origine::Programme => (true, None),
-            chasse::Origine::Argument(mot) => (false, Some(mot)),
-        };
-        return Some(Jugement {
-            certaine,
-            raison: trf!("outil offensif : {raison}", "offensive tool: {raison}"),
-            script,
-        });
-    }
-    if p.chemin.as_deref().is_some_and(&mut *connu) {
-        return Some(Jugement {
-            certaine: true,
-            raison: tr!(
-                "empreinte SHA-256 connue de MalwareBazaar",
-                "SHA-256 fingerprint known to MalwareBazaar"
-            )
-            .to_string(),
-            script: None,
-        });
-    }
-    chasse::juger_programme(p, os).map(|s| Jugement {
-        certaine: false,
-        raison: s.raison.to_string(),
-        script: None,
-    })
-}
+// Un programme se juge par la voie unique des sources de menaces, comme au veilleur.
+pub(crate) use crate::protection::sources::{Jugement, juger_programme};
 
 /// Les shells et autres programmes qui exécutent le code qu'on leur donne, en plus des interpréteurs de `chasse`.
 const SHELLS: [&str; 24] = [
@@ -221,21 +209,12 @@ fn menace_programme(p: &EnMarche, j: Jugement) -> Menace {
     }
 }
 
-/// L'empreinte d'un fichier est-elle connue ? Seulement un vrai fichier, pas trop gros ; chaque chemin haché une fois.
-fn connu_par(empreintes: Option<&Empreintes>, cache: &mut HashMap<String, bool>, chemin: &str) -> bool {
-    let Some(e) = empreintes else {
-        return false;
-    };
-    *cache.entry(chemin.to_string()).or_insert_with(|| {
-        std::fs::metadata(chemin)
-            .ok()
-            .filter(|m| m.is_file() && m.len() <= TAILLE_MAX)
-            .and_then(|_| empreintes::sha256(Path::new(chemin)))
-            .is_some_and(|h| e.contient(&h))
-    })
+/// L'empreinte d'un fichier est-elle connue ? Par la voie unique des sources (`protection::sources`).
+fn connu_par(fichiers: &mut Fichiers, chemin: &str) -> bool {
+    fichiers.connu(chemin)
 }
 
-fn programmes(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
+fn programmes(empreintes: Option<&'static Empreintes>, os: Os, t: &mut Trouvees) {
     let Some((liste, intouchables)) = chasse::en_marche() else {
         t.non_verifie.push(
             tr!(
@@ -246,13 +225,14 @@ fn programmes(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
         );
         return;
     };
-    let mut cache = HashMap::new();
+    let mut fichiers = Fichiers::de(empreintes);
     for p in liste.iter().filter(|p| !intouchables.contains(&p.pid)) {
-        let mut connu = |c: &str| connu_par(empreintes, &mut cache, c);
+        let mut connu = |c: &str| connu_par(&mut fichiers, c);
         if let Some(j) = juger_programme(p, os, &mut connu) {
             t.menaces.push(menace_programme(p, j));
         }
     }
+    non_haches(&mut fichiers, t);
     t.intouchables = intouchables;
     // Les fichiers arrivés dans Téléchargements cette semaine : seulement ceux que MalwareBazaar connaît.
     let Some(e) = empreintes else { return };
@@ -284,10 +264,7 @@ fn programmes(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
             let nom = chemin
                 .file_name()
                 .map_or_else(|| montre.clone(), |n| affichable(&n.to_string_lossy()));
-            let raison = tr!(
-                "empreinte SHA-256 connue de MalwareBazaar",
-                "SHA-256 fingerprint known to MalwareBazaar"
-            );
+            let raison = crate::protection::sources::raison_empreinte();
             t.menaces.push(Menace {
                 categorie: Categorie::Programmes,
                 certaine: true,
@@ -370,20 +347,14 @@ pub(crate) fn fichier_de_commande(commande: &str, os: Os) -> Option<String> {
     complet.then_some(fichier)
 }
 
-fn demarrage(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
-    let mut cache = HashMap::new();
+fn demarrage(empreintes: Option<&'static Empreintes>, os: Os, t: &mut Trouvees) {
+    let mut fichiers = Fichiers::de(empreintes);
     for e in crate::optimiser::demarrage_retirables() {
         let Some(fichier) = fichier_de_commande(&e.commande, os) else {
             continue;
         };
-        let (certaine, raison) = if connu_par(empreintes, &mut cache, &fichier) {
-            (
-                true,
-                tr!(
-                    "empreinte SHA-256 connue de MalwareBazaar",
-                    "SHA-256 fingerprint known to MalwareBazaar"
-                ),
-            )
+        let (certaine, raison) = if connu_par(&mut fichiers, &fichier) {
+            (true, crate::protection::sources::raison_empreinte())
         } else if let Some(raison) = chasse::dossier_douteux(&fichier, os) {
             (false, raison)
         } else {
@@ -405,8 +376,20 @@ fn demarrage(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
             },
         });
     }
+    non_haches(&mut fichiers, t);
     #[cfg(windows)]
     pilotes(t);
+}
+
+/// Les fichiers qu'on n'a pas pu hacher à temps : dits non vérifiés, jamais comptés sains.
+fn non_haches(fichiers: &mut Fichiers, t: &mut Trouvees) {
+    let n = fichiers.prendre_non_haches();
+    if n > 0 {
+        t.non_verifie.push(trf!(
+            "{n} fichier(s) non haché(s) à temps (un fichier qui ne répond pas) : empreinte non vérifiée",
+            "{n} file(s) not hashed in time (a file that does not respond): fingerprint not checked"
+        ));
+    }
 }
 
 /// La liste de blocage des pilotes vulnérables est-elle à activer ? `valeur` : VulnerableDriverBlocklistEnable
@@ -570,13 +553,29 @@ pub(crate) fn chercher(categories: &[Categorie], telecharger: bool) -> Trouvees 
     if veut(Categorie::AgentsIa) {
         agents(&mut t);
     }
-    // Une menace déjà bloquée par Vanguard (règle en place) n'est pas reproposée.
-    let bloquees: HashSet<String> = crate::changements::blocages_en_place()
-        .into_iter()
-        .map(|(_, b)| b.cle)
-        .collect();
-    t.menaces.retain(|m| !bloquees.contains(&m.cle));
+    retirer_bloquees(&mut t.menaces, &crate::changements::blocages_en_place());
+    // Déclarée normale ici : ni proposée ni bloquée tant que le choix vaut (90 jours) ; une menace certaine ne se
+    // tait jamais (le fichier connu de MalwareBazaar qui a pris la place du douteux déclaré normal).
+    t.normales = retirer_normales(&mut t.menaces, crate::protection::normales::est_normale);
     t
+}
+
+/// Une menace déjà bloquée par Vanguard (règle en place) n'est pas reproposée. Sauf une quarantaine : le fichier a
+/// quitté son chemin, ce qu'on y retrouve est un nouveau fichier (le même téléchargé de nouveau), à reproposer.
+fn retirer_bloquees(menaces: &mut Vec<Menace>, en_place: &[(String, crate::changements::Blocage)]) {
+    let bloquees: HashSet<&str> = en_place
+        .iter()
+        .filter(|(_, b)| !matches!(b.annulation, Some(crate::changements::Annulation::Quarantaine { .. })))
+        .map(|(_, b)| b.cle.as_str())
+        .collect();
+    menaces.retain(|m| !bloquees.contains(m.cle.as_str()));
+}
+
+/// Retire les menaces douteuses déclarées normales ; rend combien.
+fn retirer_normales(menaces: &mut Vec<Menace>, normale: impl Fn(&str) -> bool) -> usize {
+    let avant = menaces.len();
+    menaces.retain(|m| m.certaine || !normale(&m.cle_normale()));
+    avant - menaces.len()
 }
 
 #[cfg(test)]
@@ -797,5 +796,114 @@ mod tests {
         );
         // Un port déjà fermé par Vanguard n'est pas reproposé.
         assert_eq!(serveurs_ouverts(&prises, &[11434, 7860].into()), []);
+    }
+    fn menace_de(certaine: bool, chemin: Option<&str>, fichier: Option<&str>, detection: &str) -> Menace {
+        Menace {
+            categorie: Categorie::Programmes,
+            certaine,
+            quoi: "« python3 » (PID 4242)".into(),
+            cle: format!("programme:4242:{}", chemin.unwrap_or("")),
+            geste: Geste::Programme {
+                pid: Some(4242),
+                nom: "python3".into(),
+                chemin: chemin.map(PathBuf::from),
+                fichier: fichier.map(PathBuf::from),
+                detection: detection.into(),
+            },
+        }
+    }
+
+    /// Déclarer python3 normal pour une raison ne fait pas taire python3 pour une autre, ni pour un autre script ;
+    /// sans chemin lisible, la clé garde son numéro de processus (rien ne se reconnaîtra plus tard). Le chemin reste
+    /// en dernier, l'objet qui relie l'alerte au geste dans les traces.
+    #[test]
+    fn la_cle_normale_d_un_programme_garde_sa_raison() {
+        let telecharge = menace_de(false, Some("/usr/bin/python3"), None, "commande qui télécharge");
+        let cache = menace_de(false, Some("/usr/bin/python3"), None, "commande qui se cache");
+        let script = menace_de(
+            false,
+            Some("/usr/bin/python3"),
+            Some("/home/alice/outil.py"),
+            "commande qui télécharge",
+        );
+        assert_ne!(telecharge.cle_normale(), cache.cle_normale());
+        assert_ne!(telecharge.cle_normale(), script.cle_normale());
+        assert_eq!(
+            telecharge.cle_normale(),
+            menace_de(false, Some("/usr/bin/python3"), None, "commande qui télécharge").cle_normale()
+        );
+        assert_eq!(
+            menace_de(false, None, None, "x").cle_normale(),
+            "blocage|programme:4242:"
+        );
+        assert_eq!(
+            script.cle_normale(),
+            "blocage|commande qui télécharge|/home/alice/outil.py|/usr/bin/python3"
+        );
+    }
+
+    /// Une menace certaine ne se tait jamais, même si sa clé a été déclarée normale (le douteux d'hier remplacé par
+    /// un fichier connu de MalwareBazaar) ; le douteux déclaré normal est retiré et compté.
+    #[test]
+    fn une_menace_certaine_n_est_jamais_tue() {
+        let mut menaces = vec![
+            menace_de(true, Some("/home/alice/.cache/x/outil"), None, "r"),
+            menace_de(false, Some("/home/alice/.cache/x/outil"), None, "r"),
+        ];
+        let tues = retirer_normales(&mut menaces, |_| true);
+        assert_eq!(tues, 1);
+        assert_eq!(menaces.len(), 1);
+        assert!(menaces[0].certaine);
+    }
+
+    /// Un fichier mis en quarantaine a quitté son chemin : le même, téléchargé de nouveau, est reproposé ; une règle
+    /// de pare-feu en place, elle, retire sa menace.
+    #[test]
+    fn une_quarantaine_ne_cache_pas_le_fichier_revenu() {
+        let blocage = |cle: &str, annulation| crate::changements::Blocage {
+            id: "a".into(),
+            cle: cle.into(),
+            quoi: "q".into(),
+            automatique: false,
+            annulation: Some(annulation),
+            annule: None,
+            supprime: false,
+            preuve: None,
+        };
+        let en_place = vec![
+            (
+                "2026-10-22 03:00".to_string(),
+                blocage(
+                    "fichier:/home/alice/Téléchargements/facture.pdf.exe",
+                    crate::changements::Annulation::Quarantaine { nom: "x".into() },
+                ),
+            ),
+            (
+                "2026-10-22 03:00".to_string(),
+                blocage(
+                    "connexion:203.0.113.7",
+                    crate::changements::Annulation::Commandes {
+                        commandes: vec!["true".into()],
+                        port: None,
+                    },
+                ),
+            ),
+        ];
+        let menace = |cle: &str| Menace {
+            categorie: Categorie::Programmes,
+            certaine: true,
+            quoi: "q".into(),
+            cle: cle.into(),
+            geste: Geste::Adresse {
+                ip: "203.0.113.7".parse().unwrap(),
+            },
+        };
+        let mut menaces = vec![
+            menace("fichier:/home/alice/Téléchargements/facture.pdf.exe"),
+            menace("connexion:203.0.113.7"),
+        ];
+        retirer_bloquees(&mut menaces, &en_place);
+        assert_eq!(menaces.len(), 1);
+        assert_eq!(menaces[0].cle, "fichier:/home/alice/Téléchargements/facture.pdf.exe");
     }
 }

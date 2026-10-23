@@ -310,6 +310,7 @@ fn habitudes() {
 pub fn menu() {
     titre(tr!("Ce que Vanguard a appris", "What Vanguard has learned"));
     habitudes();
+    crate::protection::normales::section();
     section(tr!("TES CHOIX", "YOUR CHOICES"));
     let mut appris = match charger() {
         Ok(a) => a,

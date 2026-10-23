@@ -38,6 +38,15 @@ pub(crate) struct Blocage {
     /// Date de l'annulation ; `None` : toujours en place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annule: Option<String>,
+    /// Le fichier isolé a été supprimé pour de bon depuis le menu Quarantaine, pas remis à sa place : `annule` dit
+    /// seulement qu'il n'est plus à défaire, et les traces ne doivent pas lire « annulé » le contraire de ce qui
+    /// s'est passé.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub supprime: bool,
+    /// Ce qui a été relevé juste avant le geste (processus, ligne de commande, empreinte, connexions) : le geste
+    /// efface ce qui disparaît le plus vite, la preuve le garde. Absente des blocages d'avant la 0.86.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preuve: Option<crate::protection::preuve::Preuve>,
 }
 
 /// Ce qui défait un blocage, exactement.
@@ -131,7 +140,7 @@ pub(crate) fn noter_blocage(commandes: Vec<String>, reussi: bool, blocage: Bloca
     noter_blocage_dans(&fichier(), commandes, reussi, blocage);
 }
 
-fn noter_blocage_dans(chemin: &std::path::Path, commandes: Vec<String>, reussi: bool, blocage: Blocage) {
+pub(crate) fn noter_blocage_dans(chemin: &std::path::Path, commandes: Vec<String>, reussi: bool, blocage: Blocage) {
     let mut tous = lire_de(chemin);
     tous.push(Changement {
         date: maintenant(),
@@ -159,20 +168,68 @@ fn blocages_en_place_de(chemin: &std::path::Path) -> Vec<(String, Blocage)> {
         .collect()
 }
 
-/// Note que ce blocage est défait : il n'est plus proposé à l'annulation, et la menace peut revenir.
-pub(crate) fn marquer_annule(id: &str) {
-    marquer_annule_dans(&fichier(), id);
+/// Tous les blocages notés (réussis ou non, en place ou annulés), du plus ancien au plus récent : (date, réussi,
+/// blocage). Les traces d'incident lisent le relevé elles-mêmes (`blocages_du_texte`) ; les tests, d'ici.
+#[cfg(test)]
+pub(crate) fn blocages() -> Vec<(String, bool, Blocage)> {
+    lire()
+        .into_iter()
+        .filter_map(|c| Some((c.date, c.reussi, c.blocage?)))
+        .collect()
 }
 
-fn marquer_annule_dans(chemin: &std::path::Path, id: &str) {
+/// Les blocages d'un relevé déjà lu (les traces d'incident le lisent elles-mêmes, dans le dossier du compte qui a
+/// lancé sudo s'il le faut), comme `blocages`.
+pub(crate) fn blocages_du_texte(texte: &str) -> Vec<(String, bool, Blocage)> {
+    lire_texte(texte)
+        .into_iter()
+        .filter_map(|c| Some((c.date, c.reussi, c.blocage?)))
+        .collect()
+}
+
+/// Note que ce blocage est défait : il n'est plus proposé à l'annulation, et la menace peut revenir.
+pub(crate) fn marquer_annule(id: &str) {
+    marquer_annule_dans(&fichier(), id, false);
+}
+
+fn marquer_annule_dans(chemin: &std::path::Path, id: &str, supprime: bool) {
     let mut tous = lire_de(chemin);
     let date = maintenant();
     for c in &mut tous {
         if let Some(b) = c.blocage.as_mut().filter(|b| b.id == id) {
             b.annule = Some(date.clone());
+            b.supprime = supprime;
         }
     }
     ecrire(chemin, tous);
+}
+
+/// Le fichier isolé sous ce nom est sorti de la quarantaine depuis son menu, remis ou `supprime` pour de bon : le
+/// blocage qui l'y avait mis n'est plus proposé à l'annulation.
+pub(crate) fn marquer_annule_quarantaine(nom: &str, supprime: bool) {
+    marquer_annule_quarantaine_dans(&fichier(), nom, supprime);
+}
+
+fn marquer_annule_quarantaine_dans(chemin: &std::path::Path, nom: &str, supprime: bool) {
+    let ids: Vec<String> = lire_de(chemin)
+        .into_iter()
+        .filter_map(|c| c.blocage)
+        .filter(|b| matches!(&b.annulation, Some(Annulation::Quarantaine { nom: n }) if n == nom))
+        .map(|b| b.id)
+        .collect();
+    for id in ids {
+        marquer_annule_dans(chemin, &id, supprime);
+    }
+}
+
+/// Ce qu'il est advenu d'un blocage défait, pour les traces (« — annulé le … » ou « — fichier supprimé le … »).
+pub(crate) fn fin_du_blocage(b: &Blocage) -> Option<String> {
+    let le = b.annule.as_ref()?;
+    Some(if b.supprime {
+        format!(" — fichier supprimé le/file deleted on {le}")
+    } else {
+        format!(" — annulé le/undone on {le}")
+    })
 }
 
 /// Un identifiant neuf pour un blocage : l'heure en nanosecondes et le numéro du processus, sans hasard à tirer.
@@ -239,6 +296,7 @@ pub fn afficher() {
         };
         if let Some(b) = &c.blocage {
             let etat = match (&b.annule, &b.annulation, b.automatique) {
+                (Some(le), _, _) if b.supprime => trf!(" (fichier supprimé le {le})", " (file deleted on {le})"),
                 (Some(le), _, _) => trf!(" (annulé le {le})", " (undone on {le})"),
                 (None, Some(_), true) => tr!(" (automatique, annulable)", " (automatic, undoable)").to_string(),
                 (None, Some(_), false) => tr!(" (annulable)", " (undoable)").to_string(),
@@ -250,6 +308,17 @@ pub fn afficher() {
                 21,
                 "",
             );
+            // La preuve relevée avant le geste, en une ligne ; le détail est dans les traces d'incident.
+            if let Some(p) = b.preuve.as_ref().map(crate::protection::preuve::Preuve::resume)
+                && !p.is_empty()
+            {
+                afficher_aligne(
+                    &" ".repeat(21),
+                    &trf!("preuve gardée : {p}", "evidence kept: {p}"),
+                    21,
+                    GRIS,
+                );
+            }
             continue;
         }
         let premiere = c.commandes.first().map(String::as_str).unwrap_or_default();
@@ -325,6 +394,8 @@ mod tests {
             automatique: true,
             annulation,
             annule: None,
+            supprime: false,
+            preuve: None,
         }
     }
 
@@ -357,7 +428,7 @@ mod tests {
         assert_eq!(tous[0].blocage.as_ref().map(|b| b.id.as_str()), Some("a"));
         assert_eq!(blocages_en_place_de(&f).len(), 1);
         // Annulé : plus en place, et il peut maintenant être élagué comme le reste.
-        marquer_annule_dans(&f, "a");
+        marquer_annule_dans(&f, "a", false);
         assert_eq!(blocages_en_place_de(&f), Vec::new());
         assert!(
             lire_de(&f)
@@ -375,5 +446,39 @@ mod tests {
         );
         let _ = std::fs::remove_file(&f);
         assert_ne!(nouvel_id(), nouvel_id());
+    }
+    /// Un fichier isolé puis supprimé pour de bon depuis le menu Quarantaine se lit « supprimé », jamais « annulé »
+    /// (comme s'il avait été remis) ; remis, il se lit « annulé ». Une ligne d'avant ce champ se relit.
+    #[test]
+    fn fichier_supprime_de_la_quarantaine_pas_annule() {
+        let f = std::env::temp_dir().join(format!("vanguard-blocages-supprime-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&f);
+        for nom in ["x", "y"] {
+            noter_blocage_dans(
+                &f,
+                vec![format!("quarantaine : /tmp/{nom}")],
+                true,
+                blocage(nom, Some(Annulation::Quarantaine { nom: nom.into() })),
+            );
+        }
+        marquer_annule_quarantaine_dans(&f, "x", true);
+        marquer_annule_quarantaine_dans(&f, "y", false);
+        let fins: Vec<String> = lire_de(&f)
+            .iter()
+            .filter_map(|c| fin_du_blocage(c.blocage.as_ref()?))
+            .collect();
+        assert_eq!(fins.len(), 2, "{fins:?}");
+        assert!(
+            fins[0].contains("supprimé") && !fins[0].contains("annulé"),
+            "{}",
+            fins[0]
+        );
+        assert!(
+            fins[1].contains("annulé") && !fins[1].contains("supprimé"),
+            "{}",
+            fins[1]
+        );
+        assert_eq!(blocages_en_place_de(&f), Vec::new());
+        let _ = std::fs::remove_file(&f);
     }
 }

@@ -26,6 +26,10 @@ struct Entree {
     /// Permissions d'origine (Linux, macOS), pour les remettre ; absentes pour un fichier isolé avant la 0.61.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mode: Option<u32>,
+    /// Empreinte SHA-256 relevée avant l'isolement : pour le chercher (VirusTotal) et prouver que c'est le même
+    /// fichier ; absente pour un fichier isolé avant la 0.86, ou trop gros pour être haché.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -53,12 +57,104 @@ fn enregistrer(dossier: &Path, r: &Registre) -> std::io::Result<()> {
     crate::reseau::ecrire_atomique(&registre_dans(dossier), texte)
 }
 
-/// Isole `chemin` dans la quarantaine de cet ordinateur et le note ; rend son chemin en quarantaine.
-pub fn isoler(chemin: &Path, detection: &str) -> std::io::Result<PathBuf> {
-    isoler_dans(chemin, detection, &dossier())
+/// Qui demande la quarantaine, pour la noter dans « Ce que Vanguard a changé » (`changements`), avec de quoi
+/// l'annuler (`vanguard blocage annuler`) : le blocage d'une menace, ou une analyse (antivirus, YARA) après accord.
+pub(crate) struct Demande {
+    /// La menace (« fichier:/chemin ») : relie l'alerte, le blocage et la quarantaine dans les traces d'incident.
+    pub cle: String,
+    /// Ce qui est fait, et pourquoi, prêt à montrer.
+    pub quoi: String,
+    pub automatique: bool,
+    /// Ce qui a été fait juste avant (l'arrêt du processus), noté avec la quarantaine.
+    pub lancees: Vec<String>,
+    /// Le relevé d'avant le geste (`preuve`).
+    pub preuve: crate::protection::preuve::Preuve,
 }
 
-fn isoler_dans(chemin: &Path, detection: &str, dossier: &Path) -> std::io::Result<PathBuf> {
+/// La demande d'une analyse (antivirus, YARA) qui a trouvé `chemin` : son relevé est fait maintenant, avant
+/// l'isolement.
+pub(crate) fn demande_d_analyse(chemin: &Path, detection: &str) -> Demande {
+    Demande {
+        cle: format!("fichier:{}", chemin.display()),
+        quoi: trf!(
+            "Quarantaine de « {} » : {}",
+            "Quarantine of “{}”: {}",
+            chemin_affichable(chemin),
+            affichable(detection)
+        ),
+        automatique: false,
+        lancees: Vec::new(),
+        preuve: crate::protection::preuve::relever_fichier(chemin),
+    }
+}
+
+/// Le seul chemin vers la quarantaine, pour le blocage comme pour les analyses : isole `chemin` dans la quarantaine
+/// de cet ordinateur, puis note le geste (réussi ou non) avec sa preuve et de quoi l'annuler. Rend son chemin en
+/// quarantaine.
+pub(crate) fn isoler(chemin: &Path, detection: &str, d: Demande) -> std::io::Result<PathBuf> {
+    let mut lancees = d.lancees;
+    lancees.push(format!("quarantaine : {}", chemin.display()));
+    let sha256 = d
+        .preuve
+        .fichier
+        .as_ref()
+        .filter(|f| Path::new(&f.chemin) == chemin)
+        .and_then(|f| f.sha256.clone());
+    let r = isoler_dans(chemin, detection, &dossier(), sha256);
+    let annulation =
+        r.as_ref()
+            .ok()
+            .and_then(|dest| dest.file_name())
+            .map(|n| crate::changements::Annulation::Quarantaine {
+                nom: n.to_string_lossy().into_owned(),
+            });
+    crate::changements::noter_blocage(
+        lancees,
+        r.is_ok(),
+        crate::changements::Blocage {
+            id: crate::changements::nouvel_id(),
+            cle: d.cle,
+            quoi: d.quoi,
+            automatique: d.automatique,
+            annulation,
+            annule: None,
+            supprime: false,
+            preuve: Some(d.preuve),
+        },
+    );
+    r
+}
+
+/// Supprime pour de bon un fichier trouvé par une analyse, après accord : relevé d'abord (son empreinte disparaît
+/// avec lui), puis noté dans « Ce que Vanguard a changé », sans rien à annuler. Les traces d'incident le reprennent,
+/// comme une quarantaine. ClamAV, seul à le proposer, n'est lancé d'ici que sous Linux et macOS.
+#[cfg_attr(windows, allow(dead_code))]
+pub(crate) fn supprimer_apres_analyse(chemin: &Path, detection: &str) -> std::io::Result<()> {
+    let preuve = crate::protection::preuve::relever_fichier(chemin);
+    let r = std::fs::remove_file(chemin);
+    crate::changements::noter_blocage(
+        vec![format!("suppression : {}", chemin.display())],
+        r.is_ok(),
+        crate::changements::Blocage {
+            id: crate::changements::nouvel_id(),
+            cle: format!("fichier:{}", chemin.display()),
+            quoi: trf!(
+                "Suppression de « {} » : {}",
+                "Deletion of “{}”: {}",
+                chemin_affichable(chemin),
+                affichable(detection)
+            ),
+            automatique: false,
+            annulation: None,
+            annule: None,
+            supprime: false,
+            preuve: Some(preuve),
+        },
+    );
+    r
+}
+
+fn isoler_dans(chemin: &Path, detection: &str, dossier: &Path, sha256: Option<String>) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dossier)?;
     let meta = std::fs::symlink_metadata(chemin)?;
     if !meta.is_file() {
@@ -104,6 +200,7 @@ fn isoler_dans(chemin: &Path, detection: &str, dossier: &Path) -> std::io::Resul
         detection: detection.to_string(),
         date: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         mode,
+        sha256,
     });
     noter_journal(dossier, r.fichiers.last().expect("ajoutée"));
     enregistrer(dossier, &r)?;
@@ -152,9 +249,33 @@ fn liste_dans(dossier: &Path) -> Vec<Entree> {
             detection: detection.to_string(),
             date: date.to_string(),
             mode: None,
+            sha256: None,
         });
     }
     fichiers
+}
+
+/// Un fichier en quarantaine, pour les traces : (date, origine, détection, empreinte SHA-256).
+pub(crate) type PourTraces = (String, String, String, Option<String>);
+
+/// Ce qui est en quarantaine dans `dossier`, pour les traces d'incident : (date, origine, détection, empreinte
+/// SHA-256). `Err` : un registre qui n'est pas un fichier ordinaire. La collecte peut tourner en administrateur dans
+/// le dossier du compte : un tube nommé à sa place la bloquerait sans fin, un lien ferait lire un autre fichier.
+pub(crate) fn pour_traces_dans(dossier: &Path) -> Result<Vec<PourTraces>, String> {
+    for f in [registre_dans(dossier), dossier.join("journal.txt")] {
+        if let Ok(m) = std::fs::symlink_metadata(&f)
+            && !m.is_file()
+        {
+            return Err(format!(
+                "{} : pas un fichier ordinaire / not a regular file",
+                f.display()
+            ));
+        }
+    }
+    Ok(liste_dans(dossier)
+        .into_iter()
+        .map(|e| (e.date, e.origine, e.detection, e.sha256))
+        .collect())
 }
 
 /// Remet un fichier à sa place d'origine, avec ses permissions d'avant. Refuse d'écraser ce qui l'aurait remplacé.
@@ -257,7 +378,7 @@ pub fn proposer(trouves: &[(PathBuf, String)]) {
     }
     for (chemin, detection) in trouves {
         let montre = chemin_affichable(chemin);
-        match isoler(chemin, detection) {
+        match isoler(chemin, detection, demande_d_analyse(chemin, detection)) {
             Ok(_) => println!("  {VERT}✔{RESET} {montre}"),
             Err(e) => trp!(
                 "  ✖ {montre} : {e} (fichier du système ? relancer avec les droits administrateur)",
@@ -284,6 +405,9 @@ pub fn menu() {
                 affichable(&e.detection),
                 e.date.get(..16).unwrap_or(&e.date)
             );
+            if let Some(h) = &e.sha256 {
+                println!("      {GRIS}SHA-256 {h}{RESET}");
+            }
         }
         let choix = crate::selection::demander_ou_revenir(tr!(
             "\n  Numéro du fichier (Entrée pour revenir) : ",
@@ -310,7 +434,11 @@ pub fn menu() {
             _ => continue,
         };
         match resultat {
-            Ok(()) => trp!("  {VERT}✔{RESET} Fait.", "  {VERT}✔{RESET} Done."),
+            Ok(()) => {
+                // Sorti de la quarantaine : le blocage qui l'y avait mis n'est plus à annuler.
+                crate::changements::marquer_annule_quarantaine(&e.nom, action.trim() != "r");
+                trp!("  {VERT}✔{RESET} Fait.", "  {VERT}✔{RESET} Done.");
+            }
             Err(x) => trp!("  ✖ {x}", "  ✖ {x}"),
         }
         println!();
@@ -337,7 +465,7 @@ mod tests {
         std::fs::write(&fichier, b"MZ contenu").unwrap();
         #[cfg(unix)]
         std::fs::set_permissions(&fichier, std::os::unix::fs::PermissionsExt::from_mode(0o751)).unwrap();
-        let dest = isoler_dans(&fichier, "Win32.Trojan.Exemple", &q).unwrap();
+        let dest = isoler_dans(&fichier, "Win32.Trojan.Exemple", &q, Some("ab".repeat(32))).unwrap();
         assert!(!fichier.exists() && dest.exists());
         #[cfg(unix)]
         assert_eq!(
@@ -347,6 +475,7 @@ mod tests {
         let liste = liste_dans(&q);
         assert_eq!(liste.len(), 1);
         assert_eq!(liste[0].origine, fichier.to_string_lossy());
+        assert_eq!(liste[0].sha256.as_deref(), Some("ab".repeat(32).as_str()));
         // Un autre fichier a pris sa place : rien n'est écrasé.
         std::fs::write(&fichier, b"nouveau").unwrap();
         assert!(remettre_dans(&liste[0], &q).is_err());
@@ -377,6 +506,7 @@ mod tests {
                 detection: "Eicar\x07".into(),
                 date: "2026-10-18 23:00:00".into(),
                 mode: None,
+                sha256: None,
             },
         );
         let journal = std::fs::read_to_string(d.join("journal.txt")).unwrap();
@@ -408,5 +538,28 @@ mod tests {
         supprimer_dans(&liste[0], &q).unwrap();
         assert_eq!(liste_dans(&q), Vec::<Entree>::new());
         let _ = std::fs::remove_dir_all(&q);
+    }
+    /// Supprimé après une analyse : le fichier n'est plus là, mais son empreinte est relevée et le geste noté pour
+    /// les traces d'incident.
+    #[test]
+    fn suppression_apres_analyse_relevee_et_notee() {
+        let d = jetable("suppression");
+        let f = d.join("facture.pdf.exe");
+        std::fs::write(&f, b"charge inventee").unwrap();
+        supprimer_apres_analyse(&f, "Win.Test.EICAR").unwrap();
+        assert!(!f.exists());
+        let cle = format!("fichier:{}", f.display());
+        let (_, reussi, b) = crate::changements::blocages()
+            .into_iter()
+            .find(|(_, _, b)| b.cle == cle)
+            .expect("suppression notée");
+        assert!(reussi && b.annulation.is_none());
+        assert!(
+            b.preuve
+                .and_then(|p| p.fichier)
+                .and_then(|x| x.sha256)
+                .is_some_and(|h| h.len() == 64)
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

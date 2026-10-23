@@ -141,6 +141,21 @@ pub(crate) fn gardees() -> Chargees {
     GARDEES.get_or_init(|| charger(false)).as_ref()
 }
 
+/// Les empreintes récentes seulement (48 heures, quelques milliers), relues sur le disque à chaque appel, sans rien
+/// télécharger : pour le veilleur, un service borné à 128 Mo de mémoire, où la liste complète (plus d'un million
+/// d'empreintes) ne tiendrait pas. `None` : aucune copie gardée.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn recentes_gardees() -> Option<Empreintes> {
+    let texte = std::fs::read_to_string(dossier().join("recentes.txt")).ok()?;
+    let mut triees = lire_texte(&texte);
+    triees.sort_unstable();
+    triees.dedup();
+    (!triees.is_empty()).then_some(Empreintes {
+        triees,
+        avertissement: None,
+    })
+}
+
 fn charger(telecharger: bool) -> Result<Empreintes, String> {
     let d = dossier();
     let (complete, recentes) = (d.join("complete.zip"), d.join("recentes.txt"));
@@ -222,8 +237,12 @@ pub(crate) fn hex(e: &[u8; 32]) -> String {
 
 /// L'empreinte SHA-256 d'un fichier, lue par morceaux. `None` : illisible.
 pub(crate) fn sha256(chemin: &Path) -> Option<[u8; 32]> {
-    use std::io::Read;
-    let mut f = std::fs::File::open(chemin).ok()?;
+    sha256_de(std::fs::File::open(chemin).ok()?)
+}
+
+/// L'empreinte SHA-256 de ce qui se lit dans `f` (un fichier déjà ouvert et vérifié), par morceaux. `None` :
+/// illisible.
+pub(crate) fn sha256_de(mut f: impl std::io::Read) -> Option<[u8; 32]> {
     let mut h = Sha256::new();
     let mut tampon = vec![0u8; 1 << 16];
     loop {

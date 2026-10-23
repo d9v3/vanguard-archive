@@ -60,6 +60,8 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     scelle(sceau::VERSIONS, "mise_a_jour::github"),
     scelle(sceau::MACHINE, "reseau::surveillance"),
     scelle(sceau::WIFI_PUBLIC, "reseau::wifi_public"),
+    scelle(sceau::REGLAGES, "optimiser"),
+    scelle(sceau::NORMALES, "protection::normales"),
     local("sceaux.json", "sceau"),
     local("sceaux.verrou", "sceau"),
     // Historique des bilans : schéma 2 depuis les clés des constats et leur seconde empreinte.
@@ -81,7 +83,6 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     local("verifier-sauvegarde-tube", "sauvegarde"),
     local("cle-donnees", "chiffrement"),
     local("cle-donnees-enveloppe-retiree", "reseau"),
-    local("reglages.json", "optimiser"),
     local("jeux.json", "gaming::annulation"),
     local("plugins", "plugins::sortie"),
     local("tldr", "guide::tldr"),
