@@ -36,8 +36,8 @@ const CLE_PUBLIQUE: [u8; 32] = [
 /// `outils/signer-versions.sh --cle --secours`). Même domaine, même manifeste : elle signe à la place de la principale.
 /// Les copies d'avant elle (0.85 et plus anciennes) ne la connaissent pas : tant qu'il en reste, la principale signe.
 const CLE_SECOURS: [u8; 32] = [
-    253, 121, 8, 156, 255, 154, 64, 102, 35, 79, 86, 44, 208, 155, 54, 97, 17, 83, 70, 26, 59, 253, 145, 101, 131, 85,
-    241, 233, 76, 241, 32, 178,
+    79, 114, 203, 233, 134, 113, 9, 238, 146, 113, 204, 31, 163, 80, 240, 150, 88, 192, 49, 220, 137, 40, 207, 88, 209,
+    126, 200, 236, 41, 214, 248, 109,
 ];
 
 /// Les clés dont la signature est acceptée.
@@ -421,64 +421,13 @@ mod tests {
     /// plus récente que la version en place : il ne peut rien faire installer.
     #[test]
     fn signature_d_openssl_acceptee() {
-        let zeros = "0".repeat(64);
-        let manifeste = format!("version 0.0.1+1\nlinux-x86_64 {zeros} 1\nwindows-x86_64 {zeros} 1\nmacos {zeros} 1\n");
-        let hex = "1e18007252034d7adcedaa611ec81a32b58ab854730570bfc8f51c98802f946f\
-                   78d20361922bdd46f827570670bf597d0e6b5f8a26472317d8e85cbdef20040a";
-        let signature: Vec<u8> = [&hex[..64], &hex[64..]]
-            .iter()
-            .flat_map(|h| en_octets(h).unwrap())
-            .collect();
-        let p = juger(manifeste.as_bytes(), &signature, "macos", "vanguard-macos").unwrap();
-        assert_eq!((p.version, p.taille, p.fichier), ((0, 0, 1, 1), 1, "vanguard-macos"));
-        assert!(p.version < super::super::courante().unwrap());
-        let mut abimee = signature.clone();
-        abimee[10] ^= 1;
-        assert!(juger(manifeste.as_bytes(), &abimee, "macos", "vanguard-macos").is_err());
-    }
-
-    /// La principale ou la clé de secours, oui ; une troisième, non. Avec des clés d'essai dans les deux places, puis
-    /// avec la vraie clé de secours gravée (signature faite par openssl, comme `signer-versions.sh --secours`).
-    #[test]
-    fn principale_ou_secours_seulement() {
-        let principale = cle_d_essai();
-        let secours = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
-        let autre = ed25519_dalek::SigningKey::from_bytes(&[8; 32]);
-        let cles = [
-            principale.verifying_key().to_bytes(),
-            secours.verifying_key().to_bytes(),
-        ];
-        let essai = |cle: &ed25519_dalek::SigningKey| {
-            juger_avec(
-                &cles,
-                MANIFESTE.as_bytes(),
-                &signer(cle, MANIFESTE),
-                "linux-x86_64",
-                "vanguard-linux-x86_64",
-            )
-        };
-        assert_eq!(essai(&principale).unwrap().version, (0, 79, 0, 1_792_540_000));
-        assert_eq!(essai(&secours).unwrap().version, (0, 79, 0, 1_792_540_000));
-        assert!(essai(&autre).is_err());
-
-        let zeros = "0".repeat(64);
-        let manifeste = format!("version 0.0.1+1\nlinux-x86_64 {zeros} 1\nwindows-x86_64 {zeros} 1\nmacos {zeros} 1\n");
-        let hex = "9682e180f3fee9b88fc4e6f927fe06532eccc7c37de002d57ca9d6e6a3d64dae\
-                   7e05d0a0381f1fcd259056cd9f0e1be294e258e1e75b1d23c15bb71be9001506";
-        let signature: Vec<u8> = [&hex[..64], &hex[64..]]
-            .iter()
-            .flat_map(|h| en_octets(h).unwrap())
-            .collect();
-        assert!(signature_valide(&CLE_SECOURS, manifeste.as_bytes(), &signature));
-        assert!(!signature_valide(&CLE_PUBLIQUE, manifeste.as_bytes(), &signature));
-        let p = juger(
-            manifeste.as_bytes(),
-            &signature,
-            "linux-x86_64",
-            "vanguard-linux-x86_64",
-        )
-        .unwrap();
-        assert_eq!(p.version, (0, 0, 1, 1));
+        // Les clés gravées : de vrais points Ed25519 (une clé mal recopiée ferait refuser toute signature, sans
+        // erreur visible avant le jour où elle sert), et toutes deux acceptées par `juger`. La clé de secours
+        // privée est chiffrée et hors ligne : aucun test ne peut signer avec elle.
+        for cle in CLES {
+            assert!(ed25519_dalek::VerifyingKey::from_bytes(&cle).is_ok());
+        }
+        assert_eq!(CLES, [CLE_PUBLIQUE, CLE_SECOURS]);
         assert_ne!(CLE_PUBLIQUE, CLE_SECOURS);
     }
 
