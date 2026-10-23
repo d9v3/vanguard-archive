@@ -8,7 +8,12 @@
 
 # -Auto : aucune question ; les étapes qui demandent de taper ou une fenêtre UAC sont sautées.
 # -SansOuvrir : rien ne s'ouvre à l'écran (test lancé en arrière-plan par la tâche planifiée du menu).
-param([switch]$Auto, [switch]$SansOuvrir)
+# -SurPlace : vanguard.exe lancé là où il est, sans copie, et les essais qui lancent une copie (lanceur de la clé, DLL
+# posée à côté) faits dans des sous-dossiers d'ici. Pour la file d'essais sans clic (surveillant-essais.ps1), où ce
+# script tourne en administrateur depuis un dossier que seuls les administrateurs modifient : une copie dans
+# %LOCALAPPDATA% ou %TEMP%, que l'utilisateur sans droits modifie, pourrait y être remplacée entre deux lancements et
+# deviendrait administrateur sans UAC.
+param([switch]$Auto, [switch]$SansOuvrir, [switch]$SurPlace)
 
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -18,11 +23,17 @@ $ici = Split-Path -Parent $MyInvocation.MyCommand.Path
 $racine = if ((Split-Path -Leaf $ici) -eq 'programme') { Split-Path -Parent $ici } else { $ici }
 $resultats = Join-Path $racine 'resultats'
 
-# On lance une copie locale : un .exe sur un partage réseau déclenche des avertissements de sécurité.
-$local = Join-Path $env:LOCALAPPDATA 'vanguard-test'
-New-Item -ItemType Directory -Force $local | Out-Null
-Copy-Item (Join-Path $ici 'vanguard.exe') $local -Force
-$exe = Join-Path $local 'vanguard.exe'
+if ($SurPlace) {
+    $exe = Join-Path $ici 'vanguard.exe'
+    $lieuEssais = $ici
+} else {
+    # On lance une copie locale : un .exe sur un partage réseau déclenche des avertissements de sécurité.
+    $local = Join-Path $env:LOCALAPPDATA 'vanguard-test'
+    New-Item -ItemType Directory -Force $local | Out-Null
+    Copy-Item (Join-Path $ici 'vanguard.exe') $local -Force
+    $exe = Join-Path $local 'vanguard.exe'
+    $lieuEssais = $env:TEMP
+}
 Unblock-File $exe -ErrorAction SilentlyContinue
 $version = (& $exe --version 2>$null | Out-String).Trim()
 $numero = if ($version -match '\d+\.\d+\.\d+') { $Matches[0] } else { 'inconnue' }
@@ -1191,8 +1202,10 @@ Etape 'Lanceur de la clé : Vanguard introuvable ou bloqué, expliqué sans touc
 $lanceur = Join-Path $ici 'Lancer Vanguard.bat'
 if (Test-Path -LiteralPath $lanceur) {
     # Dans un dossier sans Windows\vanguard.exe : le même chemin que quand Defender refuse de le lancer.
-    $essai = Join-Path $env:TEMP 'vanguard-lanceur'
-    New-Item -ItemType Directory -Path $essai -Force | Out-Null
+    # Vidé d'abord : un Windows\vanguard.exe resté là (ou posé d'avance) serait lancé par le lanceur.
+    $essai = Join-Path $lieuEssais 'vanguard-lanceur'
+    if (Test-Path -LiteralPath $essai) { Remove-Item -LiteralPath $essai -Recurse -Force }
+    New-Item -ItemType Directory -Path $essai | Out-Null
     Copy-Item -LiteralPath $lanceur $essai -Force
     $defLanceur = (Get-MpPreference | Select-Object ExclusionPath, ControlledFolderAccessAllowedApplications | Out-String)
     $sortieLanceur = 'N' | cmd /c "`"$(Join-Path $essai 'Lancer Vanguard.bat')`"" 2>&1 | Out-String
@@ -1663,7 +1676,7 @@ try {
 Etape 'Une DLL posée à côté de Vanguard n''est pas chargée (bibliothèques prises dans System32)'
 # Sans DependentLoadFlags, Windows chargerait cet iphlpapi.dll vide avant la première ligne du programme et refuserait
 # de le lancer (0xC000007B) ; avec, il prend celui de System32 et Vanguard démarre.
-$piege = Join-Path $env:TEMP "vanguard-dll-$PID"
+$piege = Join-Path $lieuEssais "vanguard-dll-$PID"
 try {
     New-Item -ItemType Directory -Force -Path $piege | Out-Null
     Copy-Item $exe (Join-Path $piege 'vanguard.exe') -Force
@@ -1742,6 +1755,8 @@ if ($avant -and $nbOk -lt $avant) {
 }
 $suite = if ($details) { ' ; ' + ($details -join ' ; ') } else { '' }
 $bilan = if ($nbBug -eq 0 -and $nbEchec -eq 0) { "OK, tout est passé ($nbOk vérifications$suite)" } else { "$nbBug problème(s), $nbEchec commande(s) en échec, $nbOk réussies$suite" }
+# Les nombres de la passe, lisibles par un programme (la file d'essais sans clic, surveillant-essais.ps1).
+[IO.File]::WriteAllText((Join-Path $res 'bilan.txt'), ("ok=$nbOk`r`nbugs=$nbBug`r`nechecs=$nbEchec`r`nsautees=$nbSaute`r`nversion=$numero`r`n"), (New-Object Text.UTF8Encoding $false))
 Add-Content -Path (Join-Path $resultats 'historique.txt') -Encoding UTF8 -Value ('{0}  v{1,-8} {2}  ({3:N1} min, {4})  -> {5}' -f `
     (Get-Date -Format 'yyyy-MM-dd HH:mm'), $numero, $bilan, ((Get-Date) - $debutTest).TotalMinutes, $mode, (Split-Path -Leaf $res))
 Write-Host "  Rapport : $rapport" -ForegroundColor DarkGray
