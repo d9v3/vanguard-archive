@@ -255,6 +255,10 @@ mod colonnes {
     const PAGES_DEBORDEMENT: usize = 64;
     /// Lignes lues au plus dans une table : TCC.db en a quelques centaines.
     const LIGNES_MAX: usize = 100_000;
+    /// Valeurs créées au plus par un parcours (32 octets chacune, soit environ 32 Mo) : le budget d'octets ne suffit
+    /// pas, car un en-tête fait de types 0 (Nul, aucun octet de corps) crée une valeur par octet de charge. Borne
+    /// fixe, sans lien avec la taille du fichier, pour qu'une vraie TCC.db de petite taille ne soit jamais refusée.
+    pub(super) const VALEURS_MAX: usize = 1_000_000;
 
     /// Un entier signé de 1 à 8 octets, poids fort d'abord (complément à deux).
     pub(super) fn signe(octets: &[u8]) -> i64 {
@@ -392,14 +396,15 @@ mod colonnes {
         }
 
         /// Toutes les lignes de l'arbre d'une table, à partir de sa page racine : (rowid, valeurs). Une page déjà vue, un
-        /// arbre de plus de 20 niveaux, plus de `LIGNES_MAX` lignes ou plus d'octets de charge que `budget` : refusé
-        /// (`None`), comme dans `compter`.
+        /// arbre de plus de 20 niveaux, plus de `LIGNES_MAX` lignes, plus d'octets de charge que `budget` ou plus de
+        /// valeurs que `valeurs_max` : refusé (`None`), comme dans `compter`.
         fn parcourir(
             &self,
             racine: u32,
             profondeur: usize,
             vues: &mut HashSet<u32>,
             budget: &mut usize,
+            valeurs_max: &mut usize,
             lignes: &mut Vec<(i64, Vec<Valeur>)>,
         ) -> Option<()> {
             if profondeur > 20 || !vues.insert(racine) {
@@ -418,14 +423,16 @@ mod colonnes {
                         // le fichier vient de cellules ou de pages de débordement partagées, donc d'un fichier
                         // fabriqué (des Go recopiés, puis un arrêt net faute de mémoire).
                         *budget = budget.checked_sub(charge.len())?;
-                        lignes.push((rowid, valeurs(&charge)?));
+                        let v = valeurs(&charge)?;
+                        *valeurs_max = valeurs_max.checked_sub(v.len())?;
+                        lignes.push((rowid, v));
                     }
                 }
                 0x05 => {
                     for pos in positions {
-                        self.parcourir(u32be(p, pos)?, profondeur + 1, vues, budget, lignes)?;
+                        self.parcourir(u32be(p, pos)?, profondeur + 1, vues, budget, valeurs_max, lignes)?;
                     }
-                    self.parcourir(droite?, profondeur + 1, vues, budget, lignes)?;
+                    self.parcourir(droite?, profondeur + 1, vues, budget, valeurs_max, lignes)?;
                 }
                 _ => return None,
             }
@@ -444,7 +451,14 @@ mod colonnes {
         }
         // sqlite_master (page 1) : type, name, tbl_name, rootpage, sql.
         let mut master = Vec::new();
-        db.parcourir(1, 0, &mut HashSet::new(), &mut octets.len(), &mut master)?;
+        db.parcourir(
+            1,
+            0,
+            &mut HashSet::new(),
+            &mut octets.len(),
+            &mut { VALEURS_MAX },
+            &mut master,
+        )?;
         let (racine, sql) = master.iter().find_map(|(_, v)| match v.as_slice() {
             [
                 Valeur::Texte(genre),
@@ -456,6 +470,11 @@ mod colonnes {
             ] if genre == "table" && nom.eq_ignore_ascii_case(table) => Some((u32::try_from(*r).ok()?, sql.clone())),
             _ => None,
         })?;
+        // La page 1 est celle de sqlite_master : une table qui y renvoie ferait relire le même arbre.
+        if racine < 2 {
+            return None;
+        }
+        drop(master);
         let schema = colonnes_de(&sql)?;
         let places: Vec<Option<(usize, bool)>> = colonnes
             .iter()
@@ -467,7 +486,14 @@ mod colonnes {
             })
             .collect();
         let mut brutes = Vec::new();
-        db.parcourir(racine, 0, &mut HashSet::new(), &mut octets.len(), &mut brutes)?;
+        db.parcourir(
+            racine,
+            0,
+            &mut HashSet::new(),
+            &mut octets.len(),
+            &mut { VALEURS_MAX },
+            &mut brutes,
+        )?;
         Some(
             brutes
                 .into_iter()
@@ -497,7 +523,7 @@ mod colonnes {
 
 #[cfg(test)]
 mod tests {
-    use super::colonnes::{Valeur, colonnes_de, signe};
+    use super::colonnes::{VALEURS_MAX, Valeur, colonnes_de, signe};
     use super::*;
 
     #[test]
@@ -616,22 +642,21 @@ mod tests {
     /// Une base fabriquée de trois pages de 512 octets : sqlite_master (page 1) annonce la table « access » en page 2 ;
     /// la page 2 a `pointeurs` pointeurs vers une même cellule de 16 000 octets, dont la page de débordement (page 3)
     /// renvoie à elle-même.
-    fn base_a_cellule_partagee(pointeurs: usize) -> Vec<u8> {
-        fn v(n: usize) -> Vec<u8> {
-            let mut n = u64::try_from(n).unwrap();
-            let mut groupes = vec![u8::try_from(n & 0x7f).unwrap()];
+    /// Un entier au format varint de SQLite (groupes de 7 bits, le bit haut annonce la suite).
+    fn v(n: usize) -> Vec<u8> {
+        let mut n = u64::try_from(n).unwrap();
+        let mut groupes = vec![u8::try_from(n & 0x7f).unwrap()];
+        n >>= 7;
+        while n > 0 {
+            groupes.push(u8::try_from(n & 0x7f).unwrap() | 0x80);
             n >>= 7;
-            while n > 0 {
-                groupes.push(u8::try_from(n & 0x7f).unwrap() | 0x80);
-                n >>= 7;
-            }
-            groupes.reverse();
-            groupes
         }
-        let mut b = vec![0u8; 3 * 512];
-        b[..16].copy_from_slice(b"SQLite format 3\0");
-        b[16..18].copy_from_slice(&512u16.to_be_bytes());
-        // sqlite_master : type, name, tbl_name, rootpage, sql.
+        groupes.reverse();
+        groupes
+    }
+
+    /// La cellule de sqlite_master qui annonce la table « access » à la page `racine`.
+    fn cellule_access(racine: u8) -> Vec<u8> {
         let sql = b"CREATE TABLE access (service TEXT, client TEXT)";
         let textes: [&[u8]; 3] = [b"table", b"access", b"access"];
         let mut entete: Vec<u8> = textes.iter().flat_map(|t| v(t.len() * 2 + 13)).collect();
@@ -642,11 +667,20 @@ mod tests {
         for t in textes {
             charge.extend_from_slice(t);
         }
-        charge.push(2);
+        charge.push(racine);
         charge.extend_from_slice(sql);
         let mut cellule = v(charge.len());
         cellule.extend(v(1));
         cellule.extend(charge);
+        cellule
+    }
+
+    fn base_a_cellule_partagee(pointeurs: usize) -> Vec<u8> {
+        let mut b = vec![0u8; 3 * 512];
+        b[..16].copy_from_slice(b"SQLite format 3\0");
+        b[16..18].copy_from_slice(&512u16.to_be_bytes());
+        // sqlite_master : type, name, tbl_name, rootpage, sql.
+        let cellule = cellule_access(2);
         b[100] = 0x0d;
         b[103..105].copy_from_slice(&1u16.to_be_bytes());
         b[108..110].copy_from_slice(&300u16.to_be_bytes());
@@ -685,6 +719,62 @@ mod tests {
             db.racine_de("access", 1, 0, &mut std::collections::HashSet::new()),
             Some(2)
         );
+    }
+
+    /// Une base fabriquée aux pages de 64 Ko : sqlite_master (page 1) annonce « access » en page `racine` ; la page 2
+    /// est intérieure et mène à `feuilles` feuilles, chacune portant une cellule de 65 000 octets dont l'en-tête n'est
+    /// fait que de types 0 (Nul, aucun octet de corps).
+    fn base_a_nuls(racine: u8, feuilles: usize) -> Vec<u8> {
+        const PAGE: usize = 65_536;
+        let mut b = vec![0u8; (feuilles + 2) * PAGE];
+        b[..16].copy_from_slice(b"SQLite format 3\0");
+        // 1 dans l'en-tête : des pages de 65 536 octets.
+        b[16..18].copy_from_slice(&1u16.to_be_bytes());
+        let cellule = cellule_access(racine);
+        b[100] = 0x0d;
+        b[103..105].copy_from_slice(&1u16.to_be_bytes());
+        b[108..110].copy_from_slice(&300u16.to_be_bytes());
+        b[300..300 + cellule.len()].copy_from_slice(&cellule);
+        // Page 2, intérieure : un enfant par cellule, la dernière feuille en pointeur de droite.
+        let p2 = PAGE;
+        b[p2] = 0x05;
+        b[p2 + 3..p2 + 5].copy_from_slice(&u16::try_from(feuilles - 1).unwrap().to_be_bytes());
+        b[p2 + 8..p2 + 12].copy_from_slice(&u32::try_from(feuilles + 2).unwrap().to_be_bytes());
+        for i in 0..feuilles - 1 {
+            let place = 20_000 + 5 * i;
+            b[p2 + 12 + 2 * i..p2 + 14 + 2 * i].copy_from_slice(&u16::try_from(place).unwrap().to_be_bytes());
+            b[p2 + place..p2 + place + 4].copy_from_slice(&u32::try_from(i + 3).unwrap().to_be_bytes());
+            b[p2 + place + 4] = 1;
+        }
+        let taille = 65_000;
+        for k in 3..feuilles + 3 {
+            let d = (k - 1) * PAGE;
+            // L'en-tête couvre toute la charge : sa taille, puis des zéros.
+            let mut cellule = v(taille);
+            cellule.extend(v(k));
+            cellule.extend(v(taille));
+            cellule.resize(cellule.len() + taille - v(taille).len(), 0);
+            b[d] = 0x0d;
+            b[d + 3..d + 5].copy_from_slice(&1u16.to_be_bytes());
+            b[d + 8..d + 10].copy_from_slice(&100u16.to_be_bytes());
+            b[d + 100..d + 100 + cellule.len()].copy_from_slice(&cellule);
+        }
+        b
+    }
+
+    #[test]
+    fn valeurs_bornees_meme_sous_le_budget_d_octets() {
+        // Avant : chaque octet d'en-tête devenait une valeur de 32 octets ; une base de 32 Mo (la taille admise) en
+        // créait près d'un Go. Au-delà de VALEURS_MAX valeurs : refusé.
+        let trop = VALEURS_MAX / 64_997 + 1;
+        assert!(lignes(&base_a_nuls(2, trop), "access", &["service"]).is_none());
+        // Sous la borne, la même forme se lit : une ligne par feuille.
+        assert_eq!(
+            lignes(&base_a_nuls(2, 2), "access", &["service"]).map(|l| l.len()),
+            Some(2)
+        );
+        // Une table qui renvoie à la page 1 ferait relire sqlite_master comme si c'était elle : refusé.
+        assert!(lignes(&base_a_nuls(1, 2), "access", &["service"]).is_none());
     }
 
     #[test]

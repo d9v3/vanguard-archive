@@ -34,7 +34,8 @@ const TCC_ATTENDUS: &[&str] = &[
     "com.raycast.",
     "com.runningwithcrayons.alfred",
     "com.knollsoft.rectangle",
-    "org.pqrs.karabiner",
+    // Karabiner-Elements : « org.pqrs.Karabiner-Core-Service », « …-EventViewer ».
+    "org.pqrs.",
     "com.hegenberg.bettertouchtool",
     "com.1password.",
     "com.agilebits.",
@@ -429,6 +430,15 @@ mod tests {
             Jugement::Attendue
         );
         assert_eq!(juger(&a(1, "com.apple.Terminal", false), None), Jugement::Attendue);
+        // Karabiner-Elements écrit ses identifiants avec un tiret : couverts par l'éditeur, pas un voisin.
+        assert_eq!(
+            juger(&a(1, "org.pqrs.Karabiner-Core-Service", false), None),
+            Jugement::Attendue
+        );
+        assert_eq!(
+            niveau(juger(&a(1, "org.pqrsx.Karabiner", false), None)),
+            Some(Niveau::Moyen)
+        );
         // Partager son écran dans une visio, depuis un navigateur.
         for client in ["com.google.Chrome", "org.mozilla.firefox", "com.tinyspeck.slackmacgap"] {
             assert_eq!(juger(&a(2, client, false), None), Jugement::Attendue, "{client}");

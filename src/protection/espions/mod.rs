@@ -450,6 +450,33 @@ fn rien_indicateurs(r: &Releve, echap_lue: bool) -> Option<&'static str> {
     }
 }
 
+/// La ligne « rien » des logiciels de surveillance : (texte, coche verte). Sans la liste d'Échap, les noms n'ont été
+/// comparés qu'aux logiciels que Vanguard connaît lui-même : une information, pas une coche.
+fn rien_programmes(r: &Releve, echap_lue: bool) -> Option<(String, bool)> {
+    if r.programmes_vus == 0 {
+        return None;
+    }
+    Some(if echap_lue {
+        (
+            trf!(
+                "Aucun logiciel de surveillance connu parmi {} noms vérifiés.",
+                "No known monitoring software among {} names checked.",
+                r.programmes_vus
+            ),
+            true,
+        )
+    } else {
+        (
+            trf!(
+                "Aucun logiciel de surveillance connu parmi {} noms, comparés à la liste de Vanguard seulement.",
+                "No known monitoring software among {} names, compared with Vanguard's own list only.",
+                r.programmes_vus
+            ),
+            false,
+        )
+    })
+}
+
 /// La ligne « rien » de « Qui lit le clavier ? » : (texte, tout a été lu). Des processus illisibles (ceux de root,
 /// sans sudo) la rendent partielle, sans coche verte.
 fn rien_clavier(r: &Releve) -> (&'static str, bool) {
@@ -531,16 +558,12 @@ fn ecran() -> Option<Niveau> {
         tr!("Serveurs et sites connus (Échap)", "Known servers and sites (Échap)"),
         rien_indicateurs(&r, echap_lue).map(|t| (t, true)),
     );
-    let programmes_rien = trf!(
-        "Aucun logiciel de surveillance connu parmi {} noms vérifiés.",
-        "No known monitoring software among {} names checked.",
-        r.programmes_vus
-    );
+    let programmes_rien = rien_programmes(&r, echap_lue);
     afficher_section(
         &r,
         Section::Programmes,
         tr!("Logiciels de surveillance connus", "Known monitoring software"),
-        (r.programmes_vus > 0).then_some((programmes_rien.as_str(), true)),
+        programmes_rien.as_ref().map(|(t, complet)| (t.as_str(), *complet)),
     );
     let (titre_systeme, rien_systeme) = if cfg!(target_os = "linux") {
         (
@@ -620,15 +643,35 @@ pub fn afficher() {
 /// Les constats du bilan, sans réseau : la copie d'Échap seulement si elle a moins d'une semaine (pour les noms des
 /// logiciels), puis ce que le système laisse voir.
 pub(crate) fn constats() -> Vec<Constat> {
-    let mut r = Releve::default();
     let ind = echap::indicateurs(false, AGE_BILAN);
-    if let Err(raison) = &ind {
-        r.non_verifie(trf!(
+    constats_avec(ind.as_ref().map(|(i, _)| i), relever_systeme)
+}
+
+/// Le bilan, avec la liste lue (ou pourquoi elle ne l'est pas) et le relevé du système (`relever_systeme`, ou un
+/// relevé inventé dans les tests).
+fn constats_avec(ind: Result<&Indicateurs, &String>, systeme: fn(&mut Releve, Option<&Indicateurs>)) -> Vec<Constat> {
+    let mut r = Releve::default();
+    match &ind {
+        Err(raison) => r.non_verifie(trf!(
             "liste d'Échap non vérifiée : {raison}",
             "Échap list not checked: {raison}"
-        ));
+        )),
+        // Le bilan ne regarde ni les connexions ni la mémoire DNS (l'écran le fait) : les serveurs de la liste n'y
+        // sont pas comparés, et un « aucun signe » sans le dire les compterait comme sains. Sous macOS, tcc.rs dit
+        // déjà les connexions.
+        Ok(_) => r.non_verifie(if cfg!(target_os = "macos") {
+            tr!(
+                "mémoire DNS non comparée à la liste dans le bilan (vanguard logiciels-espions)",
+                "DNS cache not compared with the list in the audit (vanguard spyware)"
+            )
+        } else {
+            tr!(
+                "connexions et mémoire DNS non comparées à la liste dans le bilan (vanguard logiciels-espions)",
+                "connections and DNS cache not compared with the list in the audit (vanguard spyware)"
+            )
+        }),
     }
-    relever_systeme(&mut r, ind.as_ref().ok().map(|(i, _)| i));
+    systeme(&mut r, ind.ok());
     constats_de(&r)
 }
 
@@ -786,6 +829,22 @@ mod tests {
     }
 
     #[test]
+    fn bilan_dit_les_serveurs_non_compares() {
+        // Avant : avec la liste lue, le bilan disait « 0 point(s) non vérifié(s) » sans avoir regardé une seule
+        // connexion ni la mémoire DNS.
+        fn systeme(r: &mut Releve, _: Option<&Indicateurs>) {
+            r.verifies += 1;
+        }
+        let ind = indicateurs();
+        let c = constats_avec(Ok(&ind), systeme);
+        assert_eq!(c.len(), 1);
+        assert!(c[0].message.contains("1 point(s) non vérifié(s)"), "{}", c[0].message);
+        let raison = "aucune copie récente".to_string();
+        let c = constats_avec(Err(&raison), systeme);
+        assert!(c[0].message.contains("1 point(s) non vérifié(s)"), "{}", c[0].message);
+    }
+
+    #[test]
     fn rien_seulement_pour_ce_qui_a_ete_lu() {
         let mut r = Releve::default();
         // Liste lue, mais ni connexions ni mémoire DNS (macOS ; Linux sans root) : aucune ligne verte.
@@ -803,6 +862,12 @@ mod tests {
             Some("Aucune connexion en cours ne correspond à la liste.")
         );
         assert_eq!(rien_indicateurs(&r, false), None);
+        // Sans la liste d'Échap, les noms ne sont comparés qu'à ceux de Vanguard : pas de coche verte.
+        assert_eq!(rien_programmes(&r, true), None);
+        r.programmes_vus = 120;
+        assert!(rien_programmes(&r, true).unwrap().1);
+        let (texte, complet) = rien_programmes(&r, false).unwrap();
+        assert!(!complet && texte.contains("liste de Vanguard seulement"), "{texte}");
         // Des processus de root non lus : pas de coche verte pour le clavier.
         assert!(rien_clavier(&r).1);
         r.clavier_illisibles = 335;

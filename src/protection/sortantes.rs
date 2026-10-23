@@ -1005,7 +1005,7 @@ fn botnets() -> (Botnets, Vec<String>) {
                     Duration::from_secs(40),
                 )
             };
-            let liste = abuse_ch::liste(demande, ("feodo", "botnets.txt"), URLHAUS_FRAICHE);
+            let liste = abuse_ch::liste(demande, ("feodo", "botnets.txt"), URLHAUS_FRAICHE, |_| true);
             verifiee("Feodo Tracker", liste.resultat(false), en_texte(analyser_feodo_datee))
         });
         let api = s.spawn(|| {
@@ -1016,7 +1016,12 @@ fn botnets() -> (Botnets, Vec<String>) {
                     taille_max: 256 << 20,
                     ..Demande::get("https://threatfox-api.abuse.ch/api/v1/", Duration::from_secs(40))
                 };
-                let liste = abuse_ch::liste(demande, ("threatfox", abuse_ch::FICHIER_API), THREATFOX_CLE_FRAICHE);
+                let liste = abuse_ch::liste(
+                    demande,
+                    ("threatfox", abuse_ch::FICHIER_API),
+                    THREATFOX_CLE_FRAICHE,
+                    |_| true,
+                );
                 verifiee(
                     tr!("ThreatFox (7 jours)", "ThreatFox (7 days)"),
                     liste.resultat(true),

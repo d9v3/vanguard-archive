@@ -52,6 +52,8 @@ pub(crate) enum Echec {
     SansReponse,
     /// La réponse n'a pas pu être gardée sur le disque (plein ? droits ?).
     Ecriture,
+    /// Une réponse 200 qui n'est pas la liste (page de blocage d'un proxy, portail Wi-Fi) : la copie d'avant reste.
+    Illisible,
 }
 
 impl Echec {
@@ -80,6 +82,11 @@ impl Echec {
                 "copy could not be written to Vanguard's folder (disk full?)"
             )
             .into(),
+            Echec::Illisible => tr!(
+                "réponse qui n'est pas la liste (page d'un portail Wi-Fi ?)",
+                "answer is not the list (a Wi-Fi portal page?)"
+            )
+            .into(),
         }
     }
 }
@@ -104,6 +111,7 @@ impl Liste {
         }
         match (self.copie, self.code) {
             (Some(copie), _) => Ok(copie),
+            (None, _) if self.manque == Some(Echec::Illisible) => Err(Echec::Illisible),
             (None, Some(code)) => Err(Echec::Reponse(code)),
             (None, None) => Err(Echec::SansReponse),
         }
@@ -112,9 +120,15 @@ impl Liste {
 
 /// Une liste d'abuse.ch, gardée dans `sous_dossier/nom` du dossier de Vanguard : `fraiche` sans être redemandée,
 /// retéléchargée ensuite. La télécharger ne dit à personne ce qu'on cherche (on prend la liste entière). Seule une
-/// réponse 200 remplace la copie d'avant (un 429 ou une panne la gardent), par un fichier provisoire renommé :
-/// jamais à moitié écrite. Partagé entre MalwareBazaar, URLhaus, Feodo Tracker et ThreatFox.
-pub(crate) fn liste(demande: crate::http::Demande, (sous_dossier, nom): (&str, &str), fraiche: Duration) -> Liste {
+/// réponse 200 que `valide` accepte remplace la copie d'avant (un 429, une panne ou une page qui n'est pas la liste
+/// la gardent, avec son âge : le lancement suivant redemande), par un fichier provisoire renommé : jamais à moitié
+/// écrite. Partagé entre MalwareBazaar, URLhaus, Feodo Tracker, ThreatFox, le catalogue de la CISA et Échap.
+pub(crate) fn liste(
+    demande: crate::http::Demande,
+    (sous_dossier, nom): (&str, &str),
+    fraiche: Duration,
+    valide: fn(&[u8]) -> bool,
+) -> Liste {
     let dossier = crate::reseau::dossier_local().join(sous_dossier);
     let fichier = dossier.join(nom);
     let age = || {
@@ -130,6 +144,7 @@ pub(crate) fn liste(demande: crate::http::Demande, (sous_dossier, nom): (&str, &
             let reponse = crate::http::envoyer(demande);
             code = reponse.as_ref().map(|r| r.code);
             manque = match reponse {
+                Some(r) if r.code == 200 && !valide(&r.corps) => Some(Echec::Illisible),
                 Some(r) if r.code == 200 => {
                     let provisoire = dossier.join(format!("{nom}.nouveau"));
                     if std::fs::write(&provisoire, &r.corps).is_ok() && std::fs::rename(&provisoire, &fichier).is_ok() {
@@ -200,7 +215,7 @@ fn export_depuis(
         meme_hote: true,
         ..crate::http::Demande::get(&adresse, delai)
     };
-    let liste = liste(demande, lieu, fraiche);
+    let liste = liste(demande, lieu, fraiche, |_| true);
     let manque = liste.manque;
     liste.resultat(true).map(|copie| (copie, manque))
 }
@@ -590,6 +605,37 @@ mod tests {
         let fraiche = (Duration::from_hours(1), Duration::from_secs(5));
         let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, fraiche).unwrap();
         assert_eq!(manque, None);
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Une réponse 200 qui n'est pas la liste (page de blocage d'un proxy qui inspecte le HTTPS) : la copie d'avant
+    /// reste, avec son âge, et la raison est dite. Avant, elle était remplacée par la page, qui paraissait fraîche.
+    #[test]
+    fn page_qui_n_est_pas_la_liste_garde_la_copie() {
+        let lieu = ("essai-illisible-abuse-ch", "liste.txt");
+        let dossier = crate::reseau::dossier_local().join(lieu.0);
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        std::fs::write(dossier.join(lieu.1), b"# d'avant\n").unwrap();
+        let (base, fil) =
+            serveur(b"HTTP/1.1 200 OK\r\nContent-Length: 21\r\nConnection: close\r\n\r\n<html>Bloque</html>\r\n");
+        let adresse = format!("{base}liste.txt");
+        let demande = crate::http::Demande::get(&adresse, Duration::from_secs(5));
+        let l = liste(demande, lieu, Duration::ZERO, |o| o.starts_with(b"# "));
+        fil.join().unwrap();
+        assert_eq!(l.manque, Some(Echec::Illisible));
+        assert_eq!(l.copie.map(|(o, _)| o), Some(b"# d'avant\n".to_vec()));
+        assert_eq!(std::fs::read(dossier.join(lieu.1)).unwrap(), b"# d'avant\n");
+        // Sans copie d'avant : la raison, pas « a répondu 200 ».
+        std::fs::remove_file(dossier.join(lieu.1)).unwrap();
+        let (base, fil) =
+            serveur(b"HTTP/1.1 200 OK\r\nContent-Length: 21\r\nConnection: close\r\n\r\n<html>Bloque</html>\r\n");
+        let adresse = format!("{base}liste.txt");
+        let demande = crate::http::Demande::get(&adresse, Duration::from_secs(5));
+        let l = liste(demande, lieu, Duration::ZERO, |o| o.starts_with(b"# "));
+        fil.join().unwrap();
+        assert!(!dossier.join(lieu.1).exists());
+        assert_eq!(l.resultat(false), Err(Echec::Illisible));
         let _ = std::fs::remove_dir_all(&dossier);
     }
 

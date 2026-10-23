@@ -35,6 +35,12 @@ const LECTEURS_ATTENDUS: &[&str] = &[
     "kmonad",
     "xremap",
     "udevmon",
+    // interception-tools : udevmon lance « intercept -g », qui tient le clavier.
+    "intercept",
+    // libinput-gestures et fusuma passent par lui, sous le compte de la personne.
+    "libinput-debug-events",
+    // triggerhappy, installé d'office sur Raspberry Pi OS.
+    "thd",
     "espanso",
     "logid",
     "ratbagd",
@@ -53,6 +59,7 @@ const SCRIPTS_ATTENDUS: &[&str] = &[
     "solaar",
     "sc-controller",
     "scc-daemon",
+    "openrazer-daemon",
 ];
 
 /// Un nom de la liste, sans égard à la casse ni au point de tête. Le noyau coupe le nom court à 15 octets
@@ -120,6 +127,12 @@ pub(super) fn juger(l: &Lecteur, montages: &str) -> Option<(Niveau, String)> {
         .map(|c| c.trim_end_matches(" (deleted)"))
         .and_then(|c| c.rsplit('/').next())
         .unwrap_or_default();
+    // NixOS : wrapProgram lance le vrai programme sous le nom « .Hyprland-wrapped », depuis /nix/store.
+    let exe = if l.chemin.as_deref().is_some_and(|c| c.starts_with("/nix/store/")) {
+        exe.trim_start_matches('.').strip_suffix("-wrapped").unwrap_or(exe)
+    } else {
+        exe
+    };
     if let Some(s) = super::connus::reconnu(&l.programme).or_else(|| super::connus::reconnu(exe)) {
         // Un contrôle parental ou une surveillance d'employeur peut être voulu : à regarder, pas « signes sérieux ».
         let niveau = if s.genre == super::connus::Genre::Espion {
@@ -176,11 +189,16 @@ pub(super) fn juger(l: &Lecteur, montages: &str) -> Option<(Niveau, String)> {
     ))
 }
 
-/// Un exécutable rangé dans un dossier caché (« ~/.cache/x »), hors des dossiers où les programmes du compte
-/// s'installent d'ordinaire (~/.local/bin, ~/.cargo/bin ; Steam dans ~/.local/share/Steam).
+/// Un exécutable rangé dans un dossier caché (« ~/.cache/x ») ou caché lui-même (« ~/bin/.x »), hors des dossiers où
+/// les programmes du compte s'installent d'ordinaire (~/.local/bin, ~/.cargo/bin ; Steam dans ~/.local/share/Steam).
+/// Seule exception pour le nom : les enveloppes de NixOS (« /nix/store/…/bin/.Hyprland-wrapped »).
 fn dossier_cache(chemin: &str) -> bool {
     let ordinaires = ["/.local/bin/", "/.cargo/bin/", "/.local/share/Steam/", "/.steam/"];
-    chemin.split('/').any(|p| p.starts_with('.') && p.len() > 1) && !ordinaires.iter().any(|o| chemin.contains(o))
+    let cache = |p: &str| p.starts_with('.') && p.len() > 1;
+    let (dossier, fichier) = chemin.rsplit_once('/').unwrap_or(("", chemin));
+    let enveloppe_nix = chemin.starts_with("/nix/store/") && fichier.ends_with("-wrapped");
+    (dossier.split('/').any(cache) || (cache(fichier) && !enveloppe_nix))
+        && !ordinaires.iter().any(|o| chemin.contains(o))
 }
 
 /// Un module du noyau enregistreur de frappes, dans le contenu de /proc/modules.
@@ -378,6 +396,35 @@ mod tests {
         ] {
             assert_eq!(juger(&lecteur(nom, chemin), ""), None, "{nom}");
         }
+        // NixOS : les compositeurs enveloppés par wrapProgram ne sont pas « cachés ».
+        for chemin in [
+            "/nix/store/abc123-hyprland-0.50/bin/.Hyprland-wrapped",
+            "/nix/store/abc123-gnome-shell-48/bin/.gnome-shell-wrapped",
+            "/nix/store/abc123-kwin-6.4/bin/.kwin_wayland-wrapped",
+        ] {
+            assert_eq!(juger(&lecteur("x", chemin), ""), None, "{chemin}");
+        }
+        // Une enveloppe ailleurs que dans /nix/store, ou un programme caché lui-même, reste suspect.
+        for chemin in ["/home/alice/bin/.Hyprland-wrapped", "/home/alice/bin/.x"] {
+            assert_eq!(
+                juger(&lecteur("x", chemin), "").map(|j| j.0),
+                Some(Niveau::Eleve),
+                "{chemin}"
+            );
+        }
+        // Remappage et gestes : interception-tools, libinput-gestures, triggerhappy, openrazer.
+        for (nom, chemin) in [
+            ("intercept", "/usr/bin/intercept"),
+            ("libinput-debug-", "/usr/lib/libinput/libinput-debug-events"),
+            ("thd", "/usr/sbin/thd"),
+            ("openrazer-daemo", "/usr/bin/python3.12"),
+        ] {
+            assert_eq!(juger(&lecteur(nom, chemin), ""), None, "{nom}");
+        }
+        assert_eq!(
+            juger(&lecteur("intercept", "/home/alice/.cache/intercept"), "").map(|j| j.0),
+            Some(Niveau::Eleve)
+        );
         // Sans exécutable lisible, le nom court seul.
         let sans_chemin = Lecteur {
             chemin: None,

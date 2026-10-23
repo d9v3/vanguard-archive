@@ -74,6 +74,16 @@ fn ecarte(d: &str) -> bool {
         .any(|e| d == *e || d.strip_suffix(e).is_some_and(|r| r.ends_with('.')))
 }
 
+/// Des noms précis mais partagés, jamais gardés comme indicateur : la démo WebRTC publique de Google.
+const NOMS_PARTAGES: &[&str] = &["apprtc.appspot.com"];
+
+/// Un nom d'infrastructure partagée : les unités d'Azure App Service (« waws-prod-… »), vers lesquelles chaque
+/// application *.azurewebsites.net hébergée là renvoie par CNAME (la mémoire DNS garde aussi ce nom-là), ou un nom
+/// de `NOMS_PARTAGES`.
+fn partage(d: &str) -> bool {
+    d.starts_with("waws-prod-") || NOMS_PARTAGES.contains(&d)
+}
+
 /// Les adresses d'entrée de Cloudflare, partagées par des millions de sites : une adresse de la liste prise là
 /// accuserait Steam, Discord ou pacman de parler à un logiciel espion. Plages publiées par Cloudflare
 /// (https://www.cloudflare.com/ips-v4 et https://www.cloudflare.com/ips-v6) : (adresse, longueur du préfixe).
@@ -318,7 +328,10 @@ pub(super) fn lire_yaml(texte: &str) -> Option<Lecture> {
             return None;
         }
         let ligne = ligne.strip_suffix('\r').unwrap_or(ligne);
-        if ligne.len() > LONGUEUR_MAX {
+        // Une ligne trop longue est ignorée, mais si elle commence une entrée, la limite reste : sans elle, les clés
+        // qui suivent iraient à l'entrée d'avant (ses serveurs montrés comme ceux d'un autre logiciel).
+        let longue = ligne.len() > LONGUEUR_MAX;
+        if longue && !(ligne == "-" || ligne.starts_with("- ")) {
             lecture.ignorees += 1;
             continue;
         }
@@ -343,6 +356,11 @@ pub(super) fn lire_yaml(texte: &str) -> Option<Lecture> {
             courante = Some(Entree::default());
             pile.clear();
             valeurs_entree = 0;
+            if longue {
+                // Une entrée sans nom : ses valeurs sont lues puis jetées (`indicateurs_de` saute les sans-nom).
+                lecture.ignorees += 1;
+                continue;
+            }
             let r = reste[1..].trim_start();
             if r.is_empty() {
                 continue;
@@ -468,7 +486,7 @@ pub(super) fn indicateurs_de(entrees: &[Entree]) -> Option<Indicateurs> {
             continue;
         }
         for d in e.domaines.iter().filter_map(|d| domaine(d)) {
-            if !PLATEFORMES.contains(&d.as_str()) && !ecarte(&d) {
+            if !PLATEFORMES.contains(&d.as_str()) && !ecarte(&d) && !partage(&d) {
                 ind.serveurs.entry(d).or_insert_with(|| nom.clone());
             }
         }
@@ -486,6 +504,7 @@ pub(super) fn indicateurs_de(entrees: &[Entree]) -> Option<Indicateurs> {
             } else if let Some(d) = domaine(h)
                 && !PLATEFORMES.contains(&d.as_str())
                 && !ecarte(&d)
+                && !partage(&d)
             {
                 ind.sites.entry(d).or_insert_with(|| nom.clone());
             }
@@ -516,13 +535,19 @@ pub(crate) fn indicateurs(telecharger: bool, age_max: Duration) -> Result<(Indic
             meme_hote: true,
             ..crate::http::Demande::get(ADRESSE, Duration::from_secs(30))
         };
-        abuse_ch::liste(demande, ("echap", "ioc.yaml"), FRAICHE)
-            .resultat(false)
-            .map_err(|e| match e {
-                Echec::Reponse(code) => trf!("GitHub a répondu {code}", "GitHub answered {code}"),
-                Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
-                autre => autre.raison(),
-            })?
+        // Validée avant de remplacer la copie : une page de blocage reçue avec un 200 ne l'efface pas.
+        abuse_ch::liste(demande, ("echap", "ioc.yaml"), FRAICHE, |o| {
+            std::str::from_utf8(o)
+                .ok()
+                .and_then(lire_yaml)
+                .is_some_and(|l| indicateurs_de(&l.entrees).is_some())
+        })
+        .resultat(false)
+        .map_err(|e| match e {
+            Echec::Reponse(code) => trf!("GitHub a répondu {code}", "GitHub answered {code}"),
+            Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").to_string(),
+            autre => autre.raison(),
+        })?
     } else {
         copie_gardee().ok_or_else(|| {
             if telecharger {
@@ -653,6 +678,16 @@ mod tests {
         // Une ligne de 2 000 octets : ignorée, comptée.
         let longue = format!("- name: X\n  websites:\n  - {}.example\n", "a".repeat(2000));
         assert_eq!(lire_yaml(&longue).unwrap().ignorees, 1);
+        // Un « - name: » trop long commence quand même une entrée : ses serveurs ne vont pas à celle d'avant.
+        let texte = format!(
+            "- name: A\n  c2:\n    domains:\n    - a.example.com\n- name: {}\n  c2:\n    domains:\n    - b.example.org\n",
+            "B".repeat(2000)
+        );
+        let l = lire_yaml(&texte).unwrap();
+        assert_eq!(l.entrees[0].domaines, ["a.example.com"]);
+        assert_eq!(l.entrees.len(), 2);
+        assert_eq!(l.entrees[1].nom, "");
+        assert_eq!(l.ignorees, 1);
     }
 
     #[test]
@@ -700,6 +735,16 @@ mod tests {
                 "172.67.73.2".into(),
                 "2606:4700::6810:e38".into(),
             ],
+            ..Entree::default()
+        });
+        // L'infrastructure partagée d'Azure et la démo WebRTC de Google : ni serveur ni site.
+        entrees.push(Entree {
+            nom: "EspionQuatre".into(),
+            domaines: vec![
+                "waws-prod-xyz-1.sip.azurewebsites.windows.net".into(),
+                "waws-prod-xyz-1-ab12.eastus.cloudapp.azure.com".into(),
+            ],
+            sites: vec!["apprtc.appspot.com".into()],
             ..Entree::default()
         });
         // Les entrées écartées gardent des domaines dans la liste : ni serveur ni site.
@@ -752,6 +797,13 @@ mod tests {
             assert_eq!(ind.nom(p), None, "{p}");
         }
         assert_eq!(ind.nom("autre.firebaseio.com"), None);
+        for p in [
+            "waws-prod-xyz-1.sip.azurewebsites.windows.net",
+            "waws-prod-xyz-1-ab12.eastus.cloudapp.azure.com",
+            "apprtc.appspot.com",
+        ] {
+            assert_eq!(ind.nom(p), None, "{p}");
+        }
         assert_eq!(ind.nom("projet-123.firebaseio.com"), Some(("Cerberus", Genre::Serveur)));
         // Un hôte de distribution sous forme d'adresse : site, pas serveur.
         assert_eq!(ind.ip("203.0.113.9".parse().unwrap()), Some(("EspionUn", Genre::Site)));

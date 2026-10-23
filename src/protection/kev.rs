@@ -40,7 +40,7 @@ pub(crate) fn catalogue() -> Result<Vec<Exploitee>, String> {
         taille_max: 64 << 20,
         ..crate::http::Demande::get(ADRESSE, Duration::from_secs(60))
     };
-    let (octets, age) = abuse_ch::liste(demande, ("kev", "kev.json"), FRAICHE)
+    let (octets, age) = abuse_ch::liste(demande, ("kev", "kev.json"), FRAICHE, |_| true)
         .resultat(false)
         .map_err(|e| match e {
             Echec::Reponse(code) => trf!("la CISA a répondu {code}", "CISA answered {code}"),
