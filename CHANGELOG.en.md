@@ -83,6 +83,29 @@ delivered just before it. Only the latest version has its download page; every v
   `signer-versions.sh --secours` refuses an unencrypted backup key.
 - **CI.** `/dev/root` read by its device number like findmnt, enable links of vanished systemd units left out like
   systemctl, local HTTP client time bound adjusted for Windows; `claude-journal.yml` analysis only.
+- **Quality and delivery.** `outils/verifier.sh` builds the fuzzing bench and spends a few seconds on each target (two
+  more: the SQLite reader and the Échap YAML list); CI spends five minutes per target every night. Tests that cannot
+  run on a computer (missing tool, root of a namespace) say they were “skipped”: `verifier.sh` counts them next to the
+  passed tests and gives their reasons. The text check and a keyboard test of the menus, in a real pseudo-terminal,
+  are in the repository. CI runs `verifier.sh` itself (a single logic), the real distributions count, Windows runs on
+  each push, and the delivered .exe (MinGW) is tried on a real Windows. A release page is only published if the VM ran
+  that very .exe, and an .exe without its manifest (UTF-8, asInvoker) no longer builds. A single table of tools for
+  the menu and the command line, compared by tests with the README, `--help`, the key's manual and the Structure
+  table; `vanguard optimize` (including `undo`) joins the command line, and the help of the watcher, dangerous sites
+  and latest flaws finds its command again. Signed version history: `vanguard self-check [program]` also checks a copy
+  that is no longer the latest, changing nothing for copies already installed. Pinned Rust toolchain
+  (`rust-toolchain.toml`) and a shared build recipe (`outils/compiler-version.sh`): two builds in two folders give the
+  same program. Extensions: isolation on macOS too (sandbox-exec), and author checked by an Ed25519 signature of the
+  folder, whose key is kept at approval. Windows test program down from 520 to 314 MB. A green that checked nothing no
+  longer passes: under `verifier.sh --seulement` (the nightly CI audit), a skipped or unrun step fails and an unknown
+  step name is refused (tried by `outils/essais-verifier.sh`); tests skipped on the real Windows and the Mac of CI are
+  counted and shown; a fuzzing bench without targets fails; without `.github/hors-code.txt`, the night tests Windows
+  and the Mac instead of skipping them. A failed download of the previous signed history no longer restarts it from
+  scratch before deleting the previous pages: nothing is signed or published (`signer-versions.sh --premier` for the
+  very first time). `vanguard self-check` run without a terminal no longer asks about the history, which quit before
+  the final warning, and 0.85 is no longer said to be missing from the history. Isolation on macOS: no `open`, Apple
+  Events, clipboard or plugged-in disks (/Volumes), through which an extension left the sandbox (profile not checked
+  on a Mac).
 
 ## October 22, 2026, evening: version 0.85
 

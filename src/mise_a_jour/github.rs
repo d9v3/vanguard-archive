@@ -11,6 +11,11 @@
 //! signés restent publics : quelqu'un qui tient le dépôt des versions pourrait en remettre un pour geler les mises à
 //! jour. Vanguard retient donc la plus haute version signée déjà vue et refuse tout manifeste plus vieux ; et une
 //! dernière version signée de plus de 45 jours n'est plus dite « à jour », mais non vérifiée.
+//!
+//! L'historique signé des versions (`historique.txt`, publié avec chaque version) reprend les blocs de `derniere.txt`
+//! de toutes les versions publiées : une copie qui n'est plus la dernière se compare encore à ce que l'auteur a signé
+//! (`vanguard verifier-moi`). C'est un fichier à part, signé sous un autre domaine : `derniere.txt` garde sa forme, et
+//! les copies d'avant lui (0.85.0 et plus anciennes), qui ne lisent que lui, ne voient rien changer.
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -50,8 +55,14 @@ pub(super) const FRAICHEUR_JOURS: u64 = 45;
 /// Ce qui précède le manifeste dans le message signé : une signature faite pour autre chose ne vaut pas ici.
 const DOMAINE: &[u8] = b"vanguard-versions 1\n";
 
+/// Le domaine de l'historique : une signature de manifeste ne vaut pas pour lui, ni l'inverse.
+const DOMAINE_HISTORIQUE: &[u8] = b"vanguard-historique 1\n";
+
 /// Au-delà, ce n'est pas un manifeste.
 const MANIFESTE_MAX: u64 = 16 << 10;
+
+/// Au-delà, ce n'est pas l'historique (un bloc fait 300 octets : des milliers de versions avant d'y arriver).
+const HISTORIQUE_MAX: u64 = 4 << 20;
 
 /// Une réponse de GitHub gardée ce temps-là : l'annonce du menu ne le redemande pas à chaque lancement.
 const FRAICHE: Duration = Duration::from_hours(12);
@@ -108,16 +119,95 @@ fn en_octets(hex: &str) -> Option<[u8; 32]> {
 /// La signature est-elle celle de `cle` sur ce manifeste ? (vérification stricte : une signature trafiquée pour
 /// passer chez certaines bibliothèques est refusée).
 fn signature_valide(cle: &[u8; 32], manifeste: &[u8], signature: &[u8]) -> bool {
+    signature_valide_pour(DOMAINE, cle, manifeste, signature)
+}
+
+/// `signature_valide`, sous le domaine donné.
+fn signature_valide_pour(domaine: &[u8], cle: &[u8; 32], manifeste: &[u8], signature: &[u8]) -> bool {
     let (Ok(cle), Ok(signature)) = (
         ed25519_dalek::VerifyingKey::from_bytes(cle),
         <[u8; 64]>::try_from(signature),
     ) else {
         return false;
     };
-    let mut message = DOMAINE.to_vec();
+    let mut message = domaine.to_vec();
     message.extend_from_slice(manifeste);
     cle.verify_strict(&message, &ed25519_dalek::Signature::from_bytes(&signature))
         .is_ok()
+}
+
+/// Une version de l'historique : son numéro, puis (système, empreinte SHA-256, taille) de chacun de ses programmes.
+type Bloc = (Version, Vec<(String, [u8; 32], u64)>);
+
+/// L'historique : des blocs de `derniere.txt` mis bout à bout, « version … » en tête de chacun. Le moindre écart de
+/// forme le fait refuser en entier : signé, il n'a aucune raison d'en avoir.
+fn lire_historique(texte: &str) -> Option<Vec<Bloc>> {
+    let mut blocs: Vec<Bloc> = Vec::new();
+    for ligne in texte.lines() {
+        if let Some(v) = ligne.strip_prefix("version ") {
+            blocs.push((lire_version(v)?, Vec::new()));
+            continue;
+        }
+        let champs: Vec<&str> = ligne.split(' ').collect();
+        let [systeme, empreinte, taille] = champs[..] else {
+            return None;
+        };
+        blocs
+            .last_mut()?
+            .1
+            .push((systeme.to_string(), en_octets(empreinte)?, taille.parse().ok()?));
+    }
+    (!blocs.is_empty() && blocs.iter().all(|(_, p)| !p.is_empty())).then_some(blocs)
+}
+
+/// La version et le système du programme d'empreinte `sha256` dans un historique signé par l'une de `cles` ;
+/// `Ok(None)` : absent de l'historique ; `Err` : l'historique n'est pas celui de l'auteur, ou ne se lit pas.
+fn chercher_avec(
+    cles: &[[u8; 32]],
+    historique: &[u8],
+    signature: &[u8],
+    sha256: &[u8; 32],
+) -> Result<Option<(Version, String)>, String> {
+    if !cles
+        .iter()
+        .any(|c| signature_valide_pour(DOMAINE_HISTORIQUE, c, historique, signature))
+    {
+        return Err(tr!(
+            "historique des versions mal signé : rien n'est cru",
+            "badly signed version history: nothing is trusted"
+        )
+        .into());
+    }
+    let blocs = std::str::from_utf8(historique)
+        .ok()
+        .and_then(lire_historique)
+        .ok_or_else(|| tr!("historique des versions illisible", "unreadable version history").to_string())?;
+    Ok(blocs.into_iter().find_map(|(version, programmes)| {
+        programmes
+            .into_iter()
+            .find(|(_, e, _)| e == sha256)
+            .map(|(systeme, _, _)| (version, systeme))
+    }))
+}
+
+/// Le programme d'empreinte `sha256` est-il une version publiée et signée par l'auteur ? D'après l'historique signé
+/// des versions, téléchargé en entier (rien de cet ordinateur ni de l'empreinte cherchée ne part) et vérifié.
+/// `Ok(None)` : il n'y est pas (une version intermédiaire, d'avant l'historique, ou un programme changé) ; `Err` :
+/// pourquoi on ne sait pas.
+pub(super) fn dans_l_historique(sha256: &[u8; 32]) -> Result<Option<(Version, String)>, String> {
+    let pas_de_reponse = || {
+        tr!(
+            "pas de réponse (pas d'Internet, ou pas encore d'historique publié)",
+            "no answer (no Internet, or no history published yet)"
+        )
+        .to_string()
+    };
+    if crate::parametres::hors_ligne() {
+        return Err(tr!("travail sans Internet demandé", "offline mode requested").into());
+    }
+    let historique = recevoir("historique.txt", HISTORIQUE_MAX, 30).ok_or_else(pas_de_reponse)?;
+    let signature = recevoir("historique.txt.sig", 64, 20).ok_or_else(pas_de_reponse)?;
+    chercher_avec(&CLES, &historique, &signature, sha256)
 }
 
 /// Le manifeste et sa signature, vérifiés : la version publiée pour `systeme`, ou pourquoi elle ne vaut rien.
@@ -370,6 +460,72 @@ mod tests {
         linux-x86_64 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff 26214400\n\
         windows-x86_64 ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100 27262976\n\
         macos 0000000000000000000000000000000000000000000000000000000000000001 30000000\n";
+
+    fn signer_historique(cle: &ed25519_dalek::SigningKey, historique: &str) -> Vec<u8> {
+        let mut message = DOMAINE_HISTORIQUE.to_vec();
+        message.extend_from_slice(historique.as_bytes());
+        cle.sign(&message).to_bytes().to_vec()
+    }
+
+    /// Une copie qui n'est plus la dernière se retrouve dans l'historique signé : sa version et son système, par
+    /// l'empreinte de son programme. Signé par une autre clé, sous le domaine du manifeste, abîmé ou mal formé : refusé.
+    #[test]
+    fn une_ancienne_copie_se_retrouve_dans_l_historique() {
+        let ancien = MANIFESTE.replace("0.79.0+1792540000", "0.78.0+1792400000").replacen(
+            "linux-x86_64 0011",
+            "linux-x86_64 aa11",
+            1,
+        );
+        let historique = format!("{MANIFESTE}{ancien}");
+        let cle = cle_d_essai();
+        let cles = [cle.verifying_key().to_bytes()];
+        let signature = signer_historique(&cle, &historique);
+        let empreinte = |hex: &str| en_octets(hex).unwrap();
+        let windows = empreinte("ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100");
+        // La première version qui le porte, la plus récente en tête : le .exe n'a pas changé entre les deux.
+        assert_eq!(
+            chercher_avec(&cles, historique.as_bytes(), &signature, &windows).unwrap(),
+            Some(((0, 79, 0, 1_792_540_000), "windows-x86_64".to_string()))
+        );
+        let linux_0_78 = empreinte("aa112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+        assert_eq!(
+            chercher_avec(&cles, historique.as_bytes(), &signature, &linux_0_78).unwrap(),
+            Some(((0, 78, 0, 1_792_400_000), "linux-x86_64".to_string()))
+        );
+        assert_eq!(
+            chercher_avec(&cles, historique.as_bytes(), &signature, &[0x42; 32]).unwrap(),
+            None
+        );
+        // Signé par une autre clé, ou sous le domaine du manifeste : rien n'est cru.
+        let autre = ed25519_dalek::SigningKey::from_bytes(&[8; 32]);
+        assert!(
+            chercher_avec(
+                &cles,
+                historique.as_bytes(),
+                &signer_historique(&autre, &historique),
+                &windows
+            )
+            .is_err()
+        );
+        assert!(chercher_avec(&cles, historique.as_bytes(), &signer(&cle, &historique), &windows).is_err());
+        // Un octet changé : la signature ne tient plus.
+        let trafique = historique.replacen("27262976", "27262977", 1);
+        assert!(chercher_avec(&cles, trafique.as_bytes(), &signature, &windows).is_err());
+        // Bien signé mais mal formé : illisible, jamais lu à moitié.
+        for abime in [
+            format!("{historique}ligne en trop\n"),
+            format!("linux-x86_64 {} 1\n{historique}", "0".repeat(64)),
+            String::new(),
+        ] {
+            let s = signer_historique(&cle, &abime);
+            assert!(
+                chercher_avec(&cles, abime.as_bytes(), &s, &windows).is_err(),
+                "{abime:?}"
+            );
+        }
+        // Une signature de l'historique ne vaut pas pour un manifeste (les domaines diffèrent).
+        assert!(!signature_valide(&cles[0], historique.as_bytes(), &signature));
+    }
 
     #[test]
     fn manifeste_lu_ligne_par_ligne() {

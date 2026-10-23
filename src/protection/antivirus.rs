@@ -1264,10 +1264,10 @@ mod tests_cle {
             10,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("lsblk absent");
         };
         let Ok(montages) = std::fs::read_to_string("/proc/self/mountinfo") else {
-            return;
+            return crate::essais::saute("/proc/self/mountinfo illisible");
         };
         let lus = volumes_amovibles_sous(std::path::Path::new("/"), &montages);
         let dits = lire_lsblk(&r.sortie);

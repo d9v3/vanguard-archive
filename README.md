@@ -648,13 +648,19 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard cameras` | caméras cachées sur le réseau (location, chez quelqu'un) |
 | `vanguard objets` | routeur et objets connectés d'après le dernier scan gardé : modèle du routeur, caméras, imprimantes, NAS… et leur mot de passe d'origine (rien n'est sondé) |
 | `vanguard dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
+| `vanguard optimiser [recommandes\|confidentialite\|performance\|confort\|annuler]` | les réglages d'Optimiser, chacun montré, accepté et annulable exactement ; `annuler` remet tout comme avant ; sans argument, le menu Optimiser |
+| `vanguard wifi-public [on\|off\|portail]` | mode Wi-Fi public (café, hôtel, aéroport) : entrées fermées, partage et annonce du nom coupés, DNS protecteur, après accord ; `off` remet tout exactement, `portail` rouvre la page de connexion du réseau |
 | `vanguard appris` | ce que Vanguard a appris : les habitudes et les choix notés, et les oublier |
 | `vanguard motdepasse` | mots de passe fuités |
 | `vanguard navigateurs` | mots de passe des navigateurs : combien et comment protégés (comptés, jamais lus), la vérification intégrée de chaque navigateur, et un mot de passe tapé cherché dans les fuites |
 | `vanguard isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `vanguard courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `VANGUARD_HIBP_CLE`) |
 | `vanguard sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
-| `vanguard verifier-moi` | vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé |
+| `vanguard logiciels-espions` | logiciels espions : serveurs et sites connus (liste d'Échap), programmes qui lisent le clavier, autorisations de surveillance, logiciels de surveillance connus (lecture seule) |
+| `vanguard logiciels-perimes` | logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java, 7-Zip, PuTTY, Slack comparés à leur dernière version ; failles exploitées (lecture seule) |
+| `vanguard dernieres-failles [--jours N]` | dernières failles exploitées : celles que la CISA vient d'ajouter à son catalogue, les plus récentes d'abord |
+| `vanguard sites-dangereux [on\|off]` | sites dangereux bloqués par le fichier hosts (URLhaus, serveurs de commande de ThreatFox), après accord ; `off` les retire exactement |
+| `vanguard verifier-moi [programme]` | vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé ; après accord, l'historique signé des versions publiées, qui vérifie aussi une autre copie (`programme`), même une version d'avant |
 | `vanguard camera-micro` | caméra et micro : qui s'en sert ? (lecture seule) |
 | `vanguard acces` | bilan de confidentialité : qui a accès à la position, aux contacts, à la caméra et au micro (lecture seule) |
 | `vanguard quarantaine` | les fichiers isolés, à remettre à leur place ou à supprimer |
@@ -662,6 +668,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard conteneurs` | failles connues des images Docker ou Podman (trivy, s'il est installé ; lecture seule) |
 | `vanguard distance` | quelqu'un contrôle mon ordinateur ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
 | `vanguard lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
+| `vanguard courriel-suspect <fichier.eml>` | ce courriel est-il une arnaque ? l'expéditeur et son authentification, les liens, les pièces jointes, examinés sans rien ouvrir ; en ligne après accord |
 | `vanguard verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |
 | `vanguard integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |
 | `vanguard maj` | mises à jour |
@@ -671,7 +678,8 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard tableau [--sans-ouvrir]` | tableau de bord de la surveillance : page locale ouverte dans le navigateur ; `--sans-ouvrir` l'écrit seulement |
 | `vanguard entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
 | `vanguard nommer <ip\|mac> <surnom>` | nommer un appareil |
-| `vanguard sauvegarder [fichier]`, `vanguard restaurer <fichier>` | sauvegarde des données |
+| `vanguard sauvegarder [fichier]` | sauvegarde des données (surnoms, historique des réseaux, état de la surveillance) dans un fichier JSON |
+| `vanguard restaurer <fichier>` | ajoute une sauvegarde à la base actuelle, sans rien effacer |
 | `vanguard gaming` | paquets et réglages pour jouer (Windows et Linux) |
 | `vanguard guide [système\|programme\|mots]` | guide des commandes : un système (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `tous`, ou `linux` pour les programmes communs, ou `tldr`), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
 | `vanguard extensions [--sans-restrictions on\|off]` | extensions : le menu des plugins et des scripts du labo ; `--sans-restrictions on` coupe leurs garde-fous pour les extensions personnelles (refusé en administrateur) |
@@ -687,7 +695,9 @@ Chaque entrée du menu existe aussi en commande.
 `email`, `password`, `browser-passwords`, `outbound`, `remote-access`, `link`, `check-file`, `camera-mic`,
 `permissions`, `quarantine`, `containers`, `settings`, `blocking`, `backup`, `restore`, `name`, `slow`, `startup`,
 `specs`, `copy-files`, `check-copy`, `check-backup`, `check-drive`, `handout`, `changes`, `auto-backup`, `shortcut`,
-`computers`, `self-update`, `uninstall`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`, `lab`, `ext`).
+`computers`, `self-update`, `uninstall`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`, `lab`, `ext`,
+`watcher`, `dangerous-sites`, `latest-flaws`, `public-wifi`, `optimize`, `suspicious-email`, `spyware`,
+`outdated-software`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire

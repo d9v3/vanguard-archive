@@ -2926,8 +2926,7 @@ mod tests {
             Ok(v) => v,
             Err(refus) => {
                 assert!(!exige, "veilleur : {} (VANGUARD_EXIGER_VEILLEUR=1)", refus.raison());
-                eprintln!("veilleur : {} : essai SAUTÉ, rien de vérifié", refus.raison());
-                return;
+                return crate::essais::saute(&format!("veilleur : {}", refus.raison()));
             }
         };
         assert!(v.prises.is_ok(), "fins de prises : {:?}", v.prises.as_ref().err());

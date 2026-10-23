@@ -8,8 +8,12 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 ## Commandes
 
 - Tout vérifier en une commande : `outils/verifier.sh` (mise en forme, clippy ×4, tests Linux et Wine, la suite Linux
-  refaite sans Internet, scripts PowerShell, shell et Python, extensions, liens internes, textes FR/EN, dépendances par
-  cargo deny ; les cibles en parallèle, une ligne par étape à la fin, avec les avertissements de cargo deny). Les
+  refaite sans Internet, scripts PowerShell, shell et Python, extensions, essais de la clé et de la signature des
+  versions, liens internes, textes FR/EN (`outils/textes.py`), dépendances par cargo deny, banc de fuzzing ; les
+  cibles en parallèle, une ligne par étape à la fin, avec les avertissements de cargo deny). Un test qui ne peut pas
+  tourner ici le dit : `return crate::essais::saute("raison");` (`src/essais.rs`), compté « sauté » par verifier.sh,
+  jamais un simple `return`. `--ci` : ce que lance la CI ; `--seulement étape,étape` (une étape demandée qui se dit
+  sautée ou ne tourne pas y échoue, un nom inconnu est refusé : `outils/essais-verifier.sh`). Les
   scripts PowerShell du programme y sont analysés et rejoués sous Linux dans un bac à sable, depuis un dossier
   courant à témoins (`outils/rejouer-ps.py`) : un chemin vide qui le lirait se voit. `--rapide` : Linux seulement,
   avec Internet ; `--sans-wine`. Le détail suit.
@@ -28,23 +32,27 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Failles connues : `cargo audit`, second avis, jugé comme `outils/failles-programmes.sh` (abandon, code défaillant,
   notice refusés) ; seules exceptions celles de deny.toml (`outils/exceptions-rustsec.py`), que `.cargo/audit.toml`
   recopie à l'identique ; étape de verifier.sh, sautée sans `cargo-audit` ou sans Internet.
-- Fuzzing (cargo-fuzz, chaîne nightly à côté de la stable) : `outils/fuzz.sh [cible|tout] [secondes]`, banc `fuzz/`
-  à part (modules inclus par leur chemin, cales dans `fuzz/cale/`), corpus et plantages dans
-  `~/.cache/vanguard-dev/fuzz/` ; trop long pour verifier.sh, qui passe seulement ses dépendances à cargo deny
-  (`fuzz/deny.toml`).
+- Fuzzing (cargo-fuzz, chaîne nightly à côté de l'épinglée) : `outils/fuzz.sh [cible|tout] [secondes]`, banc `fuzz/`
+  à part (modules inclus par leur chemin, cales dans `fuzz/cale/`, cibles lues dans `fuzz/Cargo.toml`), corpus et
+  plantages dans `~/.cache/vanguard-dev/fuzz/` ; verifier.sh le compile et passe 5 s par cible, la CI 5 min chaque
+  nuit ; ses dépendances passent à cargo deny (`fuzz/deny.toml`).
+- Chaîne Rust épinglée (`rust-toolchain.toml`, à monter à la main après un verifier.sh vert) ; programmes publiés
+  compilés par `outils/compiler-version.sh` (chemins retirés : deux dossiers, même programme).
 - Tests Windows sous Wine (pas de PowerShell sous Wine ; le registre, lui, marche) :
   `WINEPREFIX=<dossier jetable> WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=~/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine cargo test --target x86_64-pc-windows-gnu`
 - macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`), à chaque publication et la nuit si
   le code a changé ; ici, clippy seulement.
-- CI (`.github/workflows/ci.yml`) : Linux à chaque envoi sur master (fmt, clippy -D warnings ×4, tests) ; la nuit,
-  si le code a changé, vrai Windows et compilation reproductible ; chaque nuit, `cargo audit` et `cargo deny`. GitHub
+- CI (`.github/workflows/ci.yml`) : à chaque envoi sur master, `outils/verifier.sh --ci` (tout sauf Wine), vraies
+  distributions, vrai Windows, compilation reproductible et le .exe livré essayé sur Windows ; la nuit, les mêmes si
+  le code a changé (`.github/hors-code.txt`), et toujours cargo audit, cargo deny et 5 min de fuzzing par cible. GitHub
   lance la nuit avec souvent des heures de retard : `gh run list --workflow ci.yml --event schedule` avant de la croire
   absente. À la demande (des minutes facturées) : `gh workflow run ci.yml --ref master`.
 - Publication du jour : `outils/livrer-branche.sh <branche> <worktree>` (commit de version en tête : garde-fou, Mac
   de GitHub, vérification complète pendant qu'il compile, fusion rapide, puis `outils/deployer.sh`). Entre deux
   publications, sans rien envoyer : `outils/deployer.sh --local` (binaire local, clé USB ; avec
   `VANGUARD_INTERMEDIAIRE=1`, rien dans la VM). `deployer.sh` publie la page de chaque publication (Releases), 0.x.0
-  comme 0.x.y ; elle reprend les versions intermédiaires d'avant, qui n'ont pas la leur. Pour chaque page, il refait
+  comme 0.x.y, seulement quand une passe réussie de la VM a fait tourner ce .exe-là (empreinte notée par test.ps1 ;
+  `VANGUARD_PUBLIER_SANS_VM=1` pour s'en passer, dit) ; avec elle, l'historique signé des versions ; elle reprend les versions intermédiaires d'avant, qui n'ont pas la leur. Pour chaque page, il refait
   aussi les captures du README (`outils/captures.py`, sur une copie des données, ce qui identifierait la maison
   masqué) et les commite à part.
 - master est protégé sur GitHub (Settings › Rules) : jamais réécrit ni supprimé, même par le propriétaire (une

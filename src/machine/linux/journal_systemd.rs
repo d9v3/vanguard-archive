@@ -1395,7 +1395,7 @@ mod tests {
     #[test]
     fn champs_compresses_du_systeme() {
         let Some(fichiers) = fichiers_du_systeme() else {
-            return;
+            return crate::essais::saute("aucun journal systemd lisible");
         };
         // Les journaux du système seulement : parcourir chaque objet de plusieurs Go de journaux d'utilisateur
         // prendrait trop de temps pour un essai.

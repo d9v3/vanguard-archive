@@ -37,3 +37,8 @@ pub mod scan {
         None
     }
 }
+
+/// Le dossier de Vanguard : un dossier qui n'existe pas, rien n'y est lu ni écrit pendant le fuzzing.
+pub fn dossier_local() -> std::path::PathBuf {
+    std::path::PathBuf::from("/nonexistent/vanguard-fuzz")
+}

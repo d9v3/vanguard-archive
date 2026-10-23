@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn vrai_depot_relu_par_git() {
         let Some(git) = outil::trouver("git") else {
-            return;
+            return crate::essais::saute("git absent");
         };
         let depot = crate::protection::isoler::dossier_jetable().unwrap();
         let git_ici = |args: &[&str]| {

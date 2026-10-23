@@ -607,8 +607,7 @@ mod tests {
             .and_then(|t| Some(t.parent()?.parent()?.join("vanguard.exe")))
             .filter(|e| e.is_file())
         else {
-            eprintln!("vanguard.exe pas encore compilé à côté des tests : version non vérifiée");
-            return;
+            return crate::essais::saute("vanguard.exe pas encore compilé à côté des tests : version non vérifiée");
         };
         let info = version(&exe).unwrap_or_else(|e| panic!("{}: {e:?}", exe.display()));
         let attendue: Vec<u16> = env!("CARGO_PKG_VERSION")

@@ -610,13 +610,19 @@ Each menu entry is also a command.
 | `vanguard cameras` | hidden cameras on the network (rental, someone else's place) |
 | `vanguard iot` | router and connected devices from the last scan kept: the router's model, cameras, printers, NAS… and their default password (nothing is probed) |
 | `vanguard fast-dns` | fastest DNS, measured here and undoable; a DNS that protects you is kept |
+| `vanguard optimize [recommended\|privacy\|performance\|comfort\|undo]` | the Optimize settings, each shown, accepted and exactly undoable; `undo` puts everything back as it was; no argument: the Optimize menu |
+| `vanguard public-wifi [on\|off\|portal]` | public Wi-Fi mode (café, hotel, airport): incoming connections closed, sharing and name announcement off, protective DNS, after your consent; `off` puts everything back exactly, `portal` reopens the network's sign-in page |
 | `vanguard learned` | what Vanguard has learned: the habits and choices recorded, and forgetting them |
 | `vanguard password` | leaked passwords |
 | `vanguard browser-passwords` | browser passwords: how many and how protected (counted, never read), each browser's built-in check, and a typed password looked up in leaks |
 | `vanguard sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
 | `vanguard email` | email address leaks (XposedOrNot, or Have I Been Pwned with `VANGUARD_HIBP_CLE`) |
 | `vanguard outbound` | who talks to the Internet: each program's connections (read-only) |
-| `vanguard self-check` | check Vanguard itself: version, build date, SHA-256 checksum to compare with the release page; on the owner's key, the key manifest |
+| `vanguard spyware` | spyware: known servers and sites (Échap list), programs reading the keyboard, monitoring permissions, known monitoring software (read-only) |
+| `vanguard outdated-software` | outdated software (Windows, macOS): browsers, Office, Acrobat, Java, 7-Zip, PuTTY, Slack compared with their latest version; exploited flaws (read-only) |
+| `vanguard latest-flaws [--days N]` | latest exploited flaws: those CISA just added to its catalog, most recent first |
+| `vanguard dangerous-sites [on\|off]` | dangerous sites blocked by the hosts file (URLhaus, ThreatFox command servers), after your consent; `off` removes them exactly |
+| `vanguard self-check [program]` | check Vanguard itself: version, build date, SHA-256 checksum to compare with the release page; on the owner's key, the key manifest; after your consent, the signed history of published versions, which also checks another copy (`program`), even an earlier version |
 | `vanguard camera-mic` | camera and microphone: who uses them? (read-only) |
 | `vanguard permissions` | privacy check: who can access location, contacts, camera and microphone (read-only) |
 | `vanguard quarantine` | the isolated files, to put back in their place or to delete |
@@ -624,6 +630,7 @@ Each menu entry is also a command.
 | `vanguard containers` | known flaws in Docker or Podman images (trivy, if installed; read-only) |
 | `vanguard remote-access` | is someone controlling my computer? remote control tools (tech-support scam), removed after consent |
 | `vanguard link <address>` | is this link dangerous? (checked without opening it; online after your consent) |
+| `vanguard suspicious-email <file.eml>` | is this email a scam? the sender and their authentication, the links, the attachments, examined without opening anything; online after your consent |
 | `vanguard check-file <file> [checksum]` | check a downloaded file: checksum, name and content, YARA, antivirus |
 | `vanguard integrity [--accept] [--live]` | integrity of critical files (BLAKE3 fingerprints), live if wanted |
 | `vanguard update` | updates |
@@ -633,7 +640,8 @@ Each menu entry is also a command.
 | `vanguard dashboard [--no-open]` | monitoring dashboard: a local page opened in the browser; `--no-open` only writes it |
 | `vanguard maintenance [on\|off]` | monthly check-up; without an argument: what it would say now |
 | `vanguard name <ip\|mac> <nickname>` | name a device |
-| `vanguard backup [file]`, `vanguard restore <file>` | data backup |
+| `vanguard backup [file]` | data backup (nicknames, network history, monitoring state) to a JSON file |
+| `vanguard restore <file>` | adds a backup to the current database, erasing nothing |
 | `vanguard gaming` | packages and settings for gaming (Windows and Linux) |
 | `vanguard guide [system\|program\|words]` | command guide: a system (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `all`, or `linux` for the common programs, or `tldr`), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
 | `vanguard extensions [--no-restrictions on\|off]` | extensions: the menu of plugins and lab scripts; `--no-restrictions on` turns their safeguards off for custom extensions (refused as administrator) |
@@ -649,8 +657,9 @@ Each menu entry is also a command.
 `memoire`, `isoler`, `courriel`, `motdepasse`, `navigateurs`, `sortantes`, `distance`, `lien`, `verifier-fichier`,
 `camera-micro`, `acces`, `quarantaine`, `conteneurs`, `parametres`, `blocage`, `sauvegarder`, `restaurer`, `nommer`,
 `lenteur`, `demarrage`, `fiche`, `copier-fichiers`, `verifier-copie`, `verifier-sauvegarde`, `verifier-cle`,
-`a-laisser`, `changements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`, `desinstaller`, `regles`, `traces`,
-`depanner`, `proche`, `verifier-moi`, `labo`, `extensions`).
+`a-laisser`, `changements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`, `desinstaller`,
+`regles`, `traces`, `depanner`, `proche`, `verifier-moi`, `labo`, `extensions`, `veilleur`, `sites-dangereux`,
+`dernieres-failles`, `wifi-public`, `optimiser`, `courriel-suspect`, `logiciels-espions`, `logiciels-perimes`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,

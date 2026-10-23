@@ -139,8 +139,9 @@ def tests(args) -> tuple[str, str]:
     source = args.verifier or (RESUME_VERIFICATION if RESUME_VERIFICATION.is_file() else None)
     if source and not (linux and wine):
         texte = Path(source).read_text(encoding="utf-8")
-        l = re.search(r"tests Linux \((\d+)\)", texte)
-        w = re.search(r"tests Windows sous Wine \((\d+)\)", texte)
+        # « tests Linux (1544) », ou « tests Linux (1544, 12 sautés) » : les tests passés, les sautés non comptés.
+        l = re.search(r"tests Linux \((\d+)[,)]", texte)
+        w = re.search(r"tests Windows sous Wine \((\d+)[,)]", texte)
         linux = linux or (l and int(l.group(1)))
         wine = wine or (w and int(w.group(1)))
     if not linux or not wine:

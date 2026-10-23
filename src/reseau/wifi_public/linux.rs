@@ -500,13 +500,11 @@ mod tests {
             .into_iter()
             .find(|p| std::path::Path::new(p).exists());
         let Some(nft) = nft else {
-            eprintln!("nft absent : essai sauté");
-            return;
+            return crate::essais::saute("nft absent");
         };
         let essai = std::process::Command::new("unshare").args(["-rn", "true"]).status();
         if !essai.is_ok_and(|s| s.success()) {
-            eprintln!("espaces de noms indisponibles : essai sauté");
-            return;
+            return crate::essais::saute("espaces de noms indisponibles");
         }
         let d = std::env::temp_dir().join(format!("vanguard-nft-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
@@ -525,8 +523,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         let texte = String::from_utf8_lossy(&r.stdout);
         if !r.status.success() && String::from_utf8_lossy(&r.stderr).contains("Operation not permitted") {
-            eprintln!("nft refusé dans l'espace de noms : essai sauté");
-            return;
+            return crate::essais::saute("nft refusé dans l'espace de noms");
         }
         assert!(r.status.success(), "{}{}", texte, String::from_utf8_lossy(&r.stderr));
         assert!(

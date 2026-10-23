@@ -15,7 +15,7 @@ on:
         default: false
   push:
     branches: [macos]
-    paths: ["src/**", "Cargo.toml", "Cargo.lock", "build.rs", ".github/workflows/macos.yml"]
+    paths: ["src/**", "Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain.toml", ".github/workflows/macos.yml"]
   schedule:
     # 3 h 17, heure de Montréal. GitHub la lance souvent bien plus tard (4 h 45 de retard le 18 oct. 2026, 7 h 20 le
     # 19) : regarder `gh run list --workflow macos.yml --event schedule` avant de la croire absente.
@@ -37,14 +37,21 @@ jobs:
     outputs:
       compiler: ${{ steps.verifier.outputs.compiler }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/hors-code.txt
+          sparse-checkout-cone-mode: false
       - id: verifier
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then echo "compiler=oui" >> "$GITHUB_OUTPUT"; exit 0; fi
-          # Le code a changé : un fichier hors de la documentation, des captures et des outils de développement, que le
-          # programme n'intègre pas. Comparaison impossible (commit disparu, plus de 300 fichiers) : on compile.
-          HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore|docs/.*|fuzz/.*|deny\.toml|\.cargo/audit\.toml)$'
+          # Le code a changé : un fichier que le programme intègre, hors de la liste de .github/hors-code.txt (la même
+          # pour ci.yml et outils/publier-version.sh). Comparaison impossible (commit disparu, plus de 300 fichiers) :
+          # on compile.
+          HORS_CODE=$(grep -v '^#' .github/hors-code.txt | head -n 1)
+          # Liste absente ou vide : un motif vide écarterait tous les fichiers, et le Mac serait sauté à tort.
+          [ -n "$HORS_CODE" ] || { echo "::warning::.github/hors-code.txt illisible : on compile"; HORS_CODE='^$'; }
           depot="${{ github.repository }}"
           ici="${{ github.sha }}"
           compiler=oui
@@ -68,18 +75,31 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - name: Rust à jour (Apple Silicon et Intel)
-        run: |
-          rustup update stable
-          rustup default stable
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      # La chaîne de rust-toolchain.toml, avec les cibles Apple Silicon et Intel.
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
       # Actions venues d'autres que GitHub : épinglées par leur commit. Une étiquette (v2) se déplace ; si leur dépôt était
       # piraté, une version piégée toucherait ce que compile ce travail. À mettre à jour à la main (le commentaire dit la
       # version).
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # .cargo/config.toml vise Linux par défaut : la cible est toujours donnée.
+      # Les tests qui ne peuvent pas tourner ici le notent dans VANGUARD_TESTS_SAUTES (src/essais.rs) : sans lui,
+      # libtest avale leur message et les compte réussis. Comptés et montrés au résumé, même si les tests échouent :
+      # non vérifié n'est jamais compté sain, comme dans outils/verifier.sh.
       - name: Tests
+        env:
+          VANGUARD_TESTS_SAUTES: ${{ runner.temp }}/sautes.txt
         run: cargo test --target aarch64-apple-darwin
+      - name: Tests sautés sur le Mac
+        if: always()
+        env:
+          VANGUARD_TESTS_SAUTES: ${{ runner.temp }}/sautes.txt
+        run: |
+          if [ -s "$VANGUARD_TESTS_SAUTES" ]; then
+            n=$(wc -l < "$VANGUARD_TESTS_SAUTES" | tr -d ' ')
+            echo "::warning::$n tests sautés (non vérifiés)"
+            { echo "### Tests sautés sur macOS : $n"; sed 's/^/- /' "$VANGUARD_TESTS_SAUTES"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
       # cargo-auditable et cargo-audit comme dans ci.yml (versions épinglées, empreintes vérifiées, aucun repli),
       # posés en quelques secondes après les tests : un passage en échec ne les télécharge pas.
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
@@ -108,6 +128,18 @@ jobs:
           ./vanguard machine --json > audit.json || true
           head -c 3000 audit.json
           ./vanguard diagnostic | tail -20 || true
+      # La moitié Intel du programme universel, que ce Mac Apple Silicon ne lance jamais tout seul : par Rosetta 2,
+      # posée si elle manque. Sans Rosetta, c'est dit (avertissement du passage), jamais compté comme essayé.
+      - name: Essai de la moitié Intel (Rosetta 2)
+        run: |
+          arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license || true
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::warning::Rosetta 2 absente : la moitié Intel du programme n'a pas été essayée."
+            exit 0
+          fi
+          arch -x86_64 ./vanguard --version
+          arch -x86_64 ./vanguard machine --json > audit-intel.json
+          python3 -c "import json; b = json.load(open('audit-intel.json')); assert b['constats'], 'bilan sans constats'; print(len(b['constats']), 'constats (Intel)')"
       - name: Essai complet
         if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
         run: bash outils/test-macos/essai.sh ./vanguard essai

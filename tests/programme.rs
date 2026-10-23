@@ -10,6 +10,10 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+// Les essais sautés, comptés par outils/verifier.sh comme ceux des tests unitaires.
+#[path = "../src/essais.rs"]
+mod essais;
+
 struct Sortie {
     code: Option<i32>,
     texte: String,
@@ -249,7 +253,7 @@ fn audit_en_json() {
 fn scan_de_cette_machine_en_json() {
     // Sous Wine, ce scan ne finit pas (sa pile réseau n'imite pas celle de Windows) ; le vrai Windows de la CI le fait.
     if sous_wine() {
-        return;
+        return essais::saute("sous Wine, le scan ne finit pas");
     }
     // 127.0.0.1 seulement : aucun paquet ne part sur le réseau.
     let s = vanguard("fr", &["reseau", "127.0.0.1", "--json"], "", 300);
@@ -677,6 +681,10 @@ fn verifier_moi_en_lecture_seule() {
     // Sous Wine, pas de PowerShell : l'empreinte est dite impossible, jamais inventée.
     assert!(t.contains("SHA-256") || t.contains("Empreinte impossible"), "{t}");
     assert!(t.contains("Compilé le"), "{t}");
+    // Sans terminal, la question de l'historique signé n'est pas posée : elle aurait lu la fin de l'entrée et quitté
+    // avant l'avertissement final. Ses lignes sont recollées : le paragraphe est coupé à la largeur.
+    let mots = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(mots.contains("Si elles diffèrent, ne l'utilise pas."), "{t}");
 }
 
 /// Programmes au démarrage : la liste se montre, et Entrée sans rien décocher ne change rien.
@@ -706,7 +714,7 @@ fn hors_ligne() -> bool {
 #[test]
 fn sans_internet_chaque_outil_le_dit() {
     if !hors_ligne() || cfg!(not(target_os = "linux")) {
-        return;
+        return essais::saute("seulement sans Internet (verifier.sh, unshare -rn)");
     }
     let dossier = maison_jetable();
     let eml = courriel_piege(&dossier);
@@ -914,7 +922,7 @@ fn bilan_de_confidentialite_en_lecture_seule() {
 #[test]
 fn raccourci_pose_puis_retire() {
     if !cfg!(target_os = "linux") {
-        return;
+        return essais::saute("Linux seulement");
     }
     let refus = vanguard("fr", &["raccourci"], "n\n", 30);
     assert_eq!(refus.code, Some(0), "{}", refus.erreurs);
@@ -939,7 +947,7 @@ fn raccourci_pose_puis_retire() {
 #[test]
 fn desinstaller_montre_puis_retire_dans_une_maison_jetable() {
     if !cfg!(target_os = "linux") {
-        return;
+        return essais::saute("Linux seulement");
     }
     let maison = maison_jetable();
     let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
@@ -1052,7 +1060,7 @@ fn desinstaller_montre_puis_retire_dans_une_maison_jetable() {
 #[test]
 fn outils_de_disque_quittes_sans_rien_ecrire() {
     if !cfg!(target_os = "linux") {
-        return;
+        return essais::saute("Linux seulement");
     }
     let cle = vanguard("fr", &["verifier-cle"], "\n", 30);
     assert_eq!(cle.code, Some(0), "{}", cle.erreurs);
@@ -1257,7 +1265,7 @@ fn plugin_d_exemple_et_labo() {
         .ok()
         == Some(0)
     {
-        return;
+        return essais::saute("en root : extensions refusées");
     }
     let maison = maison_jetable();
     let source = maison.join("source");
@@ -1439,6 +1447,181 @@ fn wifi_public_sans_rien_changer() {
         assert!(t.contains("Extinction sûre") && t.contains("Annulé"), "{t}");
         assert!(!t.contains("nmcli"), "aucune valeur notée n'est proposée : {t}");
         assert!(donnees.join("wifi-public.json").exists());
+        let _ = std::fs::remove_dir_all(&maison);
+    }
+}
+
+/// Le menu, l'interface principale, parcouru pour de vrai dans un pseudo-terminal (comme une personne au clavier,
+/// pas par un tube) : flèches, Entrée, Échap, puis « q » et Entrée. Les autres tests parlent au programme par un tube, où les
+/// menus lisent des lignes ; ici, le mode brut du terminal, les touches une à une et le retour au menu principal se
+/// vérifient. Linux seulement : un pseudo-terminal s'ouvre là sans outil (openpty), et c'est le système de l'auteur.
+#[cfg(target_os = "linux")]
+mod menus_dans_un_terminal {
+    use super::{maison_jetable, sans_couleurs};
+    use std::io::{Read, Write};
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    const BAS: &str = "\x1b[B";
+    const ENTREE: &str = "\r";
+    const ECHAP: &str = "\x1b";
+
+    /// Un pseudo-terminal de `colonnes` × `rangees` : (côté programme de test, côté Vanguard).
+    fn ouvrir(colonnes: u16, rangees: u16) -> (OwnedFd, OwnedFd) {
+        let (mut maitre, mut esclave) = (-1, -1);
+        let taille = libc::winsize {
+            ws_row: rangees,
+            ws_col: colonnes,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        // SAFETY : openpty écrit deux descripteurs dans les entiers donnés ; le nom (NULL) et les réglages (NULL)
+        // ne sont pas demandés, la taille est lue dans une structure valide le temps de l'appel.
+        let r = unsafe {
+            libc::openpty(
+                &raw mut maitre,
+                &raw mut esclave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                &raw const taille,
+            )
+        };
+        assert_eq!(r, 0, "openpty : {}", std::io::Error::last_os_error());
+        // SAFETY : les deux descripteurs viennent d'être ouverts par openpty et ne sont à personne d'autre.
+        unsafe { (OwnedFd::from_raw_fd(maitre), OwnedFd::from_raw_fd(esclave)) }
+    }
+
+    /// Ce que Vanguard a écrit dans le terminal, lu en fond, et la suite de l'échange.
+    struct Terminal {
+        ecrit: Arc<Mutex<Vec<u8>>>,
+        clavier: std::fs::File,
+        vu: usize,
+    }
+
+    impl Terminal {
+        /// Attend que l'écran, depuis la dernière attente, montre `texte` (couleurs retirées) ; rend ce qui a paru.
+        fn attendre(&mut self, texte: &str, secondes: u64) -> String {
+            let fin = Instant::now() + Duration::from_secs(secondes);
+            loop {
+                let tout = self.ecrit.lock().unwrap().clone();
+                // Une demande de position du curseur reçoit une réponse, comme d'un vrai terminal : sans elle, une
+                // bibliothèque qui la pose attendrait.
+                let nouveau = String::from_utf8_lossy(&tout[self.vu.min(tout.len())..]).into_owned();
+                if nouveau.contains("\x1b[6n") {
+                    let _ = self.clavier.write_all(b"\x1b[1;1R");
+                }
+                let propre = sans_couleurs(&nouveau);
+                if propre.contains(texte) {
+                    self.vu = tout.len();
+                    return propre;
+                }
+                assert!(
+                    Instant::now() < fin,
+                    "« {texte} » n'a pas paru en {secondes} s ; écran depuis la dernière touche :\n{propre}"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+
+        fn taper(&mut self, touches: &str) {
+            self.clavier.write_all(touches.as_bytes()).unwrap();
+            // Une touche à la fois, comme au clavier : Échap seul se distingue ainsi du début d'une flèche.
+            std::thread::sleep(Duration::from_millis(150));
+        }
+    }
+
+    #[test]
+    fn fleches_entree_echap_puis_quitter() {
+        let maison = maison_jetable();
+        let (maitre, esclave) = ouvrir(80, 40);
+        let mut commande = Command::new(env!("CARGO_BIN_EXE_vanguard"));
+        commande
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("TERM", "xterm-256color")
+            .env("VANGUARD_LANG", "fr")
+            .env("USER", "essai")
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+            .env("XDG_RUNTIME_DIR", maison.join("run"))
+            .env("HOME", &maison)
+            .env("XDG_DATA_HOME", maison.join("donnees"))
+            .env("XDG_CONFIG_HOME", maison.join("config"))
+            .env("XDG_CACHE_HOME", maison.join("cache"))
+            // Rien ne doit partir sur Internet pendant l'essai (l'annonce d'une version plus récente, par exemple).
+            .env("VANGUARD_HORS_LIGNE", "1")
+            .stdin(Stdio::from(esclave.try_clone().unwrap()))
+            .stdout(Stdio::from(esclave.try_clone().unwrap()))
+            .stderr(Stdio::from(esclave));
+        // SAFETY : entre fork et exec, seuls setsid et ioctl sont appelés, tous deux sûrs à cet endroit (ni
+        // allocation ni verrou) : Vanguard devient chef d'une session dont le pseudo-terminal est le terminal.
+        unsafe {
+            commande.pre_exec(|| {
+                libc::setsid();
+                if libc::ioctl(0, libc::TIOCSCTTY, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut enfant = commande.spawn().expect("vanguard ne démarre pas");
+        // L'esclave n'est plus ouvert ici (il a été donné à Command) : à la sortie de Vanguard, la lecture finit.
+        drop(commande);
+        let ecrit = Arc::new(Mutex::new(Vec::new()));
+        let mut lecture = std::fs::File::from(maitre.try_clone().unwrap());
+        let copie = Arc::clone(&ecrit);
+        let lecteur = std::thread::spawn(move || {
+            let mut tampon = [0u8; 4096];
+            while let Ok(n) = lecture.read(&mut tampon) {
+                if n == 0 {
+                    break;
+                }
+                copie.lock().unwrap().extend_from_slice(&tampon[..n]);
+            }
+        });
+        let mut t = Terminal {
+            ecrit,
+            clavier: std::fs::File::from(maitre),
+            vu: 0,
+        };
+
+        let menu = t.attendre("Quitter", 60);
+        assert!(
+            menu.contains("Bilan complet") && menu.contains("Cette machine"),
+            "{menu}"
+        );
+        // Trois fois en bas depuis « Bilan complet » : le premier groupe, « Cette machine », ouvert par Entrée.
+        for _ in 0..3 {
+            t.taper(BAS);
+        }
+        t.taper(ENTREE);
+        let sous_menu = t.attendre("Revenir au menu principal", 30);
+        assert!(sous_menu.contains("VANGUARD › Cette machine"), "{sous_menu}");
+        assert!(sous_menu.contains("Audit de sécurité"), "{sous_menu}");
+        // Échap revient au menu principal, sans rien lancer.
+        t.taper(ECHAP);
+        let retour = t.attendre("Quitter", 30);
+        assert!(retour.contains("Bilan complet"), "{retour}");
+        // « q » se tape dans la recherche, qui choisit « Quitter » ; Entrée le lance.
+        t.taper("q");
+        t.taper(ENTREE);
+        let fin = Instant::now() + Duration::from_secs(30);
+        let statut = loop {
+            if let Some(s) = enfant.try_wait().unwrap() {
+                break s;
+            }
+            if Instant::now() > fin {
+                let _ = enfant.kill();
+                panic!("« q » n'a pas fermé Vanguard en 30 s :\n{}", t.attendre("", 0));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(statut.success(), "{statut:?}");
+        // Le côté programme de test fermé, le lecteur en fond s'arrête de lui-même.
+        drop(t);
+        let _ = lecteur.join();
         let _ = std::fs::remove_dir_all(&maison);
     }
 }

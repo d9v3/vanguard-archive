@@ -395,7 +395,7 @@ mod tests {
     fn dossier_abrege_comme_a_l_invite() {
         let Some(maison) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
         else {
-            return;
+            return crate::essais::saute("ni HOME ni USERPROFILE");
         };
         assert_eq!(abreger(&maison), "~");
         assert_eq!(

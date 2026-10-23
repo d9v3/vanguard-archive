@@ -89,6 +89,31 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   clair.
 - **CI.** `/dev/root` lu par son numéro comme findmnt, liens d'activation d'unités systemd disparues écartés comme
   systemctl, borne de temps du client HTTP local adaptée à Windows ; `claude-journal.yml` en analyse seule.
+- **Qualité et livraison.** `outils/verifier.sh` compile le banc de fuzzing et passe quelques secondes sur chaque
+  cible (deux de plus : le lecteur SQLite et la liste YAML d'Échap) ; la CI y passe cinq minutes par cible chaque
+  nuit. Les tests qui ne peuvent pas tourner sur un ordinateur (outil absent, root d'un espace de noms) se disent «
+  sautés » : `verifier.sh` les compte à côté des tests passés et en donne les raisons. La vérification des textes et
+  un essai des menus au clavier, dans un vrai pseudo-terminal, sont dans le dépôt. La CI lance `verifier.sh` lui-même
+  (une seule logique), les vraies distributions comptent, Windows tourne à chaque envoi, et le .exe livré (MinGW) est
+  essayé sur un vrai Windows. Une page de version n'est publiée que si la VM a fait tourner ce .exe-là, et un .exe
+  sans son manifeste (UTF-8, asInvoker) ne se compile plus. Une seule table d'outils pour le menu et la ligne de
+  commande, comparée par des tests au README, à `--help`, au mode d'emploi de la clé et au tableau Structure ;
+  `vanguard optimiser` (dont `annuler`) rejoint la ligne de commande, et l'aide du veilleur, des sites dangereux et
+  des dernières failles retrouve sa commande. Historique signé des versions : `vanguard verifier-moi [programme]`
+  vérifie aussi une copie qui n'est plus la dernière, sans rien changer pour les copies déjà installées. Chaîne Rust
+  épinglée (`rust-toolchain.toml`) et recette de compilation commune (`outils/compiler-version.sh`) : deux
+  compilations dans deux dossiers donnent le même programme. Extensions : isolement sous macOS aussi (sandbox-exec),
+  et auteur vérifié par une signature Ed25519 du dossier, dont la clé est retenue à l'approbation. Programme de test
+  Windows ramené de 520 à 314 Mo. Un vert qui n'a rien vérifié ne passe plus : sous `verifier.sh --seulement` (l'audit
+  de nuit de la CI), une étape sautée ou non lancée échoue et un nom d'étape inconnu est refusé
+  (`outils/essais-verifier.sh` l'essaie) ; les tests sautés sur le vrai Windows et le Mac de la CI y sont comptés et
+  montrés ; un banc de fuzzing sans cible échoue ; sans `.github/hors-code.txt`, la nuit teste Windows et le Mac au
+  lieu de les sauter. Un téléchargement raté de l'historique signé d'avant ne le remet plus à zéro avant d'effacer les
+  pages d'avant : rien n'est signé ni publié (`signer-versions.sh --premier` pour la toute première fois). `vanguard
+  verifier-moi` lancé sans terminal ne pose plus la question de l'historique, qui quittait avant l'avertissement
+  final, et la 0.85 n'est plus dite absente de l'historique. Isolement sous macOS : ni `open`, ni Apple Events, ni
+  presse-papiers, ni disques branchés (/Volumes), par où une extension sortait du bac à sable (profil non vérifié sur
+  un Mac).
 
 ## 22 octobre 2026, au soir : version 0.85
 

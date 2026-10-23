@@ -621,7 +621,7 @@ mod registre {
         #[test]
         fn office_click_to_run() {
             let Some(j) = Jetable::nouvelle("office") else {
-                return;
+                return crate::essais::saute("registre inaccessible");
             };
             assert!(office_dans(&j.1, KEY_WOW64_64KEY).is_none());
             j.ecrire(CLICK_TO_RUN, &[("InstallPath", r"C:\Program Files\Microsoft Office")]);
@@ -660,7 +660,7 @@ mod registre {
         #[test]
         fn edge_et_java_par_le_registre() {
             let Some(j) = Jetable::nouvelle("edge-java") else {
-                return;
+                return crate::essais::saute("registre inaccessible");
             };
             assert_eq!(canal_edge_dans(&j.1, KEY_WOW64_64KEY), Branche::Inconnue);
             j.ecrire(STRATEGIE_EDGE, &[(CANAL_EDGE, "extended")]);

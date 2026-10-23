@@ -550,8 +550,7 @@ mod tests {
                 std::process::Command::new(programme).args(["-NoProfile", "-NonInteractive", "-Command", &analyse]),
                 60,
             ) else {
-                eprintln!("{programme} absent : essai sauté");
-                return;
+                return crate::essais::saute(&format!("{programme} absent"));
             };
             if r.sortie.trim().is_empty() {
                 return;

@@ -1866,11 +1866,11 @@ mod tests {
         for _ in 0..3 {
             let avant = crate::protection::sortantes::processus_connectes();
             let Some(ss) = sortie_de("ss", &["-tnpH", "state", "established"], 15) else {
-                return;
+                return crate::essais::saute("ss absent");
             };
             let apres = crate::protection::sortantes::processus_connectes();
             let (Some(avant), Some(apres)) = (avant, apres) else {
-                return;
+                return crate::essais::saute("processus connectés illisibles");
             };
             if pids_dans_ss(&ss).iter().all(|p| avant.contains(p) || apres.contains(p)) {
                 return;

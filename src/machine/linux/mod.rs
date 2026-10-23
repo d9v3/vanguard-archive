@@ -1937,10 +1937,10 @@ mod tests {
             PathBuf::from("/usr/bin/vanguard-introuvable"),
         ];
         let Some(natifs) = proprietaires_selon(&fichiers, natif::proprietaire_pacman) else {
-            return;
+            return crate::essais::saute("pacman absent");
         };
         let Some(r) = crate::commande::lancer_en_anglais(Command::new("pacman").arg("-Qo").args(&fichiers), 60) else {
-            return;
+            return crate::essais::saute("pacman absent");
         };
         let attendus = proprietaires_pacman(&r.sortie);
         for (f, n) in fichiers.iter().zip(&natifs) {
@@ -1968,10 +1968,10 @@ mod tests {
             .map(|e| e.path().join("mtree"))
             .find(|m| m.is_file())
         else {
-            return;
+            return crate::essais::saute("aucun mtree de pacman");
         };
         let Some(attendu) = commande("zcat", &[&mtree.to_string_lossy()]) else {
-            return;
+            return crate::essais::saute("zcat absent");
         };
         let lu = crate::archives::gzip::degzip(&std::fs::read(&mtree).unwrap(), 256 << 20)
             .map(|o| String::from_utf8(o).unwrap());
@@ -1999,14 +1999,14 @@ mod tests {
             .filter(|(s, _)| s.starts_with("/dev/"))
             .and_then(|(s, _)| natif::chiffre(&s))
         else {
-            return;
+            return crate::essais::saute("chiffrement de la racine illisible");
         };
         let Some(source) = commande("findmnt", &["-no", "SOURCE", "/"]) else {
-            return;
+            return crate::essais::saute("findmnt absent");
         };
         let peripherique = source.trim().split('[').next().unwrap_or_default().to_string();
         let Some(chaine) = commande("lsblk", &["-nso", "TYPE", &peripherique]) else {
-            return;
+            return crate::essais::saute("lsblk absent");
         };
         assert_eq!(chiffree, chaine.lines().any(|l| l.trim() == "crypt"));
     }

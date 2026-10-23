@@ -43,7 +43,8 @@ titre_fr = "Mon plugin"
 titre_en = "My plugin"
 description_fr = "Ce qu'il vérifie, en une phrase."
 description_en = "What it checks, in one sentence."
-auteur = "alice"                   # facultatif, montré tel quel (non vérifié)
+auteur = "alice"                   # facultatif, montré tel quel (non vérifié, sauf signé : voir plus bas)
+cle_auteur = "1f0c…"               # facultatif : clé publique Ed25519 de l'auteur, 64 chiffres hexadécimaux
 source = "https://exemple.org/x"   # facultatif, montré tel quel (non vérifié)
 systemes = ["linux", "macos", "windows"]
 delai = 30                         # secondes, de 1 à 600 (60 par défaut)
@@ -69,13 +70,41 @@ Commandes :
 vanguard plugin ajouter extensions/exemples/exemple   copie, analyse, montre, demande l'accord
 vanguard plugin exemple                                le lance
 vanguard plugin exemple --rapport                      ses constats dans le rapport HTML (section Plugins)
-vanguard plugin exemple --isole                        Linux : sans réseau, dossier personnel masqué
+vanguard plugin exemple --isole                        sans réseau, dossier personnel masqué (Linux :
+                                                       bubblewrap ; macOS : sandbox-exec ; pas sous Windows)
 vanguard plugin liste                                  chaque plugin et son état
 vanguard plugin approuver exemple                      après un changement, le remontre et le réapprouve
 vanguard plugin retirer exemple
 ```
 
 Après `--`, tout va au plugin tel quel (`vanguard plugin exemple -- --rapport`).
+
+### Signer un plugin (auteur vérifié)
+
+Sans signature, l'auteur et la source sont montrés tels que le manifeste les dit, « non vérifiés ». Avec
+`cle_auteur` dans `plugin.toml` et `plugin.sig` à côté, Vanguard vérifie que **tout le dossier** vient de qui tient la
+clé privée : l'approbation dit « signé par la clé …, signature vérifiée », et une signature absente ou fausse (un
+fichier changé après la signature) fait refuser le plugin. La clé est notée à l'approbation : une mise à jour signée
+par une autre clé, ou plus signée du tout, est signalée en rouge à l'approbation suivante (quelqu'un a pu remplacer
+le plugin). La signature ne dit pas qui est l'auteur, seulement que c'est le même.
+
+La signature : Ed25519, sur « vanguard-plugin 1 », un saut de ligne, l'empreinte du dossier sans `plugin.sig` (le
+SHA-256 des lignes « empreinte  chemin » de `sha256sum`, triées par chemin, sans `target/` ni `.git/` à la racine)
+et un saut de ligne ; en hexadécimal dans `plugin.sig`. Une clé : `openssl genpkey -algorithm ed25519 -out
+auteur.pem` (à garder pour soi) ; la clé publique pour `cle_auteur` : `openssl pkey -in auteur.pem -pubout -outform
+DER | tail -c 32 | od -An -tx1 | tr -d ' \n'`. Puis, dans le dossier du plugin, après le dernier changement (Linux ;
+sous macOS, `shasum -a 256` à la place de `sha256sum`) :
+
+```sh
+# signer-plugin
+rm -f plugin.sig
+empreinte=$(find . -type f ! -path './target/*' ! -path './.git/*' | sed 's|^\./||' | LC_ALL=C sort |
+  while IFS= read -r f; do sha256sum "$f"; done | sha256sum | cut -d' ' -f1)
+message=$(mktemp)
+printf 'vanguard-plugin 1\n%s\n' "$empreinte" >"$message"
+openssl pkeyutl -sign -inkey auteur.pem -rawin -in "$message" | od -An -tx1 | tr -d ' \n' >plugin.sig
+rm -f "$message"
+```
 
 ## Le protocole
 

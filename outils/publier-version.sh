@@ -113,10 +113,10 @@ outils/failles-programmes.sh "$DOSSIER/vanguard-linux-x86_64" "$DOSSIER/vanguard
 
 # Une compilation macOS qui a vraiment produit le programme de ce code : celle de ce commit, ou celle d'un commit
 # d'avant dont le programme est le même (seuls des captures, la documentation ou les outils ont changé depuis :
-# HORS_CODE de .github/workflows/macos.yml). Le passage de la branche sur le Mac de GitHub, juste avant la fusion,
-# sert ainsi à la page : une seule compilation de Mac par publication (comptée 10 fois sur un dépôt privé). Une
-# exécution de nuit sautée (code inchangé) réussit aussi, sans rien produire : son artefact manque, elle est passée.
-HORS_CODE=$(sed -n "s/^ *HORS_CODE='\(.*\)'$/\1/p" .github/workflows/macos.yml)
+# .github/hors-code.txt, la liste que lisent aussi les workflows). Le passage de la branche sur le Mac de GitHub,
+# juste avant la fusion, sert ainsi à la page : une seule compilation de Mac par publication. Une exécution de
+# nuit sautée (code inchangé) réussit aussi, sans rien produire : son artefact manque, elle est passée.
+HORS_CODE=$(grep -v '^#' .github/hors-code.txt | head -n 1)
 avec_programme() {
   local id sha
   while read -r id sha; do
@@ -170,6 +170,34 @@ if [[ -z $ANNONCEE || $ANNONCEE != "$(sha256sum "$DOSSIER/vanguard-macos" | cut 
   exit 1
 fi
 outils/failles-programmes.sh "$DOSSIER/vanguard-macos" || { echo "Version macOS : rien de publié."; exit 1; }
+
+# Le programme Windows publié doit être celui qu'une passe réussie de la VM a fait tourner, octet pour octet
+# (outils/test-windows/test.ps1 note l'empreinte de ce qu'il lance, à la fin de sa ligne d'historique) : la CI teste
+# la cible MSVC sur Windows, Wine a ses faux verts, et seule la VM essaie ce .exe-là sur un vrai Windows. deployer.sh
+# vient de l'y déposer : sa passe automatique (choix 6 du menu des tests) prend six minutes environ, attendues ici
+# (VANGUARD_ATTENTE_VM, en minutes, 25 par défaut). Une passe en échec, ou aucune : rien de publié.
+# VANGUARD_PUBLIER_SANS_VM=1 publie quand même (VM en panne), et le dit.
+VM_HISTORIQUE=$HOME/Windows/VANGUARD-TEST/resultats/historique.txt
+EXE_PUBLIE=$(sha256sum "$DOSSIER/vanguard-windows-x86_64.exe" | cut -d' ' -f1)
+# Les lignes de l'historique finissent par \r\n (écrites sous Windows).
+passe_de_la_vm() { tr -d '\r' <"$VM_HISTORIQUE" 2>/dev/null | grep -E " sha256 $EXE_PUBLIE\$" | tail -n 1; }
+if [[ -n ${VANGUARD_PUBLIER_SANS_VM:-} ]]; then
+  echo "⚠ Programme Windows publié sans passe de la VM sur ce .exe (VANGUARD_PUBLIER_SANS_VM)."
+else
+  fin=$((SECONDS + 60 * ${VANGUARD_ATTENTE_VM:-25}))
+  [[ -n $(passe_de_la_vm) ]] || echo "Programme Windows : attente de sa passe dans la VM (${VANGUARD_ATTENTE_VM:-25} min au plus)…"
+  while [[ -z $(passe_de_la_vm) ]] && ((SECONDS < fin)); do
+    sleep 20
+  done
+  PASSE=$(passe_de_la_vm)
+  [[ -n $PASSE ]] || PASSE="aucune passe de la VM ne l'a essayé"
+  if [[ $PASSE != *"OK, tout est passé"* ]]; then
+    echo "Programme Windows ($EXE_PUBLIE) : $PASSE : rien de publié."
+    echo "  (VANGUARD_PUBLIER_SANS_VM=1 outils/publier-version.sh pour publier sans elle.)"
+    exit 1
+  fi
+  echo "✔ Programme Windows essayé tel quel dans la VM : ${PASSE%% ->*}"
+fi
 (cd "$DOSSIER" && sha256sum vanguard-windows-x86_64.exe vanguard-linux-x86_64 vanguard-macos >SHA256SUMS.txt)
 
 NOTES=$(notes)
@@ -188,10 +216,21 @@ echo "Version $TAG publiée : $(gh release view "$TAG" --json url -q .url)"
 DEPOT_VERSIONS=d9v3/vanguard-update
 if ! gh repo view "$DEPOT_VERSIONS" >/dev/null 2>&1; then
   echo "Dépôt public des versions absent ($DEPOT_VERSIONS, outils/depot-versions.sh) : mise à jour depuis GitHub non publiée."
-elif outils/signer-versions.sh "$DOSSIER" &&
+elif mkdir -p "$DOSSIER/avant" &&
+  # L'historique signé de la version d'avant (ou, la première fois, son manifeste signé) : signer-versions.sh le
+  # revérifie, y ajoute cette version et le signe ; publié avec elle, il permet de vérifier une copie qui n'est pas
+  # la dernière, une fois les pages d'avant retirées. Un téléchargement raté (réseau, limite de l'API, jeton
+  # expiré) n'est permis que si le dépôt n'a encore aucune version : sinon l'historique repartirait de zéro, et la
+  # boucle plus bas effacerait les pages d'avant. API muette : sortie vide, pas « 0 », donc rien de publié.
+  PREMIER=() &&
+  { gh release download -R "$DEPOT_VERSIONS" -D "$DOSSIER/avant" -p 'historique.txt*' -p 'derniere.txt*' \
+    >/dev/null 2>&1 ||
+    { [[ $(gh api "repos/$DEPOT_VERSIONS/releases?per_page=1" --jq length 2>/dev/null) == 0 ]] && PREMIER=(--premier); }; } &&
+  outils/signer-versions.sh "${PREMIER[@]}" "$DOSSIER" &&
   gh release create "$TAG" -R "$DEPOT_VERSIONS" --title "$NOM $VERSION" --notes "$NOTES" \
     "$DOSSIER/vanguard-windows-x86_64.exe" "$DOSSIER/vanguard-linux-x86_64" "$DOSSIER/vanguard-macos" \
-    "$DOSSIER/SHA256SUMS.txt" "$DOSSIER/derniere.txt" "$DOSSIER/derniere.txt.sig"; then
+    "$DOSSIER/SHA256SUMS.txt" "$DOSSIER/derniere.txt" "$DOSSIER/derniere.txt.sig" \
+    "$DOSSIER/historique.txt" "$DOSSIER/historique.txt.sig"; then
   echo "Version $TAG signée dans $DEPOT_VERSIONS : les Vanguard sans clé la proposeront."
   for ancienne in $(gh release list -R "$DEPOT_VERSIONS" --limit 500 --json tagName -q '.[].tagName' | grep -vxF "$TAG"); do
     gh release delete "$ancienne" -R "$DEPOT_VERSIONS" --yes --cleanup-tag >/dev/null

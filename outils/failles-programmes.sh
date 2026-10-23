@@ -13,6 +13,9 @@
 # celui de la CI (.github/workflows/ci.yml) : le même jugement ici et là-bas.
 #   outils/failles-programmes.sh <programme>...
 #   outils/failles-programmes.sh --outil   cargo-audit seulement (présent, version de la CI), avant une compilation
+#   outils/failles-programmes.sh --depot   Cargo.lock du dépôt, jugé de même (étape « failles connues » de
+#                                          outils/verifier.sh, que la CI lance aussi chaque nuit) : code 77 sans
+#                                          cargo-audit ou sans Internet, où une base pas à jour dirait vert à tort
 # Lancé par outils/deployer.sh (après chaque compilation, et sur la version macOS avant de la copier sur la clé), par
 # outils/publier-version.sh sur les trois programmes qu'il publie, et par la CI sur ceux qu'elle compile (ci.yml,
 # macos.yml). Sans Internet : la base RustSec du dernier téléchargement, et c'est dit.
@@ -20,8 +23,18 @@ set -euo pipefail
 RACINE=$(cd "$(dirname "$0")/.." && pwd)
 
 if (($# == 0)); then
-  echo "outils/failles-programmes.sh <programme>... (ou --outil)" >&2
+  echo "outils/failles-programmes.sh <programme>... (ou --outil, --depot)" >&2
   exit 2
+fi
+if [[ $1 == --depot ]]; then
+  # Les exceptions de .cargo/audit.toml (que cargo audit lirait seul, à côté de Cargo.lock) doivent être celles de
+  # deny.toml : une seule liste, deux copies comparées.
+  python3 -I "$RACINE/outils/exceptions-rustsec.py" --audit-toml || exit 1
+  command -v cargo-audit >/dev/null || { echo "cargo-audit absent (cargo install --locked cargo-audit)"; exit 77; }
+  if [[ -n ${VANGUARD_HORS_LIGNE:-} ]] || ! curl -fsI --max-time 5 https://github.com >/dev/null 2>&1; then
+    echo "sans Internet, base RustSec pas à jour"
+    exit 77
+  fi
 fi
 # Une autre version de cargo-audit pourrait juger autrement que la CI : celle qu'elle pose (tool: …,cargo-audit@X).
 ATTENDUE=$(sed -n 's/.*cargo-audit@\([0-9][0-9.]*\).*/\1/p' "$RACINE/.github/workflows/ci.yml" | head -1)
@@ -46,7 +59,7 @@ EXCEPTIONS=$(python3 -I "$RACINE/outils/exceptions-rustsec.py")
 for id in $EXCEPTIONS; do
   OPTIONS+=(--ignore "$id")
 done
-if [[ -n ${VANGUARD_HORS_LIGNE:-} ]] || ! curl -fsI --max-time 5 https://github.com >/dev/null 2>&1; then
+if [[ $1 != --depot ]] && { [[ -n ${VANGUARD_HORS_LIGNE:-} ]] || ! curl -fsI --max-time 5 https://github.com >/dev/null 2>&1; }; then
   OPTIONS+=(--no-fetch --stale)
   echo "⚠ sans Internet : base RustSec du dernier téléchargement, qui ignore les failles publiées depuis"
 fi
@@ -58,6 +71,21 @@ trap 'rm -rf "$TRAVAIL"' EXIT
 mkdir "$TRAVAIL/.cargo"
 echo "# outils/failles-programmes.sh : aucune exception ici, seulement celles de deny.toml (--ignore)." \
   >"$TRAVAIL/.cargo/audit.toml"
+
+# Le Cargo.lock du dépôt, lu depuis ce dossier-là (son audit.toml vide) : même jugement que pour les programmes.
+if [[ $1 == --depot ]]; then
+  CODE=0
+  SORTIE=$(cd "$TRAVAIL" && cargo-audit audit "${OPTIONS[@]}" --file "$RACINE/Cargo.lock" 2>&1) || CODE=$?
+  printf '%s\n' "$SORTIE"
+  # cargo audit n'a pas d'option pour refuser une « notice » : comptée ici (une version retirée de crates.io reste un
+  # simple avertissement).
+  if awk '$1 == "Warning:" && $2 != "yanked" { n++ } END { exit !n }' <<<"$SORTIE"; then
+    echo "✖ avis que cargo deny refuse aussi (notice)"
+    CODE=1
+  fi
+  [[ -z $EXCEPTIONS ]] || echo "exceptions de deny.toml : $(printf '%s\n' "$EXCEPTIONS" | paste -sd, - | sed 's/,/, /g')"
+  exit "$CODE"
+fi
 
 # Un programme universel de macOS (en-tête « fat », gros-boutiste) : chaque moitié écrite à part, une ligne
 # « architecture<tab>chemin » par moitié ; rien pour un autre programme. Une classe Java a la même magie, mais ses

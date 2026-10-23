@@ -1,14 +1,16 @@
-# Intégration continue. À chaque envoi sur master (la publication du jour), sur Linux : la mise en forme, clippy sans
-# aucune remarque sur les quatre cibles (Linux, Windows, les deux Mac) et les tests ; et le garde-fou de
-# confidentialité sur les commits envoyés. Sur un vrai Windows de GitHub (PowerShell, registre, winget) : chaque nuit
-# si le code a changé, à chaque demande de fusion, et à la demande (gh workflow run ci.yml) ; la compilation
-# reproductible aussi, sauf pour une demande de fusion. Chaque nuit, même sans changement : les failles connues des
-# dépendances, leurs licences et leur provenance. macOS a son propre workflow (macos.yml), qui teste et compile le
-# programme universel pour la clé.
+# Intégration continue. Le travail principal lance outils/verifier.sh, la vérification complète de l'ordinateur de
+# l'auteur (mise en forme, clippy sans remarque sur les quatre cibles, tests, la suite refaite sans Internet, scripts
+# PowerShell, shell et Python, extensions, essais des outils de la clé, liens internes, dépendances, failles connues,
+# banc de fuzzing), sauf Wine : une seule logique, la même ici et là-bas, au lieu d'une copie qui divergeait. Il tourne
+# à chaque envoi sur master (la publication du jour) et à chaque demande de fusion, avec le garde-fou de
+# confidentialité. Sur un vrai Windows de GitHub (PowerShell, registre, winget) : à chaque envoi et à chaque demande de
+# fusion, la nuit si le code a changé, et à la demande (gh workflow run ci.yml) ; la compilation reproductible et
+# l'essai du .exe livré (MinGW) aussi, sauf pour une demande de fusion. Chaque nuit, même sans changement : les failles
+# connues des dépendances, leurs licences et leur provenance, et cinq minutes de fuzzing par cible. macOS a son propre
+# workflow (macos.yml), qui teste et compile le programme universel pour la clé.
 #
-# Pourquoi pas Windows à chaque envoi : sur un dépôt privé, une minute de Windows en compte deux (une de Mac, dix),
-# sur 2000 minutes gratuites par mois. Pour tester Windows à chaque envoi malgré tout : ajouter « push » à la
-# condition du travail « utile » plus bas.
+# Le dépôt est public depuis le 20 octobre 2026 : les minutes de Linux et de Windows ne sont plus comptées, Windows
+# tourne donc à chaque envoi.
 name: CI
 
 on:
@@ -42,56 +44,49 @@ jobs:
   linux:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
+      # Tout l'historique : les textes affichés se comparent à master (outils/textes.py).
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       # Compilateurs C : YARA-X (par wasmtime) compile un petit fichier C pour chaque cible ; musl-gcc pour Linux, le
       # gcc de MinGW pour Windows (et le préprocesseur de windres, pour l'icône et le manifeste), clang pour les cibles
-      # Mac, qu'il vise sans les outils d'Apple (outils/mac-entetes).
-      - name: Rust à jour, cibles et outils de compilation croisée
+      # Mac, qu'il vise sans les outils d'Apple (outils/mac-entetes). La chaîne Rust est celle de rust-toolchain.toml,
+      # avec ses cibles et ses composants ; nightly pour le banc de fuzzing seulement.
+      - name: Rust, cibles et outils de compilation croisée
         run: |
-          rustup update stable
-          rustup default stable
-          rustup component add rustfmt clippy
-          rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin
+          rustup toolchain install
+          rustup toolchain install nightly --profile minimal
           sudo apt-get update -qq
           sudo apt-get install -y -qq musl-tools gcc-mingw-w64-x86-64 clang
+          git branch -f master origin/master 2>/dev/null || true
+      # Les tests sans Internet (unshare -rn) et les essais des outils de la clé (unshare -rmn) demandent des espaces
+      # de noms d'utilisateur, qu'AppArmor refuse par défaut sur Ubuntu 24.04.
+      - name: Espaces de noms d'utilisateur
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       # Actions venues d'autres que GitHub : épinglées par leur commit. Une étiquette (v2) se déplace ; si leur dépôt était
       # piraté, une version piégée toucherait ce que compile ce travail. À mettre à jour à la main (le commentaire dit la
-      # version).
+      # version). Les outils dans la version épinglée ici, tels que leurs auteurs les publient (empreintes vérifiées).
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2,cargo-fuzz@0.13.2
+          fallback: none
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Mise en forme
-        run: cargo fmt --check
-      - name: Clippy, zéro remarque, sur les quatre cibles
-        run: |
-          entetes="$PWD/outils/mac-entetes"
-          for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin; do
-            echo "::group::$c"
-            v=${c//-/_}
-            case $c in
-              *-apple-darwin) env "CC_$v=clang" "CFLAGS_$v=-ffreestanding -nostdlibinc -DRING_CORE_NOSTDLIBINC -I$entetes" \
-                cargo clippy --all-targets --target "$c" -- -D warnings ;;
-              *) cargo clippy --all-targets --target "$c" -- -D warnings ;;
-            esac
-            echo "::endgroup::"
-          done
-      # .cargo/config.toml vise la cible musl : « cargo test » teste la version qui part sur la clé.
-      - name: Tests
-        run: cargo test
+      # La vérification de l'ordinateur de l'auteur, sans Wine (pas de Wine ici ; le vrai Windows est plus bas).
+      - name: outils/verifier.sh
+        run: outils/verifier.sh --ci
       # Le programme de mise au point, que les tests viennent de compiler (tests/programme.rs le lance) : la version
-      # optimisée est compilée sur l'ordinateur de développement avant chaque envoi (outils/deployer.sh), et la nuit
-      # par le travail « reproductible ». La recompiler ici prenait une minute et demie à chaque envoi.
+      # optimisée est compilée par le travail « reproductible ».
       - name: Le programme démarre et répond
         run: |
           ./target/x86_64-unknown-linux-musl/debug/vanguard --version
           ./target/x86_64-unknown-linux-musl/debug/vanguard logiciels --liste
           ./target/x86_64-unknown-linux-musl/debug/vanguard nettoyer --liste
       # Le bilan sur de vraies distributions (Fedora, Debian, Ubuntu, openSUSE), dans des conteneurs, avec le serveur
-      # SSH installé : le programme statique que les tests viennent de compiler. Minutes de Linux, comptées une fois.
-      # Pas encore passé une seule fois (ajouté le 20 oct., jamais essayé hors de GitHub, Docker valant root ici) : il
-      # ne fait pas échouer la CI tant qu'il n'a pas été vert une première fois ; retirer continue-on-error ensuite.
+      # SSH installé : le programme statique que les tests viennent de compiler. Vert depuis le 20 oct. 2026
+      # (exécution 39484699636) : une régression dans l'une d'elles fait échouer la CI.
       - name: Vraies distributions Linux
-        continue-on-error: true
         run: bash outils/test-distributions.sh ./target/x86_64-unknown-linux-musl/debug/vanguard distributions
       - uses: actions/upload-artifact@v7
         if: always()
@@ -106,10 +101,6 @@ jobs:
           python3 -m venv /tmp/yara
           /tmp/yara/bin/pip install -q yara-python
           /tmp/yara/bin/python -c "import yara; yara.compile(filepath='assets/yara/reversinglabs.yara'); print('règles YARA compilées')"
-      # Liens internes de la documentation : fichiers visés, titres des ancres. Les liens web, eux, sont vérifiés
-      # avant chaque envoi et chaque version (outils/liens.py) : un site en panne ne doit pas faire échouer la CI.
-      - name: Liens internes
-        run: python3 outils/liens.py --hors-ligne
 
   # Garde-fou de confidentialité (outils/confidentialite.py) sur les commits de chaque envoi et de chaque demande de
   # fusion, second filet de celui qui tourne avant chaque commit et chaque envoi sur l'ordinateur de développement. Ici
@@ -134,73 +125,85 @@ jobs:
         run: python3 outils/confidentialite.py --generique --plage "$AVANT" "$APRES"
 
   # Failles connues dans les dépendances (base RustSec, cargo audit et cargo deny) : chaque nuit, même sans changement
-  # de code, car les failles arrivent sans lui ; et à la demande. Linux seulement, lecture seule : un avis le lendemain
-  # plutôt que des mois plus tard. cargo deny y ajoute les licences, la provenance et les doublons (deny.toml).
+  # de code, car les failles arrivent sans lui ; et à la demande. Les étapes « dépendances » et « failles connues » de
+  # outils/verifier.sh, les mêmes que sur l'ordinateur de l'auteur (cargo deny sur Vanguard, la bibliothèque des
+  # extensions, l'exemple en Rust et le banc de fuzzing ; cargo audit jugé par outils/failles-programmes.sh --depot).
+  # Rien à compiler : seuls les Cargo.lock et les Cargo.toml des dépendances sont lus.
   audit:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # cargo-audit tel que RustSec le publie (ses versions sur GitHub), posé en quelques secondes : le compiler ici
-      # (cargo install) prenait trois minutes et demie chaque nuit. Rien d'autre à compiler : seul Cargo.lock est lu.
-      # cargo-deny de la même façon, tel que ses auteurs le publient ; il lit en plus les Cargo.toml des dépendances
-      # (cargo metadata), téléchargés sans rien compiler.
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
-          tool: cargo-audit@0.22.2,cargo-deny
-      # Jugé comme outils/verifier.sh et outils/failles-programmes.sh, dans la même version de cargo-audit : abandon,
-      # code défaillant et « notice » refusés, une version retirée de crates.io (yanked) seulement signalée ; un
-      # cargo audit nu laisserait passer les trois premiers. Ses exceptions sont dans .cargo/audit.toml : celles de
-      # deny.toml, où est leur preuve.
-      - name: cargo audit
-        run: |
-          code=0
-          sortie=$(cargo audit --color never --deny unmaintained --deny unsound 2>&1) || code=1
-          printf '%s\n' "$sortie"
-          # cargo audit n'a pas d'option pour refuser une « notice » : comptée ici.
-          if awk '$1 == "Warning:" && $2 != "yanked" { n++ } END { exit !n }' <<<"$sortie"; then
-            echo "✖ avis que cargo deny refuse aussi (notice)"
-            code=1
-          fi
-          exit "$code"
-      # Lancé même si cargo audit a échoué : les deux avis servent.
-      - name: Dépendances (cargo deny)
-        if: ${{ !cancelled() }}
-        run: |
-          cargo deny --locked check --hide-inclusion-graph
-          # La bibliothèque des extensions et l'exemple en Rust : leurs propres règles (extensions/deny.toml).
-          for m in extensions/sdk/Cargo.toml extensions/exemples/rust-exemple/Cargo.toml; do
-            cargo deny --locked --manifest-path "$m" --config extensions/deny.toml check --hide-inclusion-graph
-          done
-          # Le banc de fuzzing (fuzz/), crate à part : ses propres règles (fuzz/deny.toml).
-          cargo deny --locked --manifest-path fuzz/Cargo.toml --config fuzz/deny.toml check --hide-inclusion-graph
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+          fallback: none
+      - name: Dépendances et failles connues (outils/verifier.sh)
+        run: outils/verifier.sh --seulement dependances,failles-connues
 
-  # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
+  # Le banc de fuzzing (fuzz/), cinq minutes par cible chaque nuit, et à la demande : verifier.sh n'y passe que
+  # quelques secondes. Le corpus appris d'une nuit est repris la suivante (cache de GitHub) ; une donnée qui fait
+  # planter un lecteur est gardée dans les artefacts, pour en faire un test de non-régression.
+  fuzzing:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v7
+      - name: Chaîne nightly
+        run: rustup toolchain install nightly --profile minimal
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-fuzz@0.13.2
+          fallback: none
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Cinq minutes par cible
+        run: VANGUARD_FUZZ="$RUNNER_TEMP/fuzz" outils/fuzz.sh tout 300
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-plantages
+          path: |
+            ${{ runner.temp }}/fuzz/plantages
+            ${{ runner.temp }}/fuzz/*.log
+          retention-days: 30
+
+  # Windows à chaque envoi, à chaque demande de fusion et à la demande ; la nuit, seulement si le code a changé depuis
+  # le dernier passage réussi (comme macos.yml). La liste des fichiers que le programme n'intègre pas est dans
+  # .github/hors-code.txt, la même pour macos.yml et outils/publier-version.sh.
   utile:
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     outputs:
       windows: ${{ steps.verifier.outputs.windows }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/hors-code.txt
+          sparse-checkout-cone-mode: false
       - id: verifier
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           case "${{ github.event_name }}" in
-            workflow_dispatch|pull_request) echo "windows=oui" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            push|workflow_dispatch|pull_request) echo "windows=oui" >> "$GITHUB_OUTPUT"; exit 0 ;;
             schedule) ;;
             *) echo "windows=non" >> "$GITHUB_OUTPUT"; exit 0 ;;
           esac
           dernier=""
-          for evenement in schedule workflow_dispatch; do
+          for evenement in schedule workflow_dispatch push; do
             sha=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?status=success&event=$evenement&branch=${{ github.ref_name }}&per_page=1" -q '.workflow_runs[0] | "\(.created_at) \(.head_sha)"' 2>/dev/null || true)
             if [ -n "$sha" ] && [ "$sha" \> "$dernier" ]; then dernier=$sha; fi
           done
           dernier=${dernier#* }
-          # Le code a changé : un fichier hors de la documentation, des captures et des outils de développement, que le
-          # programme n'intègre pas (comme macos.yml). Comparaison impossible : on teste.
-          HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore|docs/.*|fuzz/.*|deny\.toml|\.cargo/audit\.toml)$'
+          # Le code a changé : un fichier hors de .github/hors-code.txt. Comparaison impossible : on teste.
+          HORS_CODE=$(grep -v '^#' .github/hors-code.txt | head -n 1)
+          # Liste absente ou vide : un motif vide écarterait tous les fichiers, et Windows serait sauté à tort.
+          [ -n "$HORS_CODE" ] || { echo "::warning::.github/hors-code.txt illisible : on teste"; HORS_CODE='^$'; }
           windows=oui
           if [ "$dernier" = "${{ github.sha }}" ]; then
             windows=non
@@ -210,32 +213,31 @@ jobs:
           echo "windows=$windows" >> "$GITHUB_OUTPUT"
 
   # Compilation reproductible : le même code, compilé deux fois de suite, doit donner exactement le même programme
-  # (Linux et Windows). C'est la condition de la preuve d'intégrité d'un programme non signé : avec les mêmes outils
-  # (version de rustc, MinGW, cargo-auditable, --remap-path-prefix de ~/.cargo/config.toml), n'importe qui retrouve
-  # l'empreinte de la page de la version. La nuit et à la demande seulement, et seulement si le code a changé (même
-  # règle que Windows) : deux compilations en release coûtent plusieurs minutes.
+  # (Linux et Windows), par la recette de l'ordinateur de l'auteur (outils/compiler-version.sh : chaîne de
+  # rust-toolchain.toml, Cargo.lock tel quel, chemins de la compilation retirés, cargo-auditable de la version
+  # ci-dessous). C'est la condition de la preuve d'intégrité d'un programme non signé. Les empreintes sont écrites
+  # dans le journal (EMPREINTE-VANGUARD-…) : à comparer à celles de la page de la version ; ce qui peut encore les
+  # faire différer d'un ordinateur à l'autre est dit dans CONTRIBUTING.md (« Compilation reproductible »). Le .exe
+  # passe ensuite au travail « windows-livre », qui le fait tourner sur un vrai Windows.
   reproductible:
     needs: utile
     if: needs.utile.outputs.windows == 'oui' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       # gcc-mingw-w64 : l'éditeur de liens du .exe, et le préprocesseur de windres (icône et manifeste intégrés comme
       # dans le .exe livré). Avec les binutils seuls, la première nuit a échoué : « linker x86_64-w64-mingw32-gcc not
       # found ».
-      - name: Rust à jour, cibles et outils de compilation croisée
+      - name: Rust, cibles et outils de compilation croisée
         run: |
-          rustup update stable
-          rustup default stable
-          rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
+          rustup toolchain install
           sudo apt-get update -qq
           sudo apt-get install -y -qq musl-tools gcc-mingw-w64-x86-64
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # Compilés comme par outils/deployer.sh : cargo auditable grave dans chaque programme la liste de ses
-      # dépendances, versions comprises, que cargo audit relit. Les deux outils dans la version épinglée ici, tels que
-      # leurs auteurs les publient, vérifiés par l'empreinte SHA-256 que porte install-action (épinglée par son
-      # commit), en quelques secondes ; jamais de repli sur une compilation ou un autre téléchargement (fallback: none).
+      # cargo auditable grave dans chaque programme la liste de ses dépendances, versions comprises, que cargo audit
+      # relit. Les deux outils dans la version épinglée ici, que outils/deployer.sh et outils/failles-programmes.sh
+      # exigent aussi sur l'ordinateur de l'auteur ; jamais de repli sur une compilation ou un autre téléchargement.
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-auditable@0.7.7,cargo-audit@0.22.2
@@ -244,23 +246,33 @@ jobs:
       # programme, et cargo les mène de front ; deux cargo lancés ensemble s'attendraient (verrou du dossier).
       - name: Deux compilations, un seul programme
         run: |
-          cargo auditable build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
+          outils/compiler-version.sh
           mkdir premiere
           cp target/x86_64-unknown-linux-musl/release/vanguard premiere/vanguard
           cp target/x86_64-pc-windows-gnu/release/vanguard.exe premiere/vanguard.exe
           # Seul le programme est recompilé (les dépendances restent) : c'est lui que l'on compare.
           cargo clean -p vanguard --release --target x86_64-unknown-linux-musl
           cargo clean -p vanguard --release --target x86_64-pc-windows-gnu
-          cargo auditable build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
-          sha256sum premiere/vanguard target/x86_64-unknown-linux-musl/release/vanguard
-          sha256sum premiere/vanguard.exe target/x86_64-pc-windows-gnu/release/vanguard.exe
+          outils/compiler-version.sh
           cmp premiere/vanguard target/x86_64-unknown-linux-musl/release/vanguard
           cmp premiere/vanguard.exe target/x86_64-pc-windows-gnu/release/vanguard.exe
-      # Les failles connues des deux programmes, lues dans la liste qu'ils portent, comme avant chaque déploiement.
-      - name: Failles connues des programmes
+          echo "EMPREINTE-VANGUARD-LINUX $(sha256sum premiere/vanguard | cut -d' ' -f1)"
+          echo "EMPREINTE-VANGUARD-WINDOWS $(sha256sum premiere/vanguard.exe | cut -d' ' -f1)"
+          rustc --version
+          x86_64-w64-mingw32-gcc --version | head -n 1
+          musl-gcc --version 2>/dev/null | head -n 1 || true
+      # Ce que l'ordinateur de l'auteur vérifie avant de livrer : DLL depuis System32 seulement, manifeste UTF-8 et
+      # asInvoker ; puis les failles connues des deux programmes, lues dans la liste qu'ils portent.
+      - name: Le .exe porte ses gardes, failles connues des programmes
         run: |
+          python3 outils/verifier-pe.py target/x86_64-pc-windows-gnu/release/vanguard.exe
           bash outils/failles-programmes.sh target/x86_64-unknown-linux-musl/release/vanguard \
             target/x86_64-pc-windows-gnu/release/vanguard.exe
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vanguard-windows-livre
+          path: target/x86_64-pc-windows-gnu/release/vanguard.exe
+          retention-days: 7
 
   windows:
     needs: utile
@@ -269,18 +281,30 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - name: Rust à jour
-        run: |
-          rustup update stable
-          rustup default stable
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # La cible est donnée : .cargo/config.toml vise Linux par défaut. Ici, PowerShell existe vraiment (pas comme
-      # sous Wine) : les tests lisent le vrai registre et le vrai système.
+      # sous Wine) : les tests lisent le vrai registre et le vrai système. La cible MSVC : celle de MinGW, livrée, est
+      # essayée telle qu'elle part par le travail « windows-livre ».
+      # Les tests qui ne peuvent pas tourner ici (registre inaccessible…) le notent dans VANGUARD_TESTS_SAUTES
+      # (src/essais.rs) : sans lui, libtest avale leur message et les compte réussis. Comptés et montrés au résumé,
+      # même si les tests échouent : non vérifié n'est jamais compté sain, comme dans outils/verifier.sh.
       - name: Tests sur un vrai Windows
+        env:
+          VANGUARD_TESTS_SAUTES: ${{ runner.temp }}\sautes.txt
         run: cargo test --target x86_64-pc-windows-msvc
-      # Le programme de mise au point, que les tests viennent de compiler : le .exe livré est celui de MinGW, compilé
-      # sur l'ordinateur de développement (et la nuit par le travail « reproductible »). Une version optimisée pour
-      # MSVC, jamais livrée, prenait ici près de quatre minutes, comptées deux fois.
+      - name: Tests sautés sur le vrai Windows
+        if: always()
+        env:
+          VANGUARD_TESTS_SAUTES: ${{ runner.temp }}\sautes.txt
+        run: |
+          if (Test-Path $env:VANGUARD_TESTS_SAUTES) {
+            $l = @(Get-Content $env:VANGUARD_TESTS_SAUTES)
+            "::warning::$($l.Count) tests sautés (non vérifiés)"
+            "### Tests sautés sur Windows : $($l.Count)" >> $env:GITHUB_STEP_SUMMARY
+            $l | ForEach-Object { "- $_" } >> $env:GITHUB_STEP_SUMMARY
+          }
       - name: Essai du programme (lecture seule)
         run: |
           $s = ".\target\x86_64-pc-windows-msvc\debug\vanguard.exe"
@@ -293,5 +317,39 @@ jobs:
         if: always()
         with:
           name: essai-windows
+          path: audit.json
+          retention-days: 14
+
+  # Le .exe livré (MinGW, version publiée, compilé par « reproductible » selon la recette de l'auteur) sur un vrai
+  # Windows : la CI testait jusque-là la cible MSVC, que personne ne reçoit, et le .exe livré ne tournait que sous Wine
+  # ou à la main dans la VM. Lecture seule ; le bilan en JSON doit se lire, et ses accents passer (manifeste UTF-8).
+  windows-livre:
+    needs: reproductible
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: vanguard-windows-livre
+      - name: Le .exe livré démarre, fait son bilan et répond
+        run: |
+          # La sortie du programme lue en UTF-8 par PowerShell : un accent perdu doit venir du .exe, pas d'ici.
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $s = ".\vanguard.exe"
+          "EMPREINTE-VANGUARD-WINDOWS-ESSAYE $((Get-FileHash $s -Algorithm SHA256).Hash.ToLower())"
+          & $s --version
+          if ($LASTEXITCODE -ne 0) { throw "--version : code $LASTEXITCODE" }
+          $env:VANGUARD_LANG = 'fr'
+          & $s machine --json > audit.json
+          $bilan = Get-Content audit.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if (-not $bilan.constats) { throw "bilan sans constats" }
+          $aide = (& $s --help | Out-String)
+          if ($aide -notmatch 'Cyberdéfense') { throw "accents perdus dans l'aide (manifeste UTF-8 ?) : $aide" }
+          & $s logiciels --liste
+          & $s nettoyer --liste
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: essai-windows-livre
           path: audit.json
           retention-days: 14

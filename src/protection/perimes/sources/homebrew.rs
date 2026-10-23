@@ -254,10 +254,10 @@ mod tests {
     #[test]
     fn vraie_copie_si_presente() {
         let Some(dossier) = std::env::var_os("VANGUARD_ESSAI_PERIMES").map(std::path::PathBuf::from) else {
-            return;
+            return crate::essais::saute("VANGUARD_ESSAI_PERIMES non donné");
         };
         let Ok(octets) = std::fs::read(dossier.join("formula.json")) else {
-            return;
+            return crate::essais::saute("pas de formula.json dans VANGUARD_ESSAI_PERIMES");
         };
         let lues = formules(&octets).unwrap();
         for nom in FORMULES_SUIVIES {

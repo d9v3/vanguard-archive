@@ -39,8 +39,10 @@ fn entete() -> [u8; 17] {
     std::hint::black_box(ENTETE_DECALE).map(|o| o - 1)
 }
 
-/// Au-delà, un fichier n'est pas un programme de Vanguard (un release fait environ 25 Mo avec YARA-X, un debug
-/// un peu plus de 200) : il n'est pas lu, la mémoire ne se remplit pas.
+/// Au-delà, un fichier n'est pas un programme de Vanguard (en 0.85, un release fait 31 Mo sous Windows et 33 sous
+/// Linux, avec YARA-X ; le programme de mise au point environ 230 Mo, celui des tests unitaires, qui se lit lui-même
+/// dans `ce_programme_porte_sa_version`, 290 Mo sous Linux, voir [profile.test] de Cargo.toml) : il n'est pas lu, la
+/// mémoire ne se remplit pas.
 const TAILLE_MAX: u64 = 512 << 20;
 
 /// Le nom du programme copié dans bin/ (la désinstallation le retrouve aussi, avec ses restes `.ancien`, `.nouveau`).
@@ -338,6 +340,13 @@ fn plus_ancien(chemin: &Path, publiee: Version) -> bool {
         Lu::Version(v) => v < publiee,
         Lu::Absent | Lu::Illisible(_) => false,
     }
+}
+
+/// Le programme d'empreinte `sha256` est-il une version publiée et signée par l'auteur ? D'après l'historique signé
+/// des versions sur GitHub (`github::dans_l_historique`) : (version, système), `None` s'il n'y est pas, `Err` quand on
+/// ne sait pas.
+pub(crate) fn version_signee(sha256: &[u8; 32]) -> Result<Option<(String, String)>, String> {
+    github::dans_l_historique(sha256).map(|t| t.map(|(v, systeme)| (format!("{}.{}.{}", v.0, v.1, v.2), systeme)))
 }
 
 /// Copie `source` à la place de `cible` : à côté d'abord, sa version revérifiée (ce qui a été montré est ce qui

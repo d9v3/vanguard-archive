@@ -1824,7 +1824,7 @@ mod tests {
                 .map(|r| r.sortie)
         };
         let Some((total, noms)) = commande(&[]).as_deref().and_then(duree_de_systemd_analyze) else {
-            return;
+            return crate::essais::saute("systemd-analyze absent");
         };
         let d = systeme::demarrage().expect("systemd-analyze répond : le bus aussi");
         // systemd-analyze arrondit chaque étape à la milliseconde.
@@ -1836,7 +1836,7 @@ mod tests {
             d.etapes
         );
         let Some(chaine) = commande(&["critical-chain", "--no-pager"]) else {
-            return;
+            return crate::essais::saute("systemd-analyze critical-chain sans réponse (seconde moitié)");
         };
         let mut attendus: Vec<(String, f64)> = chaine_de_systemd_analyze(&chaine);
         attendus.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -2073,7 +2073,7 @@ mod tests {
             20,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("systemctl absent");
         };
         let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
         let config =

@@ -1190,7 +1190,7 @@ mod tests {
     #[test]
     fn permissions_comme_flatpak_info() {
         let Some(apps) = crate::gaming::linux::applications_flatpak() else {
-            return;
+            return crate::essais::saute("flatpak absent");
         };
         for a in apps.iter().take(20) {
             let Some(r) = crate::commande::lancer_en_anglais(

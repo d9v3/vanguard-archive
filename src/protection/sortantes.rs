@@ -2383,7 +2383,7 @@ mod tests {
         // « personne » : rien à essayer là.
         use std::os::unix::fs::MetadataExt;
         if std::fs::metadata("/usr/bin/env").map_or(true, |m| m.uid() != 0) {
-            return;
+            return crate::essais::saute("fichiers de root vus comme « personne » (unshare -r)");
         }
         let c = Connexion::vers(ip("140.82.112.4"), 443);
         let nom = "github.com".to_string();
@@ -2411,7 +2411,7 @@ mod tests {
             use std::os::unix::fs::MetadataExt;
             if std::fs::metadata(&repose).is_ok_and(|m| m.uid() == 0) {
                 let _ = std::fs::remove_dir_all(&dossier);
-                return;
+                return crate::essais::saute("en root : rien ne peut imiter la personne");
             }
         }
         let efface = format!("{} (deleted)", repose.display());

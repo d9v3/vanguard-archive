@@ -1670,7 +1670,7 @@ mod tests {
             10,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("systemctl --user absent");
         };
         for ligne in r.sortie.lines() {
             let mut mots = ligne.split_whitespace();

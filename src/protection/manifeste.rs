@@ -394,8 +394,14 @@ fn programme() -> Option<PathBuf> {
     }
 }
 
-/// « vanguard verifier-moi » : version, date, empreinte SHA-256, et le manifeste sur la clé du propriétaire.
-pub fn verifier_moi() {
+/// « vanguard verifier-moi » : version, date, empreinte SHA-256, et le manifeste sur la clé du propriétaire ; après
+/// accord, l'historique signé des versions publiées. « vanguard verifier-moi <programme> » : une autre copie de
+/// Vanguard (celle d'une autre clé, une version d'avant), par son empreinte et l'historique.
+pub fn verifier_moi(autre: Option<&Path>) {
+    if let Some(copie) = autre {
+        verifier_une_copie(copie);
+        return;
+    }
     titre(tr!("Vérifier Vanguard lui-même", "Check Vanguard itself"));
     println!(
         "  {GRIS}{}{RESET}  {}",
@@ -432,10 +438,17 @@ pub fn verifier_moi() {
         tr!("Programme ", "Program   "),
         chemin_affichable(&exe)
     );
-    match crate::protection::telechargement::calculer(&exe, crate::protection::telechargement::Algo::Sha256) {
-        Ok(h) => println!("  {GRIS}SHA-256   {RESET}  {h}"),
-        Err(e) => trp!("  ✖ Empreinte impossible ({e}).", "  ✖ Checksum impossible ({e})."),
-    }
+    let sha256 =
+        match crate::protection::telechargement::calculer(&exe, crate::protection::telechargement::Algo::Sha256) {
+            Ok(h) => {
+                println!("  {GRIS}SHA-256   {RESET}  {h}");
+                Some(h)
+            }
+            Err(e) => {
+                trp!("  ✖ Empreinte impossible ({e}).", "  ✖ Checksum impossible ({e}).");
+                None
+            }
+        };
     if let Some(cle) = crate::reseau::cle_usb()
         && let Ok(relatif) = exe.strip_prefix(&cle)
     {
@@ -463,6 +476,9 @@ pub fn verifier_moi() {
             },
         }
     }
+    if let Some(h) = sha256 {
+        comparer_a_l_historique(&h);
+    }
     println!();
     for ligne in envelopper(
         tr!(
@@ -472,6 +488,77 @@ pub fn verifier_moi() {
         LARGEUR - 2,
     ) {
         println!("  {ligne}");
+    }
+}
+
+/// Une autre copie de Vanguard, par son empreinte SHA-256 et l'historique signé des versions publiées.
+fn verifier_une_copie(copie: &Path) {
+    titre(tr!("Vérifier une copie de Vanguard", "Check a copy of Vanguard"));
+    println!(
+        "  {GRIS}{}{RESET}  {}",
+        tr!("Programme ", "Program   "),
+        chemin_affichable(copie)
+    );
+    match crate::protection::telechargement::calculer(copie, crate::protection::telechargement::Algo::Sha256) {
+        Ok(h) => {
+            println!("  {GRIS}SHA-256   {RESET}  {h}");
+            comparer_a_l_historique(&h);
+        }
+        Err(e) => trp!("  ✖ Empreinte impossible ({e}).", "  ✖ Checksum impossible ({e})."),
+    }
+}
+
+/// L'empreinte comparée à l'historique signé des versions publiées (GitHub), après accord : le fichier entier est
+/// téléchargé, rien de cet ordinateur ni l'empreinte cherchée ne part. Absente, ou l'historique inaccessible : c'est
+/// dit, jamais compté comme vérifié.
+fn comparer_a_l_historique(hex: &str) {
+    let Some(sha256) = (hex.len() == 64)
+        .then(|| {
+            let mut o = [0u8; 32];
+            for (i, c) in o.iter_mut().enumerate() {
+                *c = u8::from_str_radix(hex.get(2 * i..2 * i + 2)?, 16).ok()?;
+            }
+            Some(o)
+        })
+        .flatten()
+    else {
+        return;
+    };
+    if crate::parametres::hors_ligne() {
+        trp!(
+            "  {GRIS}Historique signé des versions : non comparé (travail sans Internet).{RESET}",
+            "  {GRIS}Signed version history: not compared (offline mode).{RESET}"
+        );
+        return;
+    }
+    // Sans terminal (script, tâche planifiée, entrée vide), demander lirait la fin de l'entrée et quitterait le
+    // programme : l'avertissement final (« Si elles diffèrent, ne l'utilise pas ») ne s'afficherait jamais.
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin())
+        || !demander(tr!(
+        "  Comparer à l'historique signé des versions publiées, sur GitHub (rien de cet ordinateur n'est envoyé) ? [o/N] : ",
+        "  Compare with the signed history of published versions, on GitHub (nothing from this computer is sent)? [y/N]: "
+    ))
+    .oui()
+    {
+        trp!(
+            "  {GRIS}Historique signé des versions : non comparé.{RESET}",
+            "  {GRIS}Signed version history: not compared.{RESET}"
+        );
+        return;
+    }
+    match crate::mise_a_jour::version_signee(&sha256) {
+        Ok(Some((version, systeme))) => trp!(
+            "  {VERT}✔{RESET} Version {version} publiée et signée par l'auteur ({systeme}).",
+            "  {VERT}✔{RESET} Version {version} published and signed by the author ({systeme})."
+        ),
+        Ok(None) => trp!(
+            "  ⚠ Absente de l'historique signé : une version intermédiaire, une version d'avant l'historique (0.84 et plus anciennes), ou un programme changé. Ne t'en sers que si tu sais d'où il vient.",
+            "  ⚠ Missing from the signed history: an intermediate version, a version older than the history (0.84 and earlier), or a changed program. Only use it if you know where it comes from."
+        ),
+        Err(e) => trp!(
+            "  {GRIS}Historique signé des versions : non vérifié ({e}).{RESET}",
+            "  {GRIS}Signed version history: not checked ({e}).{RESET}"
+        ),
     }
 }
 
