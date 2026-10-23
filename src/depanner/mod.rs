@@ -249,7 +249,7 @@ fn taille(octets: u64) -> String {
         let to = octets as f64 / f64::from(1u32 << 20) / f64::from(1u32 << 20);
         trf!("{} To", "{} TB", crate::langue::decimal(to, 1))
     } else {
-        crate::nettoyer::taille_lisible(octets)
+        crate::socle::taille_lisible(octets)
     }
 }
 
@@ -469,7 +469,7 @@ fn volumes() -> Vec<(String, u64, u64)> {
                 if crate::copier::est_la_cle(std::path::Path::new(&point)) {
                     return None;
                 }
-                let (libre, total) = crate::nettoyer::volume(std::path::Path::new(&point))?;
+                let (libre, total) = crate::socle::volume(std::path::Path::new(&point))?;
                 Some((affichable(&point), libre, total))
             })
             .collect()
@@ -491,7 +491,7 @@ fn volumes() -> Vec<(String, u64, u64)> {
                     .filter(|p| !p.to_string_lossy().contains("com.apple.") && !crate::copier::est_la_cle(p)),
             )
             .filter_map(|p| {
-                let (libre, total) = crate::nettoyer::volume(&p)?;
+                let (libre, total) = crate::socle::volume(&p)?;
                 Some((chemin_affichable(&p), libre, total))
             })
             .fold(Vec::new(), |mut v, x| {
@@ -536,7 +536,7 @@ fn plus_gros_dossiers() -> Vec<(String, u64)> {
     #[cfg(windows)]
     let maison = std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default());
     #[cfg(not(windows))]
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     if maison.as_os_str().is_empty() {
         return Vec::new();
     }

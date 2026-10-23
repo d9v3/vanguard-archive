@@ -126,19 +126,19 @@ pub(crate) struct Alerte {
 }
 
 fn fichier_journal() -> PathBuf {
-    reseau::dossier_local().join("surveillance-alertes.jsonl")
+    crate::socle::dossier_local().join("surveillance-alertes.jsonl")
 }
 
 fn fichier_passe() -> PathBuf {
-    reseau::dossier_local().join("surveillance-passe.txt")
+    crate::socle::dossier_local().join("surveillance-passe.txt")
 }
 
 fn fichier_reseau() -> PathBuf {
-    reseau::dossier_local().join("surveillance-reseau-non-verifie.txt")
+    crate::socle::dossier_local().join("surveillance-reseau-non-verifie.txt")
 }
 
 fn fichier_page() -> PathBuf {
-    reseau::dossier_local().join("tableau.html")
+    crate::socle::dossier_local().join("tableau.html")
 }
 
 /// Les `max` premiers caractères (jamais au milieu d'un caractère), suivis de « … » s'il y en avait plus.
@@ -171,7 +171,7 @@ pub(crate) fn noter_alerte(genre: Genre, titre: &str, texte: &str) {
 fn ajouter(fichier: &Path, alerte: Alerte, maintenant: NaiveDateTime) -> std::io::Result<()> {
     let _verrou = fichier
         .parent()
-        .and_then(|d| reseau::Verrou::prendre_nomme(d, "alertes.verrou"));
+        .and_then(|d| crate::socle::Verrou::prendre_nomme(d, "alertes.verrou"));
     let mut alertes = lire_journal(fichier);
     alertes.push(alerte);
     let texte: String = borner(alertes, maintenant)
@@ -179,7 +179,7 @@ fn ajouter(fichier: &Path, alerte: Alerte, maintenant: NaiveDateTime) -> std::io
         .filter_map(|a| serde_json::to_string(a).ok())
         .map(|ligne| ligne + "\n")
         .collect();
-    reseau::ecrire_atomique(fichier, texte)
+    crate::socle::ecrire_atomique(fichier, texte)
 }
 
 /// Les alertes de moins de 90 jours, les 500 plus récentes au plus.
@@ -216,7 +216,7 @@ fn lire_journal(fichier: &Path) -> Vec<Alerte> {
 /// Noté au début de chaque passe de la surveillance : le tableau dit quand elle a tourné pour la dernière fois.
 pub(crate) fn noter_passe() {
     let maintenant = chrono::Local::now().format(FORMAT_DATE).to_string();
-    let _ = reseau::ecrire_atomique(&fichier_passe(), maintenant);
+    let _ = crate::socle::ecrire_atomique(&fichier_passe(), maintenant);
 }
 
 /// Le scan du réseau de cette passe n'a pas pu se faire (`Some(raison)`), ou il s'est fait (`None`). La passe est
@@ -234,7 +234,7 @@ fn ecrire_reseau(fichier: &Path, non_verifie: Option<&str>, maintenant: NaiveDat
                 maintenant.format(FORMAT_DATE),
                 tronquer(&raison.replace('\n', " "), TEXTE_MAX)
             );
-            if let Err(e) = reseau::ecrire_atomique(fichier, texte) {
+            if let Err(e) = crate::socle::ecrire_atomique(fichier, texte) {
                 crate::journal::erreur("scan du réseau non vérifié", &e.to_string());
             }
         }
@@ -261,7 +261,7 @@ fn derniere_passe() -> Option<String> {
         .map(|t| t.trim().to_string())
         .filter(|t| NaiveDateTime::parse_from_str(t, FORMAT_DATE).is_ok());
     notee.or_else(|| {
-        let date = std::fs::metadata(reseau::dossier_local().join("surveillance-machine.json"))
+        let date = std::fs::metadata(crate::socle::dossier_local().join("surveillance-machine.json"))
             .and_then(|m| m.modified())
             .ok()?;
         Some(
@@ -716,7 +716,7 @@ pub(crate) fn html(d: &Donnees) -> String {
 /// Écrit la page dans le dossier de Vanguard de cet ordinateur (jamais sur la clé : elle dit ce qui a été vu ici).
 pub fn generer() -> std::io::Result<PathBuf> {
     let chemin = fichier_page();
-    reseau::ecrire_atomique(&chemin, html(&collecter()))?;
+    crate::socle::ecrire_atomique(&chemin, html(&collecter()))?;
     Ok(chemin)
 }
 
@@ -923,7 +923,7 @@ mod tests {
     #[test]
     fn scan_du_reseau_non_verifie() {
         assert!(!html(&donnees()).contains("NON VÉRIFIÉ") && !html(&donnees()).contains("NOT CHECKED"));
-        let dossier = reseau::dossier_local().join("tableau-reseau");
+        let dossier = crate::socle::dossier_local().join("tableau-reseau");
         let _ = std::fs::remove_dir_all(&dossier);
         let fichier = dossier.join("surveillance-reseau-non-verifie.txt");
         assert_eq!(lire_reseau(&fichier), None);
@@ -956,7 +956,7 @@ mod tests {
 
     #[test]
     fn journal_borne_en_nombre_et_en_age() {
-        let dossier = reseau::dossier_local().join("tableau-journal");
+        let dossier = crate::socle::dossier_local().join("tableau-journal");
         let _ = std::fs::remove_dir_all(&dossier);
         let fichier = dossier.join("surveillance-alertes.jsonl");
         let maintenant = date("2026-10-20 14:50:00");

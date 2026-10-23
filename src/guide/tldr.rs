@@ -39,7 +39,7 @@ pub(super) struct PageTldr {
 }
 
 fn dossier() -> PathBuf {
-    crate::reseau::dossier_local().join("tldr")
+    crate::socle::dossier_local().join("tldr")
 }
 
 fn nom_d_archive(langue: &str) -> String {
@@ -248,28 +248,19 @@ pub(super) fn en_cours() -> bool {
     EN_COURS.load(Ordering::SeqCst)
 }
 
-/// Télécharge une archive à côté de l'ancienne, puis la met à sa place si elle se lit : une page d'erreur ou un
-/// fichier tronqué ne remplace jamais la bonne.
+/// Télécharge une archive et la met à la place de l'ancienne si elle se lit : une page d'erreur ou un fichier
+/// tronqué ne remplace jamais la bonne. Écrite par l'écriture atomique du socle (disque forcé, essais répétés quand
+/// Defender tient l'ancienne), plus par un renommage fait ici.
 fn telecharger(langue: &str) -> bool {
-    if std::fs::create_dir_all(dossier()).is_err() {
-        return false;
-    }
     let fin = archive(langue);
-    let provisoire = fin.with_extension(format!("zip.{}", std::process::id()));
     let adresse = format!("{ADRESSE}tldr-pages.{langue}.zip");
     let demande = crate::http::Demande {
         taille_max: TAILLE_ARCHIVE,
         ..crate::http::Demande::get(&adresse, std::time::Duration::from_secs(120))
     };
-    let recu = crate::http::envoyer(demande)
-        .filter(|r| r.code == 200)
-        .is_some_and(|r| std::fs::write(&provisoire, &r.corps).is_ok());
-    let lisible = recu && std::fs::read(&provisoire).is_ok_and(|octets| !lire_zip(&octets).is_empty());
-    if lisible && std::fs::rename(&provisoire, &fin).is_ok() {
-        return true;
-    }
-    let _ = std::fs::remove_file(&provisoire);
-    false
+    crate::http::envoyer(demande)
+        .filter(|r| r.code == 200 && !lire_zip(&r.corps).is_empty())
+        .is_some_and(|r| crate::socle::ecrire_atomique(&fin, &r.corps).is_ok())
 }
 
 /// Les fichiers d'une archive de tldr-pages : (nom, contenu), par le lecteur commun (`archives::zip`), avec les
@@ -600,7 +591,7 @@ mod tests {
 
     /// Deux dossiers d'essai, l'un pour cet ordinateur, l'autre pour la clé.
     fn deux_copies(nom: &str) -> (PathBuf, [PathBuf; 2]) {
-        let racine = crate::reseau::dossier_local().join(nom);
+        let racine = crate::socle::dossier_local().join(nom);
         let dossiers = [racine.join("ordinateur"), racine.join("cle")];
         for d in &dossiers {
             std::fs::create_dir_all(d).unwrap();

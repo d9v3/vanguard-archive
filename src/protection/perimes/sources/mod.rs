@@ -6,7 +6,7 @@
 //! téléchargement ; les copies déjà gardées servent alors seules, et c'est dit.
 //!
 //! Une réponse qui n'a pas la forme attendue (page d'un portail Wi-Fi, format changé) ne remplace jamais la bonne
-//! copie (`abuse_ch::liste_validee`). Un fichier gzip est gardé tel que reçu, et relu par `degzip_controle` (CRC et
+//! copie (`crate::socle::cache::liste_validee`). Un fichier gzip est gardé tel que reçu, et relu par `degzip_controle` (CRC et
 //! taille vérifiés) : un téléchargement coupé ne passe pas pour un fichier entier.
 
 pub(crate) mod editeurs;
@@ -565,8 +565,7 @@ fn obtenir(source: &Source, adresse: &str, mode: &Mode) -> Result<Copie, String>
             if source.gzip.is_some() {
                 demande.entetes.push(("Accept-Encoding", "gzip".to_string()));
             }
-            let liste =
-                crate::protection::abuse_ch::liste_validee(demande, lieu, FRAICHE, &|o| contenu(source, o).is_some());
+            let liste = crate::socle::cache::liste_validee(demande, lieu, FRAICHE, &|o| contenu(source, o).is_some());
             let manque = liste.manque.map(raison);
             let (brut, age) = liste.resultat(false).map_err(raison)?;
             (brut, age, manque)
@@ -596,7 +595,7 @@ fn obtenir(source: &Source, adresse: &str, mode: &Mode) -> Result<Copie, String>
 
 /// La copie gardée et son âge, sans rien demander.
 fn gardee((sous_dossier, nom): (&str, &str)) -> Option<(Vec<u8>, Duration)> {
-    let fichier = crate::reseau::dossier_local().join(sous_dossier).join(nom);
+    let fichier = crate::socle::dossier_local().join(sous_dossier).join(nom);
     let age = std::fs::metadata(&fichier)
         .and_then(|m| m.modified())
         .ok()?
@@ -828,7 +827,7 @@ mod tests {
     /// ne chasse pas la bonne copie, et c'est dit.
     #[test]
     fn gzip_garde_et_portail_refuse() {
-        let dossier = crate::reseau::dossier_local().join(SOUS_DOSSIER);
+        let dossier = crate::socle::dossier_local().join(SOUS_DOSSIER);
         let _ = std::fs::remove_file(dossier.join(ESSAI.id));
         let (adresse, fil) = serveur(reponse(&gzip(EOL)));
         let copie = obtenir(&ESSAI, &adresse, &Mode::Telecharger).unwrap();
@@ -898,7 +897,7 @@ mod tests {
             id: "essai-sans-copie",
             ..ESSAI
         };
-        let _ = std::fs::remove_file(crate::reseau::dossier_local().join(SOUS_DOSSIER).join(source.id));
+        let _ = std::fs::remove_file(crate::socle::dossier_local().join(SOUS_DOSSIER).join(source.id));
         let libre = std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()

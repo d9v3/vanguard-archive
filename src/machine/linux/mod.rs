@@ -21,6 +21,7 @@ pub(crate) mod gvdb;
 pub(crate) mod journal_systemd;
 mod maj;
 pub(crate) mod natif;
+pub(crate) mod paquets;
 mod persistance;
 mod plateforme;
 mod privileges;
@@ -63,11 +64,10 @@ pub fn commande_installation(paquet: &str) -> String {
 
 /// Ubuntu ou une dérivée (Mint, Pop!_OS, Zorin…) : quelques paquets n'y ont pas le nom de Debian.
 pub fn famille_ubuntu() -> bool {
-    std::fs::read_to_string("/etc/os-release").is_ok_and(|t| {
-        t.lines()
-            .filter(|l| l.starts_with("ID=") || l.starts_with("ID_LIKE="))
-            .any(|l| l.split(['=', '"', ' ']).any(|id| id == "ubuntu"))
-    })
+    crate::socle::systeme::os_release()
+        .lines()
+        .filter(|l| l.starts_with("ID=") || l.starts_with("ID_LIKE="))
+        .any(|l| l.split(['=', '"', '\'', ' ']).any(|id| id == "ubuntu"))
 }
 
 /// Système « atomique » : racine en lecture seule, mises à jour par image complète. dnf ou zypper n'y installent
@@ -148,10 +148,7 @@ impl Paquets {
             Paquets::Dnf => present("dnf") || present("rpm-ostree"),
             Paquets::Zypper => present("zypper"),
         };
-        let os_release = std::fs::read_to_string("/etc/os-release")
-            .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
-            .unwrap_or_default();
-        if let Some(p) = famille(&os_release).filter(|&p| outil(p)) {
+        if let Some(p) = famille(crate::socle::systeme::os_release()).filter(|&p| outil(p)) {
             return Some(p);
         }
         [
@@ -360,7 +357,7 @@ pub(crate) fn service_actif(nom: &str) -> bool {
 }
 
 fn home() -> String {
-    std::env::var("HOME").unwrap_or_default()
+    crate::socle::maison().to_string_lossy().into_owned()
 }
 
 /// Politique d'entrée par défaut de ufw (ACCEPT, DROP ou REJECT), lue dans /etc/default/ufw.
@@ -1021,15 +1018,11 @@ pub(crate) fn tentatives_ssh_lues() -> Option<Result<Vec<crate::machine::chasse:
     Some(journal_sshd()?.map(|journal| tentatives_ssh(&journal)))
 }
 
-/// Adresse d'Internet, pas du réseau local (privé, lien local, partagé du fournisseur, la machine elle-même).
+/// Adresse d'Internet, pas du réseau local (privé, lien local, partagé du fournisseur, la machine elle-même), par
+/// la règle commune. La copie d'avant comptait « ::ffff:192.168.1.5 », une adresse de la maison telle que la note
+/// un sshd qui écoute aussi en IPv6, comme venue d'Internet.
 fn d_internet(ip: &std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            let o = v4.octets();
-            !(v4.is_private() || v4.is_loopback() || v4.is_link_local() || (o[0] == 100 && (64..128).contains(&o[1])))
-        }
-        std::net::IpAddr::V6(v6) => !(v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()),
-    }
+    crate::socle::adresses::sur_internet(*ip)
 }
 
 /// Gravité des tentatives ratées. Moins de 5 en 24 h, c'est du bruit (une faute de frappe, un vieux script) ; avec
@@ -1363,8 +1356,32 @@ fn comptes() -> Constat {
     }
 }
 
-/// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
+/// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles. Lus d'abord
+/// par nl80211, comme l'audit du réseau (sous iwd, sans NetworkManager, nmcli ne voyait rien) ; nmcli en secours.
 fn wifi(passerelle: Option<String>) -> Vec<Constat> {
+    let natifs = super::wifi::nl80211::lire()
+        .map(|l| super::wifi::visibles_de(&l))
+        .unwrap_or_default();
+    let visibles = if natifs.iter().any(|v| v.actif) {
+        natifs
+    } else {
+        wifi_nmcli()
+    };
+    let Some(actif) = visibles.iter().find(|v| v.actif) else {
+        return Vec::new();
+    };
+    let admin = format!(
+        "xdg-open https://{}",
+        passerelle.unwrap_or_else(|| "192.168.1.1".into())
+    );
+    let mut constats = vec![super::wifi::securite(&actif.ssid, &actif.securite, &[&admin])];
+    constats.extend(super::wifi::jumeau(&visibles));
+    constats.extend(wifi_ouverts_automatiques());
+    constats
+}
+
+/// Les réseaux visibles selon NetworkManager, quand nl80211 ne les donne pas.
+fn wifi_nmcli() -> Vec<super::wifi::Visible> {
     // « --rescan no » : la liste que NetworkManager tient à jour de lui-même. Sans cela, une liste de plus de 30 s
     // faisait attendre un nouveau balayage, 7 s sur les 8 du bilan.
     // SSID en dernier et sans échappement : un nom de réseau contenant « : » reste intact. En anglais : nmcli
@@ -1388,18 +1405,7 @@ fn wifi(passerelle: Option<String>) -> Vec<Constat> {
     .map(|r| r.sortie) else {
         return Vec::new();
     };
-    let visibles = super::wifi::lire_nmcli(&s);
-    let Some(actif) = visibles.iter().find(|v| v.actif) else {
-        return Vec::new();
-    };
-    let admin = format!(
-        "xdg-open https://{}",
-        passerelle.unwrap_or_else(|| "192.168.1.1".into())
-    );
-    let mut constats = vec![super::wifi::securite(&actif.ssid, &actif.securite, &[&admin])];
-    constats.extend(super::wifi::jumeau(&visibles));
-    constats.extend(wifi_ouverts_automatiques());
-    constats
+    super::wifi::lire_nmcli(&s)
 }
 
 /// Connexions Wi-Fi de NetworkManager qui se reconnectent toutes seules : (UUID, nom). Le nom vient en dernier, sans
@@ -1426,8 +1432,12 @@ fn wifi_ouvert(details: &str) -> bool {
         .is_none_or(|v| v.trim().is_empty() || v.trim() == "--")
 }
 
-/// Réseaux ouverts enregistrés (sans gestion de clé) qui se reconnectent seuls ; 40 connexions regardées au plus.
+/// Réseaux ouverts enregistrés (sans gestion de clé) qui se reconnectent seuls : les profils lus nativement, comme
+/// l'audit du réseau (NetworkManager et iwd, en administrateur) ; sinon nmcli, 40 connexions regardées au plus.
 fn wifi_ouverts_automatiques() -> Option<Constat> {
+    if let Ok(profils) = super::wifi::profils::lire_linux() {
+        return super::wifi::ouverts_des_profils(&profils);
+    }
     let liste = crate::commande::lancer_en_anglais(
         Command::new("nmcli").args([
             "-t",

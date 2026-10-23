@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::machine::Constat;
-#[cfg(not(windows))]
-use crate::nettoyer::taille_lisible;
 use crate::selection::{Ligne, choisir};
+#[cfg(not(windows))]
+use crate::socle::taille_lisible;
 use crate::ui::*;
 
 /// Le dossier posé sur le disque externe, un sous-dossier par ordinateur.
@@ -63,7 +63,7 @@ struct Notes {
 pub(crate) const NOTES: &str = "sauvegarde.json";
 
 fn fichier_notes() -> PathBuf {
-    crate::reseau::dossier_local().join(NOTES)
+    crate::socle::dossier_local().join(NOTES)
 }
 
 fn charger_de(chemin: &Path) -> Notes {
@@ -270,7 +270,7 @@ fn sans_liens(systeme: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn dossier_unites() -> PathBuf {
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     std::env::var_os("XDG_CONFIG_HOME")
         .map_or_else(|| maison.join(".config"), PathBuf::from)
         .join("systemd/user")
@@ -319,7 +319,7 @@ pub(crate) fn schema_gsettings(schema: &str, cle: Option<&str>) -> Option<bool> 
 /// (/usr/local/share et /usr/share par défaut ; Flatpak y ajoute les siens).
 #[cfg(target_os = "linux")]
 fn dossiers_de_schemas() -> Vec<PathBuf> {
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
     let systeme = std::env::var("XDG_DATA_DIRS")
         .ok()
@@ -1472,7 +1472,7 @@ mod tests {
     /// copie abîmée (même heure, ou réécrite après la sauvegarde), fichier sans original.
     #[test]
     fn sauvegarde_relue_et_comparee() {
-        let base = crate::reseau::dossier_local().join("verifier-sauvegarde");
+        let base = crate::socle::dossier_local().join("verifier-sauvegarde");
         let _ = std::fs::remove_dir_all(&base);
         let (maison, sauvegarde) = (base.join("maison"), base.join("disque"));
         for d in [maison.join("Documents"), sauvegarde.join("Documents")] {
@@ -1533,7 +1533,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn original_qui_n_est_plus_un_fichier() {
-        let base = crate::reseau::dossier_local().join("verifier-sauvegarde-tube");
+        let base = crate::socle::dossier_local().join("verifier-sauvegarde-tube");
         let _ = std::fs::remove_dir_all(&base);
         let (maison, sauvegarde) = (base.join("maison"), base.join("disque"));
         for d in [maison.join("Documents"), sauvegarde.join("Documents")] {
@@ -1558,7 +1558,7 @@ mod tests {
     /// La borne arrête tout le parcours, et un gros fichier est compté sans entrer dans la liste.
     #[test]
     fn liste_bornee_et_gros_fichiers_comptes() {
-        let base = crate::reseau::dossier_local().join("verifier-sauvegarde-liste");
+        let base = crate::socle::dossier_local().join("verifier-sauvegarde-liste");
         let _ = std::fs::remove_dir_all(&base);
         for d in ["a", "b", "c"] {
             std::fs::create_dir_all(base.join(d)).unwrap();

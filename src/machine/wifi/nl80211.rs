@@ -388,10 +388,13 @@ fn connexion(interface: &Interface, bornes: &[Balise]) -> Option<Connexion> {
                 b.borne.ssid.clone()
             },
             bssid: b.borne.bssid.clone(),
+            // nl80211 ne dit pas la protection négociée : celle de la balise.
+            securite: String::new(),
         }),
         None if !nom_interface.is_empty() => Some(Connexion {
             ssid: nom_interface,
             bssid: String::new(),
+            securite: String::new(),
         }),
         None => None,
     }
@@ -583,7 +586,8 @@ mod tests {
             connexion(&interface, &b),
             Some(Connexion {
                 ssid: "Salon".into(),
-                bssid: "02:00:00:aa:bb:01".into()
+                bssid: "02:00:00:aa:bb:01".into(),
+                securite: String::new(),
             })
         );
         // Sans borne associée : le nom que l'interface porte, sinon rien.

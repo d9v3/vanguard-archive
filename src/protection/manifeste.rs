@@ -142,7 +142,7 @@ fn reference_ecrite(base: &Path, id: Option<&str>) -> PathBuf {
 
 /// La référence de la clé branchée à `racine`, sur l'ordinateur du propriétaire.
 fn reference(racine: &Path) -> Option<PathBuf> {
-    reference_lue(&crate::reseau::dossier_local(), identifiant_volume(racine).as_deref())
+    reference_lue(&crate::socle::dossier_local(), identifiant_volume(racine).as_deref())
 }
 
 /// Un chemin de la clé qui ne compte pas : dossier exclu, corbeille d'un gestionnaire de fichiers (« .Trash-1000 »,
@@ -224,7 +224,7 @@ fn ecrire_dans(racine: &Path, reference: &Path, gros: u64) -> Result<usize, Stri
 /// référence. L'ancienne référence unique part dès qu'une clé a la sienne : elle décrivait la clé déployée jusque-là,
 /// et gardée, elle servirait de référence à une autre.
 pub fn ecrire(racine: &Path) -> Result<(usize, PathBuf), String> {
-    let base = crate::reseau::dossier_local();
+    let base = crate::socle::dossier_local();
     let id = identifiant_volume(racine);
     let chemin = reference_ecrite(&base, id.as_deref());
     let n = ecrire_dans(racine, &chemin, GROS)?;
@@ -304,7 +304,7 @@ fn resume_ecart(ecart: &Ecart) -> String {
 /// Au bilan, chez le propriétaire (la référence existe) avec la clé branchée.
 pub fn constat() -> Option<Constat> {
     let cle = crate::reseau::cle_usb()?;
-    let base = crate::reseau::dossier_local();
+    let base = crate::socle::dossier_local();
     if reference(&cle).is_none() {
         // Chez le propriétaire (d'autres clés y ont leur référence), une clé VANGUARD sans la sienne : une deuxième
         // clé, ou une clé reformatée. Rien n'a pu être comparé, et c'est dit.

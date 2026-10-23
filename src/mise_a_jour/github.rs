@@ -166,7 +166,7 @@ fn juger_avec(
 }
 
 fn dossier() -> PathBuf {
-    crate::reseau::dossier_local().join("versions")
+    crate::socle::dossier_local().join("versions")
 }
 
 /// L'âge en jours de la version signée `v`, d'après la date de son commit gravée avec elle ; `None` sans date, ou
@@ -240,7 +240,7 @@ pub(super) fn dossier_sur() -> bool {
         if unsafe { libc::geteuid() } != 0 {
             return true;
         }
-        std::fs::symlink_metadata(crate::reseau::dossier_local())
+        std::fs::symlink_metadata(crate::socle::dossier_local())
             .is_ok_and(|m| std::os::unix::fs::MetadataExt::uid(&m) == 0)
     }
     #[cfg(windows)]
@@ -502,7 +502,7 @@ mod tests {
     fn versions_vues_changees_a_cote() {
         crate::sceau::ecrire(crate::sceau::VERSIONS, "0.85.0+1792540000").unwrap();
         assert_eq!(plus_haute_vue(), Ok(Some((0, 85, 0, 1_792_540_000))));
-        std::fs::write(crate::reseau::dossier_local().join(crate::sceau::VERSIONS), "0.1.0+1").unwrap();
+        std::fs::write(crate::socle::dossier_local().join(crate::sceau::VERSIONS), "0.1.0+1").unwrap();
         assert!(plus_haute_vue().is_err() && versions_vues_douteuses());
         oublier_versions_vues().unwrap();
         assert_eq!(plus_haute_vue(), Ok(None));

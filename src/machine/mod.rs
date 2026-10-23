@@ -347,7 +347,7 @@ pub(crate) fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
 /// Permissions de ~/.ssh.
 #[cfg(unix)]
 fn cles_ssh() -> Vec<Constat> {
-    let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".ssh");
+    let dossier = crate::socle::maison().join(".ssh");
     let Ok(meta) = std::fs::metadata(&dossier) else {
         return vec![ok("Clés SSH", tr!("Pas de dossier ~/.ssh.", "No ~/.ssh folder."))];
     };
@@ -644,7 +644,7 @@ fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
 /// Un port bloqué écoute toujours : sans ce registre, l'alerte et la même correction revenaient à chaque audit.
 /// Sous Linux, les règles ufw ne sont pas lisibles sans root ; Windows, lui, relit ses règles directement.
 fn fichier_blocages() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("ports-bloques.txt")
+    crate::socle::dossier_local().join("ports-bloques.txt")
 }
 
 fn lire_blocages(texte: &str) -> std::collections::HashSet<String> {
@@ -684,7 +684,7 @@ pub fn empreinte_machine() -> Option<String> {
         .and_then(|k| k.get_value("MachineGuid"))
         .ok()?;
     let id = id.trim();
-    (!id.is_empty()).then(|| sha1_smol::Sha1::from(id).digest().to_string())
+    (!id.is_empty()).then(|| crate::socle::hachage::sha1_hexa(id.as_bytes()))
 }
 
 pub fn retenir_blocage(k: &Correctif) {

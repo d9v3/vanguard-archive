@@ -1613,7 +1613,7 @@ mod tests {
 
     #[test]
     fn fichier_de_la_chronologie() {
-        let dossier = crate::reseau::dossier_local().join("chronologie");
+        let dossier = crate::socle::dossier_local().join("chronologie");
         std::fs::create_dir_all(&dossier).unwrap();
         let _ = std::fs::remove_file(dossier.join(NOM));
         let maintenant = secondes(SystemTime::now()).unwrap();

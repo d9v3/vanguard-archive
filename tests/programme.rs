@@ -1217,7 +1217,7 @@ fn traces_collectees_et_manifeste_juste() {
     let _ = std::fs::remove_dir_all(&maison);
 }
 
-/// Le dossier de Vanguard dans un dossier personnel jetable, selon le système (voir `reseau::dossier_local`).
+/// Le dossier de Vanguard dans un dossier personnel jetable, selon le système (voir `socle::dossier_local`).
 fn dossier_vanguard(maison: &Path) -> PathBuf {
     if cfg!(windows) {
         maison.join("local").join("vanguard")

@@ -42,6 +42,17 @@ fn present_dans(cmd: &str, path: &OsStr) -> bool {
     chemin_dans(cmd, path).is_some()
 }
 
+/// Les dossiers de programmes du système, ceux que le `secure_path` de sudo garde : pour décider d'une commande
+/// lancée par sudo, le PATH du compte ne vaut rien (un `~/.local/bin/ufw` y passerait pour installé sans être celui
+/// que sudo lancera).
+const DOSSIERS_SYSTEME: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/// Le programme `cmd` est-il dans un dossier du système, et exécutable ? Les deux copies d'avant (réparer, nettoyer)
+/// prenaient un dossier ou un fichier non exécutable du même nom pour le programme.
+pub(crate) fn present_systeme(cmd: &str) -> bool {
+    !cmd.contains('/') && chemin_dans(cmd, OsStr::new(DOSSIERS_SYSTEME)).is_some()
+}
+
 fn chemin_dans(cmd: &str, path: &OsStr) -> Option<PathBuf> {
     let executable = |f: &Path| {
         f.metadata()
@@ -70,7 +81,7 @@ fn chemin_dans(cmd: &str, path: &OsStr) -> Option<PathBuf> {
 fn dossiers_de_config(racine: &Path, utilisateur: bool) -> Vec<PathBuf> {
     if utilisateur {
         let xdg = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
-        dossiers_utilisateur(racine, &crate::nettoyer::maison(), xdg.as_deref(), uid())
+        dossiers_utilisateur(racine, &crate::socle::maison(), xdg.as_deref(), uid())
     } else {
         vec![sous(racine, "/etc/systemd/system"), sous(racine, "/run/systemd/system")]
     }
@@ -214,16 +225,14 @@ fn processus_nomme_sous(racine: &Path, nom: &str) -> bool {
     if cherche.is_empty() {
         return false;
     }
-    std::fs::read_dir(sous(racine, "/proc"))
+    let proc = sous(racine, "/proc");
+    crate::socle::processus::pids_dans(&proc)
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| {
-            e.file_name()
-                .to_str()
-                .is_some_and(|n| n.bytes().all(|o| o.is_ascii_digit()))
+        .any(|pid| {
+            std::fs::read_to_string(proc.join(pid.to_string()).join("comm"))
+                .is_ok_and(|c| c.trim_end_matches('\n') == cherche)
         })
-        .any(|e| std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim_end_matches('\n') == cherche))
 }
 
 /// Lesquels de ces services du système tournent (`systemctl is-active`) ? Un seul passage dans /proc pour toute
@@ -247,15 +256,8 @@ fn services_actifs_sous(racine: &Path, services: &[&str]) -> Option<Vec<bool>> {
         .map(|s| format!("/system.slice/{}", nom_complet(s)))
         .collect();
     let mut actifs = vec![false; services.len()];
-    for e in std::fs::read_dir(&proc).ok()?.flatten() {
-        if !e
-            .file_name()
-            .to_str()
-            .is_some_and(|n| n.bytes().all(|o| o.is_ascii_digit()))
-        {
-            continue;
-        }
-        let Ok(texte) = std::fs::read_to_string(e.path().join("cgroup")) else {
+    for pid in crate::socle::processus::pids_dans(&proc)? {
+        let Ok(texte) = std::fs::read_to_string(proc.join(pid.to_string()).join("cgroup")) else {
             continue;
         };
         // Une ligne par hiérarchie, « 0::/chemin » (cgroup v2) ou « 1:name=systemd:/chemin » (v1) ; le chemin
@@ -438,17 +440,44 @@ fn paragraphes_dpkg(texte: &str) -> Vec<HashMap<&str, &str>> {
     tous
 }
 
-/// Les paquets installés et leur version, d'après le texte du fichier status. Seul « install ok installed »
-/// compte : un paquet retiré garde son paragraphe (« deinstall ok config-files ») tant que sa configuration reste.
-pub(crate) fn paquets_dpkg_selon(status: &str) -> Vec<(String, String)> {
+/// État d'un paquet selon dpkg : installé quand le dernier mot de Status est « installed », qu'il soit voulu
+/// (« install ok installed ») ou retenu (« hold ok installed »). Un paquet retiré dont la configuration reste
+/// (« deinstall ok config-files ») est connu de dpkg, qui répond sans erreur à « dpkg -s » : il n'est pas
+/// installé. La règle d'avant, ici, ne gardait que « install ok installed » : un openssh-server retenu n'avait pas
+/// de version ; celle du menu Gaming comptait les paquets retenus. Une seule règle, celle de `dpkg-query`
+/// (`${db:Status-Status}`).
+pub(crate) fn installe_selon_dpkg(statut: &str) -> bool {
+    statut.trim().ends_with(" installed")
+}
+
+/// Les paragraphes des paquets installés, `champ` gardé : (nom, champ), triés, sans doublon.
+fn installes_dpkg_avec(status: &str, champ: &str) -> Vec<(String, String)> {
     let mut paquets: Vec<(String, String)> = paragraphes_dpkg(status)
         .into_iter()
-        .filter(|p| p.get("Status") == Some(&"install ok installed"))
-        .filter_map(|p| Some((p.get("Package")?.to_string(), p.get("Version")?.to_string())))
+        .filter(|p| p.get("Status").is_some_and(|s| installe_selon_dpkg(s)))
+        .filter_map(|p| Some((p.get("Package")?.to_string(), p.get(champ)?.to_string())))
         .collect();
     paquets.sort();
     paquets.dedup();
     paquets
+}
+
+/// Les paquets installés et leur version, d'après le texte du fichier status.
+pub(crate) fn paquets_dpkg_selon(status: &str) -> Vec<(String, String)> {
+    installes_dpkg_avec(status, "Version")
+}
+
+/// Les paquets installés et leur architecture, d'après le texte du fichier status : « mesa-vulkan-drivers:i386 »
+/// se demande par son architecture.
+pub(crate) fn architectures_installees_selon(status: &str) -> Vec<(String, String)> {
+    installes_dpkg_avec(status, "Architecture")
+}
+
+/// Les paquets installés selon dpkg, avec leur architecture : (nom, architecture). `None` sans base.
+pub(crate) fn paquets_dpkg_installes() -> Option<Vec<(String, String)>> {
+    Some(architectures_installees_selon(
+        &std::fs::read_to_string(sous(Path::new(RACINE), DPKG_STATUS)).ok()?,
+    ))
 }
 
 /// Les paquets installés (`dpkg-query -W`) ; `None` sans base dpkg.
@@ -485,7 +514,7 @@ fn architectures_dpkg_sous(racine: &Path) -> Option<Vec<String>> {
 
 /// Les installations Flatpak : celle du système, puis celle du compte.
 fn installations_flatpak(racine: &Path) -> Vec<PathBuf> {
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
     vec![
         sous(racine, "/var/lib/flatpak"),
@@ -983,6 +1012,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// Les dossiers du système seulement, et jamais un chemin : `present_systeme` décide de commandes passées à sudo.
+    #[test]
+    fn present_systeme_sans_chemin() {
+        assert!(present_systeme("sh"));
+        assert!(!present_systeme("vanguard-introuvable") && !present_systeme(""));
+        assert!(!present_systeme("/bin/sh") && !present_systeme("../bin/sh"));
+    }
+
     #[test]
     fn unite_activee_par_les_liens() {
         let d = jetable("unites");
@@ -1237,6 +1274,41 @@ mod tests {
         Conffiles:\n /etc/ld.so.conf.d/x86_64-linux-gnu.conf abc\n\
         \n\
         Package: demi\nStatus: install ok half-configured\nVersion: 3\n";
+
+    #[test]
+    fn paquet_retire_pas_compte_installe() {
+        assert!(installe_selon_dpkg("install ok installed"));
+        assert!(installe_selon_dpkg("hold ok installed\n"));
+        assert!(!installe_selon_dpkg("deinstall ok config-files"));
+        assert!(!installe_selon_dpkg("install ok half-installed"));
+        assert!(!installe_selon_dpkg(""));
+    }
+
+    #[test]
+    fn paquets_de_dpkg_avec_leur_architecture() {
+        let status = "Package: steam-installer\nStatus: install ok installed\nArchitecture: amd64\n\
+                      Description: jeux\n Status: deinstall ok config-files\n\n\
+                      Package: libvulkan1\nStatus: hold ok installed\nArchitecture: i386\n\n\
+                      Package: ancien\nStatus: deinstall ok config-files\nArchitecture: amd64\n";
+        assert_eq!(
+            architectures_installees_selon(status),
+            [
+                ("libvulkan1".to_string(), "i386".to_string()),
+                ("steam-installer".to_string(), "amd64".to_string())
+            ]
+        );
+        assert_eq!(architectures_installees_selon(""), Vec::<(String, String)>::new());
+    }
+
+    /// Un paquet retenu (« hold ») est installé : il a sa version.
+    #[test]
+    fn paquet_retenu_a_sa_version() {
+        let status = "Package: openssh-server\nStatus: hold ok installed\nVersion: 1:9.6p1-3\n";
+        assert_eq!(
+            paquets_dpkg_selon(status),
+            [("openssh-server".to_string(), "1:9.6p1-3".to_string())]
+        );
+    }
 
     #[test]
     fn dpkg_lit_status_et_arch() {

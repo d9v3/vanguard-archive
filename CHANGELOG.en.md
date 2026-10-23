@@ -83,6 +83,23 @@ delivered just before it. Only the latest version has its download page; every v
   `signer-versions.sh --secours` refuses an unencrypted backup key.
 - **CI.** `/dev/root` read by its device number like findmnt, enable links of vanished systemd units left out like
   systemctl, local HTTP client time bound adjusted for Windows; `claude-journal.yml` analysis only.
+- **Common base, no duplicates.** What all of Vanguard shares lives in `src/socle/`, once, tested once: Vanguard's
+  folder, atomic write and lock (out of the network module), cache of downloaded lists (out of abuse.ch), an IP
+  address's scope per the RFCs, home folder, Linux and macOS processes, JSON with comments, os-release,
+  fingerprints; the package inventory leaves Gaming for `machine/linux/paquets.rs`, and `sha1_smol` and the
+  hand-written MD5 give way to RustCrypto's sha1 and md-5, already pulled in by YARA-X (no extra crate). Some copies
+  were wrong: an SSH attempt logged as “::ffff:192.168.1.5” looked like it came from the Internet; a Chrome policy
+  with “1, // comment” before “}” was called unreadable; a held package had no version; a folder or a
+  non-executable file with the same name passed for an installed program before a sudo command; an empty HOME made
+  reads and writes start from the current folder. An unreadable /proc no longer counts as checked (spyware,
+  keyboard readers, camera, remote control), and a /proc mounted with hidepid is reported. Threat lists and tldr
+  are written by the atomic write (on Windows, Defender holding the old copy kept it in place). Run keys are read
+  one way, the safest: “Is someone controlling my PC?” and “Spyware” also see RunOnce and malformed names, and
+  “Spyware” reports an unreadable key. The check-up reads Wi-Fi through nl80211 and wlanapi, like the network
+  audit (nmcli and netsh as fallbacks), and judges saved open networks the same way it does: the protection kept
+  is the one Windows negotiated (a WPA2/WPA3 access point joined in WPA2 stays WPA2), two access points with the
+  same name and different protections, with no known transmitter, defer to nmcli, and NetworkManager profiles are
+  also read from /run (netplan) and /usr/lib, with nmcli as a fallback when a file is refused.
 
 ## October 22, 2026, evening: version 0.85
 

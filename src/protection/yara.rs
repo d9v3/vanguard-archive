@@ -41,11 +41,7 @@ pub(crate) fn regles() -> Result<&'static yara_x::Rules, &'static str> {
 /// Les endroits à risque : téléchargements, bureau, programmes lancés au démarrage (et le dossier temporaire sous
 /// Windows, où atterrissent les programmes téléchargés).
 pub(crate) fn endroits_a_risque() -> Vec<PathBuf> {
-    let maison = PathBuf::from(
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .unwrap_or_default(),
-    );
+    let maison = crate::socle::maison();
     #[cfg(windows)]
     let mut liste: Vec<PathBuf> = ["Downloads", "Desktop"].iter().map(|d| maison.join(d)).collect();
     #[cfg(windows)]
@@ -277,11 +273,7 @@ pub fn analyser(portee: &Portee) {
     titre(tr!("Analyse YARA", "YARA scan"));
     let cibles = match portee {
         Portee::Dossier(d) => vec![d.clone()],
-        Portee::Complete => vec![PathBuf::from(
-            std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .unwrap_or_default(),
-        )],
+        Portee::Complete => vec![crate::socle::maison()],
         Portee::Rapide => endroits_a_risque(),
     };
     if cibles.is_empty() {

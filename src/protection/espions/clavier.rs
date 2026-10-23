@@ -246,12 +246,11 @@ pub(super) fn lecteurs() -> (Vec<Lecteur>, usize) {
             .clone()
     };
     let (mut lecteurs, mut illisibles) = (Vec::new(), 0);
-    let pids: Vec<u32> = std::fs::read_dir("/proc")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| e.file_name().to_str()?.parse().ok())
-        .collect();
+    // /proc illisible : aucun processus n'a pu être regardé, ce qui se dit (un illisible), au lieu d'une liste vide
+    // qui passait pour « aucun lecteur du clavier ».
+    let Some(pids) = crate::socle::processus::pids() else {
+        return (lecteurs, 1);
+    };
     for (i, pid) in pids.into_iter().enumerate() {
         if pid == soi {
             continue;
@@ -282,12 +281,10 @@ pub(super) fn lecteurs() -> (Vec<Lecteur>, usize) {
         claviers.dedup();
         lecteurs.push(Lecteur {
             pid,
-            programme: std::fs::read_to_string(format!("/proc/{pid}/comm"))
-                .map(|n| crate::ui::affichable(n.trim_end_matches('\n')))
+            programme: crate::socle::processus::nom_court(pid)
+                .map(|n| crate::ui::affichable(&n))
                 .unwrap_or_default(),
-            chemin: std::fs::read_link(format!("/proc/{pid}/exe"))
-                .ok()
-                .map(|c| c.to_string_lossy().into_owned()),
+            chemin: crate::socle::processus::programme(pid).map(|c| c.to_string_lossy().into_owned()),
             claviers,
         });
     }

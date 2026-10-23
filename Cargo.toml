@@ -29,7 +29,11 @@ notify = { version = "8.2.0", default-features = false }
 rpassword = "7.5.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-sha1_smol = "1.0.1"
+# SHA-1 et MD5 de RustCrypto, déjà liés par YARA-X (son module pe) : aucune crate de plus. SHA-1 pour l'empreinte
+# de la machine et la recherche d'un mot de passe dans les fuites (Have I Been Pwned), MD5 et SHA-1 pour les
+# empreintes publiées à côté des vieux téléchargements. De la crypto relue par d'autres, plutôt qu'écrite ici.
+md-5 = { version = "0.11.0", default-features = false }
+sha1 = { version = "0.11.0", default-features = false }
 # SHA-256 : l'empreinte du script lancé en administrateur sous Windows, vérifiée par la fenêtre élevée avant de
 # l'exécuter ; celle des programmes et des fichiers des traces collectées, à chercher sur VirusTotal.
 sha2 = { version = "0.11.1", default-features = false }

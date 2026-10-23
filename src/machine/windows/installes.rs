@@ -13,6 +13,13 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_READ,
 
 const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 const UNINSTALL_32: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";
+/// Les trois clés Uninstall du panneau « Applications installées » : machine (64 puis 32 bits) et ce compte. Une
+/// seule liste pour ceux qui les lisent (ici, et « Quelqu'un contrôle mon ordi ? »).
+pub(crate) const CLES_UNINSTALL: [(winreg::HKEY, &str); 3] = [
+    (HKEY_LOCAL_MACHINE, UNINSTALL),
+    (HKEY_LOCAL_MACHINE, UNINSTALL_32),
+    (HKEY_CURRENT_USER, UNINSTALL),
+];
 /// Les paquets du Store installés pour ce compte (ce que Get-AppxPackage liste sans -AllUsers).
 const PAQUETS: &str =
     r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages";
@@ -20,17 +27,12 @@ const PAQUETS: &str =
 /// Les noms affichés (DisplayName) des programmes installés pour la machine (64 et 32 bits) et pour ce compte.
 /// `None` si la clé Uninstall de la machine ne s'ouvre pas : l'appelant demande alors à PowerShell.
 pub(crate) fn noms() -> Option<Vec<String>> {
-    let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let principale = machine.open_subkey(UNINSTALL).ok()?;
-    let mut noms = noms_de(&principale);
-    for cle in [
-        machine.open_subkey(UNINSTALL_32),
-        RegKey::predef(HKEY_CURRENT_USER).open_subkey(UNINSTALL),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        noms.extend(noms_de(&cle));
+    let [(racine, principale), autres @ ..] = CLES_UNINSTALL;
+    let mut noms = noms_de(&RegKey::predef(racine).open_subkey(principale).ok()?);
+    for (racine, chemin) in autres {
+        if let Ok(cle) = RegKey::predef(racine).open_subkey(chemin) {
+            noms.extend(noms_de(&cle));
+        }
     }
     Some(noms)
 }

@@ -9,11 +9,7 @@ use crate::ui::*;
 
 #[cfg(unix)]
 fn home() -> PathBuf {
-    PathBuf::from(
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .unwrap_or_default(),
-    )
+    crate::socle::maison()
 }
 
 /// Ce qu'un moteur a conclu sur un fichier.

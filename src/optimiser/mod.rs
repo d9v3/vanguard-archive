@@ -104,7 +104,7 @@ struct Avant {
 }
 
 fn fichier_historique() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("reglages.json")
+    crate::socle::dossier_local().join("reglages.json")
 }
 
 fn charger() -> Historique {
@@ -145,7 +145,7 @@ fn sauver(h: &Historique) -> bool {
 fn sauver_dans(h: &Historique, chemin: &std::path::Path) -> bool {
     let ecrit = serde_json::to_string_pretty(h)
         .map_err(std::io::Error::other)
-        .and_then(|texte| crate::reseau::ecrire_atomique(chemin, &texte));
+        .and_then(|texte| crate::socle::ecrire_atomique(chemin, &texte));
     if let Err(e) = &ecrit {
         tre!(
             "Attention : valeurs d'avant des réglages non enregistrées ({e}).",
@@ -643,7 +643,7 @@ mod tests {
     fn messages_dans_la_largeur() {
         let larges: Vec<String> = [include_str!("mod.rs"), include_str!("demarrage.rs")]
             .into_iter()
-            .flat_map(crate::gaming::tests::textes_trop_larges)
+            .flat_map(crate::ui::textes_trop_larges)
             .collect();
         assert_eq!(larges, Vec::<String>::new());
     }

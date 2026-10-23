@@ -1148,7 +1148,7 @@ fn juger_lance(l: &Lance) -> Option<Alerte> {
 /// Une connexion fermée, jugée par les serveurs de commande connus : seulement vers Internet.
 fn juger_prise(f: &FinPrise, serveurs: &ServeursDeCommande) -> Option<Alerte> {
     let ip = f.distante.ip().to_canonical();
-    if !crate::protection::sortantes::sur_internet(ip) {
+    if !crate::socle::adresses::sur_internet(ip) {
         return None;
     }
     let serveur = serveurs.serveur(ip, f.distante.port())?;
@@ -1292,12 +1292,12 @@ pub(crate) struct Etat {
 const DERNIERS_PARTIS: usize = 10;
 
 fn fichier_etat() -> PathBuf {
-    crate::reseau::dossier_local().join(ETAT)
+    crate::socle::dossier_local().join(ETAT)
 }
 
 /// Le choix de la personne, noté à l'allumage : si l'unité disparaît sans qu'elle l'ait coupée, le bilan le dit.
 fn fichier_voulu() -> PathBuf {
-    crate::reseau::dossier_local().join(VOULU)
+    crate::socle::dossier_local().join(VOULU)
 }
 
 pub(crate) fn voulu() -> bool {
@@ -1311,7 +1311,7 @@ fn lire_etat() -> Option<Etat> {
 
 fn ecrire_etat(etat: &Etat) {
     if let Ok(texte) = serde_json::to_string(etat) {
-        let _ = crate::reseau::ecrire_atomique(&fichier_etat(), texte);
+        let _ = crate::socle::ecrire_atomique(&fichier_etat(), texte);
     }
 }
 
@@ -1504,9 +1504,7 @@ const MARQUE_FR: &str = "# Posé par Vanguard (vanguard veilleur on)";
 const MARQUE_EN: &str = "# Placed by Vanguard (vanguard watcher on)";
 
 pub(crate) fn fichier_unite() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join(".config/systemd/user")
-        .join(UNITE)
+    crate::socle::maison().join(".config/systemd/user").join(UNITE)
 }
 
 /// Le texte de l'unité, dans la langue demandée. Le chemin entre guillemets (un dossier personnel peut contenir une
@@ -1834,7 +1832,7 @@ pub(crate) fn retirer_sans_question(chemin: &std::path::Path, arreter_l_etranger
     } else {
         Retire::Fait
     };
-    oublier_le_choix(&issue, &crate::reseau::dossier_local());
+    oublier_le_choix(&issue, &crate::socle::dossier_local());
     crate::changements::noter(&[commandes], &[issue == Retire::Fait]);
     issue
 }
@@ -2752,7 +2750,7 @@ mod tests {
     /// seulement non confirmé, ils partent. Dans un dossier à lui, pas celui des autres tests.
     #[test]
     fn retrait_rate_garde_le_choix() {
-        let d = crate::reseau::dossier_local().join("veilleur-oublier-le-choix");
+        let d = crate::socle::dossier_local().join("veilleur-oublier-le-choix");
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let poser = || {

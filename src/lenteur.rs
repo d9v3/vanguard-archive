@@ -770,7 +770,7 @@ fn occupation_disques(texte: &str, disques: &[String]) -> HashMap<String, u64> {
 
 #[cfg(target_os = "linux")]
 mod systeme {
-    use std::fs::{read_dir, read_link, read_to_string};
+    use std::fs::{read_dir, read_to_string};
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
@@ -803,16 +803,14 @@ mod systeme {
     }
 
     fn echantillon(disques: &[String]) -> Echantillon {
-        let processus = read_dir("/proc")
+        let processus = crate::socle::processus::pids()
+            .unwrap_or_default()
             .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                let pid = e.file_name().to_string_lossy().into_owned();
-                let n = pid.parse::<u32>().ok()?;
+            .filter_map(|n| {
+                let pid = n;
                 let (temps, pages) = stat_processus(&read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
-                let comm = read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
-                let exe = read_link(format!("/proc/{pid}/exe")).ok();
+                let comm = crate::socle::processus::nom_court(pid).unwrap_or_default();
+                let exe = crate::socle::processus::programme(pid);
                 let nom = nom_de_processus(exe.as_deref().and_then(Path::to_str), comm.trim());
                 // Octets lus et écrits : illisibles pour les programmes d'un autre compte.
                 let io = read_to_string(format!("/proc/{pid}/io")).unwrap_or_default();
@@ -904,7 +902,7 @@ mod systeme {
     /// l'utilisateur remplacent celles du système au même nom) et services ajoutés par l'utilisateur
     /// (~/.config/systemd/user).
     fn au_demarrage() -> Vec<(String, String)> {
-        let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let maison = crate::socle::maison();
         let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
         let systeme = std::env::var("XDG_CONFIG_DIRS").unwrap_or_default();
         let systeme = if systeme.is_empty() { "/etc/xdg" } else { &systeme };
@@ -1005,7 +1003,7 @@ mod systeme {
             allume_depuis: read_to_string("/proc/uptime")
                 .ok()
                 .and_then(|t| t.split('.').next()?.parse().ok()),
-            place: crate::nettoyer::volume(Path::new("/")),
+            place: crate::socle::volume(Path::new("/")),
         }
     }
 }
@@ -1587,7 +1585,7 @@ mod systeme {
             .split_once("sec = ")
             .and_then(|(_, r)| r.split(',').next()?.trim().parse::<u64>().ok())
             .and_then(|s| maintenant.checked_sub(s));
-        let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let maison = crate::socle::maison();
         // Agents lancés à l'ouverture de session par des programmes installés (pas ceux d'Apple).
         let dossiers = [maison, PathBuf::from("/")].map(|d| d.join("Library/LaunchAgents"));
         let au_demarrage = dossiers
@@ -1613,7 +1611,7 @@ mod systeme {
             .into()),
             au_demarrage,
             allume_depuis,
-            place: crate::nettoyer::volume(if donnees.is_dir() { donnees } else { Path::new("/") }),
+            place: crate::socle::volume(if donnees.is_dir() { donnees } else { Path::new("/") }),
         }
     }
 }
@@ -2075,7 +2073,7 @@ mod tests {
         .filter(|r| r.code == Some(0)) else {
             return;
         };
-        let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let maison = crate::socle::maison();
         let config =
             std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), std::path::PathBuf::from);
         let dossier = config.join("systemd/user");

@@ -1,6 +1,6 @@
 //! Les réseaux Wi-Fi enregistrés sur cet ordinateur, ceux auxquels il se reconnecte tout seul, lus dans les fichiers
 //! du système sans lancer nmcli, iwctl ni networksetup : NetworkManager (`/etc/NetworkManager/system-connections`,
-//! un fichier clé par connexion), iwd (`/var/lib/iwd`, un fichier par réseau, nommé d'après lui), macOS
+//! un fichier clé par connexion, plus ceux de `/run` et `/usr/lib` : netplan, profils fournis), iwd (`/var/lib/iwd`, un fichier par réseau, nommé d'après lui), macOS
 //! (`com.apple.wifi.known-networks.plist`). Ces fichiers n'appartiennent qu'à l'administrateur : sans ses droits,
 //! c'est « non vérifié », et le bilan de la machine garde sa lecture par nmcli. Windows lit les siens par l'API WLAN
 //! (wlanapi.rs). Les lecteurs sont purs ; seuls `lire_linux` et `lire_macos` touchent le disque.
@@ -183,7 +183,8 @@ pub(crate) fn connus_macos(plist: &crate::plist::Valeur) -> Vec<ProfilEnregistre
         .collect()
 }
 
-/// Les fichiers ordinaires d'un dossier, lus jusqu'à la taille bornée : (nom, contenu). `Err` : dossier interdit.
+/// Les fichiers ordinaires d'un dossier, lus jusqu'à la taille bornée : (nom, contenu). `Err` : dossier ou un de ses
+/// fichiers interdit.
 #[cfg(target_os = "linux")]
 fn fichiers(dossier: &str) -> std::io::Result<Vec<(String, String)>> {
     use std::io::Read;
@@ -193,8 +194,12 @@ fn fichiers(dossier: &str) -> std::io::Result<Vec<(String, String)>> {
         if !chemin.is_file() {
             continue;
         }
-        let Ok(fichier) = std::fs::File::open(&chemin) else {
-            continue;
+        let fichier = match std::fs::File::open(&chemin) {
+            Ok(f) => f,
+            // Dossier lisible (0755 sur certaines distributions) mais fichiers en 0600 : les sauter rendrait une liste
+            // vide, donc un faux « aucun réseau ouvert ». Même cas qu'un dossier interdit : le bilan passe par nmcli.
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Err(e),
+            Err(_) => continue,
         };
         let mut texte = String::new();
         if fichier.take(TAILLE_MAX).read_to_string(&mut texte).is_ok() {
@@ -216,9 +221,15 @@ pub(crate) fn lire_linux() -> Result<Vec<ProfilEnregistre>, &'static str> {
             "readable only as administrator (NetworkManager, iwd); the check-up reads them through nmcli"
         ));
     }
+    // Les réseaux enregistrés par NetworkManager. /etc et iwd décident seuls si les profils se lisent : ils sont
+    // réservés à l'administrateur. /run (netplan, profils en mémoire) et /usr/lib (profils fournis) peuvent se lister
+    // sans lui, ou manquer : ils s'ajoutent sans rien décider. Sans eux, un /etc vide en administrateur rendait
+    // « aucun réseau ouvert » sur un Ubuntu à netplan, sans passer par nmcli, qui les voit.
     let mut profils: Vec<ProfilEnregistre> = nm
         .into_iter()
         .flatten()
+        .chain(fichiers("/run/NetworkManager/system-connections").unwrap_or_default())
+        .chain(fichiers("/usr/lib/NetworkManager/system-connections").unwrap_or_default())
         .filter_map(|(_, texte)| nm_keyfile(&texte))
         .collect();
     profils.extend(
@@ -397,6 +408,31 @@ mod tests {
         assert_eq!(valeur(&paires, "Settings", "AutoConnect"), Some("false"));
         assert_eq!(valeur(&paires, "", "x"), Some("1"));
         assert_eq!(valeur(&paires, "Settings", "x"), None);
+    }
+
+    /// Un dossier qui se liste mais dont un fichier est interdit : refusé comme un dossier interdit, pas une liste
+    /// vide qui dirait « aucun réseau ouvert ». Sans objet en administrateur, qui lit tout.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fichier_interdit_dans_un_dossier_lisible() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY : geteuid ne prend rien et ne peut pas échouer.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let dossier = std::env::temp_dir().join(format!("vanguard-profils-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        std::fs::write(dossier.join("Salon.nmconnection"), "[wifi]\nssid=Salon\n").unwrap();
+        let nom = dossier.to_string_lossy().into_owned();
+        assert_eq!(fichiers(&nom).unwrap().len(), 1);
+        let cafe = dossier.join("Café.nmconnection");
+        std::fs::write(&cafe, "[wifi]\nssid=Café\n").unwrap();
+        std::fs::set_permissions(&cafe, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let lu = fichiers(&nom);
+        std::fs::set_permissions(&cafe, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let _ = std::fs::remove_dir_all(&dossier);
+        assert!(lu.is_err());
     }
 
     /// La vraie lecture : sans droits, la raison ; avec, des profils aux noms inoffensifs. Rien n'est affiché.

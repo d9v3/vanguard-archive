@@ -54,10 +54,13 @@ pub fn lire() -> Lecture {
     }
 }
 
-/// Une adresse IPv6 publique (« globale », 2000::/3) : joignable d'Internet, à la différence des adresses de lien
-/// local (fe80::/10) et des adresses locales uniques (fc00::/7).
+/// Une adresse IPv6 publique : une adresse mondiale (2000::/3, RFC 4291), joignable d'Internet, à la différence des
+/// adresses de lien local (fe80::/10) et des adresses locales uniques (fc00::/7). La règle commune
+/// (`socle::adresses`) compte comme Internet tout ce qu'elle ne place pas ailleurs, le côté prudent pour bloquer ;
+/// ici, ce serait annoncer l'ordinateur joignable d'Internet pour une adresse « ::192.168.1.5 » de sit0 ou un
+/// préfixe de traduction 64:ff9b::/96. D'où la limite à 2000::/3 par-dessus.
 pub fn publique(ip: Ipv6Addr) -> bool {
-    ip.segments()[0] & 0xe000 == 0x2000
+    ip.segments()[0] & 0xe000 == 0x2000 && crate::socle::adresses::sur_internet(ip.into())
 }
 
 /// Le préfixe /64 d'une adresse, celui que le fournisseur a donné à la maison : à montrer à la place de l'adresse
@@ -210,7 +213,19 @@ mod tests {
         let publique_1 = "2001:db8:1:2:aaaa:bbbb:cccc:dddd".parse().unwrap();
         assert!(publique(publique_1));
         assert!(publique("2a01:cb00:1:2::1".parse().unwrap()));
-        for privee in ["fe80::1", "fd12:3456::1", "::1", "::ffff:10.0.0.1", "ff02::1"] {
+        // Hors de 2000::/3 : adresse IPv4 compatible de sit0, traduction NAT64, préfixe à jeter (RFC 6666), plage
+        // pas encore attribuée.
+        for privee in [
+            "fe80::1",
+            "fd12:3456::1",
+            "::1",
+            "::ffff:10.0.0.1",
+            "ff02::1",
+            "::192.168.1.5",
+            "64:ff9b::808:808",
+            "100::1",
+            "4000::1",
+        ] {
             assert!(!publique(privee.parse().unwrap()), "{privee}");
         }
         assert_eq!(prefixe(publique_1), "2001:db8:1:2::/64");

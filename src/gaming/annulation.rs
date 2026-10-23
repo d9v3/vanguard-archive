@@ -44,7 +44,7 @@ impl Notes {
 }
 
 fn fichier() -> PathBuf {
-    crate::reseau::dossier_local().join("jeux.json")
+    crate::socle::dossier_local().join("jeux.json")
 }
 
 pub(crate) fn charger() -> Notes {
@@ -89,7 +89,7 @@ fn sauver_dans(n: &Notes, chemin: &Path) -> bool {
     } else {
         serde_json::to_string_pretty(n)
             .map_err(std::io::Error::other)
-            .and_then(|texte| crate::reseau::ecrire_atomique(chemin, &texte))
+            .and_then(|texte| crate::socle::ecrire_atomique(chemin, &texte))
     };
     if let Err(e) = &ecrit {
         tre!(

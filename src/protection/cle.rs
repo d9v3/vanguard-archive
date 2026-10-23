@@ -148,7 +148,7 @@ pub fn proteger_cle() {
         return;
     }
     // Le dossier courant est peut-être sur la clé (terminal ouvert dans Linux/) : on en sort.
-    if let Some(maison) = std::env::var_os("HOME") {
+    if let Some(maison) = crate::socle::personnel::dossier_personnel() {
         let _ = std::env::set_current_dir(maison);
     }
     // Un programme du bureau (indexation, miniatures) peut lire la clé un court instant : on réessaie un peu.

@@ -216,19 +216,14 @@ impl Entree {
 
 /// Une adresse du réseau local (box, Pi-hole, NAS, résolveur local), pas d'Internet.
 fn du_reseau(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_private() || v4.is_link_local() || v4.is_loopback() || matches!(v4.octets(), [100, 64..128, ..])
-        }
-        IpAddr::V6(v6) => v6.is_unique_local() || v6.is_unicast_link_local() || v6.is_loopback(),
-    }
+    ip.is_loopback() || crate::socle::adresses::du_reseau(ip)
 }
 
 /// Un serveur qu'on sait interroger d'ici : une adresse IPv6 de lien local n'a pas le nom de sa carte.
 fn interrogeable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(_) => true,
-        IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) != 0xfe80 && (v6.segments()[0] & 0xffc0) != 0xfec0,
+        IpAddr::V6(v6) => !crate::socle::adresses::lien_local_v6(v6),
     }
 }
 

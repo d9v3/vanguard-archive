@@ -456,7 +456,7 @@ fn domaine(nom: &str) -> Option<String> {
 /// hors des hébergeurs partagés.
 fn adresse(texte: &str) -> Option<IpAddr> {
     let ip = texte.trim().parse::<IpAddr>().ok()?.to_canonical();
-    (crate::protection::sortantes::sur_internet(ip) && !partagee(ip)).then_some(ip)
+    (crate::socle::adresses::sur_internet(ip) && !partagee(ip)).then_some(ip)
 }
 
 /// L'hôte d'une ligne de distribution : une adresse (« https://github.com/x/y ») ou un nom nu ; schéma, chemin,
@@ -529,14 +529,14 @@ pub(super) fn indicateurs_de(entrees: &[Entree]) -> Option<Indicateurs> {
 /// ne sert pas, prêt à suivre « liste d'Échap non vérifiée : ».
 pub(crate) fn indicateurs(telecharger: bool, age_max: Duration) -> Result<(Indicateurs, Duration), String> {
     let (octets, age) = if telecharger && !crate::parametres::hors_ligne() {
-        use crate::protection::abuse_ch::{self, Echec};
+        use crate::protection::abuse_ch::Echec;
         let demande = crate::http::Demande {
             taille_max: TAILLE_MAX,
             meme_hote: true,
             ..crate::http::Demande::get(ADRESSE, Duration::from_secs(30))
         };
         // Validée avant de remplacer la copie : une page de blocage reçue avec un 200 ne l'efface pas.
-        abuse_ch::liste(demande, ("echap", "ioc.yaml"), FRAICHE, |o| {
+        crate::socle::cache::liste(demande, ("echap", "ioc.yaml"), FRAICHE, |o| {
             std::str::from_utf8(o)
                 .ok()
                 .and_then(lire_yaml)
@@ -594,7 +594,7 @@ pub(crate) fn indicateurs(telecharger: bool, age_max: Duration) -> Result<(Indic
 
 /// La copie gardée par un téléchargement d'avant, et son âge.
 fn copie_gardee() -> Option<(Vec<u8>, Duration)> {
-    let fichier = crate::reseau::dossier_local().join("echap").join("ioc.yaml");
+    let fichier = crate::socle::dossier_local().join("echap").join("ioc.yaml");
     let age = std::fs::metadata(&fichier)
         .ok()?
         .modified()

@@ -211,7 +211,7 @@ pub(super) fn juger(a: &Autorisation, ind: Option<&Indicateurs>) -> Jugement {
 #[cfg(target_os = "macos")]
 pub(super) fn relever(r: &mut super::Releve, ind: Option<&Indicateurs>) {
     use crate::{tr, trf};
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let bases = [
         std::path::PathBuf::from("/Library/Application Support/com.apple.TCC/TCC.db"),
         maison.join("Library/Application Support/com.apple.TCC/TCC.db"),
@@ -283,29 +283,19 @@ pub(super) fn relever(r: &mut super::Releve, ind: Option<&Indicateurs>) {
             }
         }
     }
-    // Les processus : leur chemin, demandé au noyau (proc_listallpids, proc_pidpath), sans lancer ps.
-    let mut pids: Vec<libc::c_int> = vec![0; 8192];
-    let taille = libc::c_int::try_from(pids.len() * std::mem::size_of::<libc::c_int>()).unwrap_or(0);
-    // SAFETY : proc_listallpids écrit au plus `taille` octets dans `pids` et rend le nombre de processus écrits.
-    let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), taille) };
-    let n = usize::try_from(n).unwrap_or(0).min(pids.len());
-    // Une liste vide est un échec de l'appel (au moins Vanguard tourne) : dit, jamais compté comme vérifié.
-    if n == 0 {
-        r.non_verifie(tr!("processus illisibles", "processes unreadable"));
-    } else {
+    // Les processus : leur chemin, demandé au noyau par la lecture commune (`socle::processus`), sans lancer ps.
+    // Une liste illisible est dite, jamais comptée comme vérifiée.
+    let pids = crate::socle::processus::pids();
+    if pids.is_some() {
         r.verifies += 1;
+    } else {
+        r.non_verifie(tr!("processus illisibles", "processes unreadable"));
     }
-    for &pid in &pids[..n] {
-        let mut tampon = vec![0u8; 4096];
-        let Ok(taille) = u32::try_from(tampon.len()) else {
+    for pid in pids.unwrap_or_default() {
+        let Some(chemin) = crate::socle::processus::programme(pid) else {
             continue;
         };
-        // SAFETY : proc_pidpath écrit au plus `taille` octets dans `tampon` et rend leur nombre (0 : refus).
-        let lus = unsafe { libc::proc_pidpath(pid, tampon.as_mut_ptr().cast(), taille) };
-        let Some(octets) = usize::try_from(lus).ok().and_then(|l| tampon.get(..l)) else {
-            continue;
-        };
-        let chemin = String::from_utf8_lossy(octets).into_owned();
+        let chemin = chemin.to_string_lossy().into_owned();
         let nom = chemin.rsplit('/').next().unwrap_or_default().to_string();
         if !nom.is_empty() {
             r.programme(

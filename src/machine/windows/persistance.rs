@@ -126,22 +126,24 @@ fn valeur_texte(valeur: &winreg::RegValue) -> String {
 }
 
 /// Une valeur d'une clé Run ou RunOnce.
-struct ValeurRun {
+pub(crate) struct ValeurRun {
     /// Le nom PowerShell de la clé (`CLES_RUN`).
-    cle: &'static str,
+    pub(crate) cle: &'static str,
     /// Vide pour la valeur par défaut ; lu avec pertes (U+FFFD) s'il n'est pas de l'Unicode valide.
-    nom: String,
+    pub(crate) nom: String,
     /// Le nom exact, mot par mot, quand il n'est pas de l'Unicode valide (demi-caractère de substitution isolé, que
     /// RegSetValueExW accepte) : la correction doit viser ce nom-là, pas sa version lue avec pertes.
     mots: Option<Vec<u16>>,
-    valeur: String,
+    pub(crate) valeur: String,
 }
 
 /// Les valeurs des clés Run et RunOnce, lues par winreg, et les clés qui n'ont pas pu être lues en entier. Toutes les
 /// valeurs comptent : le filtre « PS* » du script n'écartait que les propriétés ajoutées par PowerShell (PSPath…),
 /// mais cachait aussi une valeur nommée « PSUpdate ». Les noms sont lus en UTF-16 brut : la conversion en texte de
-/// winreg refusait un nom mal formé, et la valeur, que Windows lance quand même, était sautée.
-fn lignes_run() -> (Vec<ValeurRun>, Vec<&'static str>) {
+/// winreg refusait un nom mal formé, et la valeur, que Windows lance quand même, était sautée. La seule lecture des
+/// clés Run de Vanguard : « Quelqu'un contrôle mon ordi ? » et « Logiciels espions » en avaient chacun une copie, qui
+/// jetait sans rien dire les valeurs que winreg ne rendait pas et ne lisait pas toutes les clés.
+pub(crate) fn lignes_run() -> (Vec<ValeurRun>, Vec<&'static str>) {
     use std::os::windows::ffi::OsStrExt;
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};

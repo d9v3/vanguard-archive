@@ -122,10 +122,7 @@ fn mesurer_noms(serveur: IpAddr, noms: &[String]) -> Option<Duration> {
 
 /// Adresse d'un réseau local (box, routeur, serveur de la maison), pas d'Internet.
 fn locale(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => v4.is_private() || v4.is_link_local() || matches!(v4.octets(), [100, 64..128, ..]),
-        IpAddr::V6(v6) => v6.is_unique_local() || v6.is_unicast_link_local(),
-    }
+    crate::socle::adresses::du_reseau(ip)
 }
 
 /// Les adresses de la famille « Cloudflare pour les familles », qui filtrent (1.1.1.2, 1.1.1.3…).
@@ -230,7 +227,7 @@ fn millisecondes(d: Option<Duration>) -> String {
 fn mesurable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(_) => true,
-        IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) != 0xfe80 && (v6.segments()[0] & 0xffc0) != 0xfec0,
+        IpAddr::V6(v6) => !crate::socle::adresses::lien_local_v6(v6),
     }
 }
 

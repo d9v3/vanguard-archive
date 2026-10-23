@@ -170,7 +170,7 @@ fn commandes(prepare: &str, nouvelle: &str, avant: &str) -> Vec<String> {
 /// Écrit `nouveau` à la place du hosts lu (`avant`), en administrateur, après l'avoir montré ; relit pour dire ce qui
 /// est vraiment posé.
 fn ecrire(avant: &[u8], nouveau: &str) -> bool {
-    let dossier = crate::reseau::dossier_local().join("sites-bloques");
+    let dossier = crate::socle::dossier_local().join("sites-bloques");
     let prepare = dossier.join("hosts");
     if let Err(e) = std::fs::create_dir_all(&dossier).and_then(|()| std::fs::write(&prepare, nouveau)) {
         trp!(

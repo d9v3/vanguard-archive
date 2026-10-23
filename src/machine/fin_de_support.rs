@@ -226,7 +226,7 @@ pub fn constats() -> Vec<Constat> {
     {
         constats.push(c);
     }
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let present = |p: &str| std::path::Path::new(p).exists() || maison.join(p.trim_start_matches('/')).exists();
     let mut noms = Vec::new();
     for (chemin, nom) in [
@@ -252,7 +252,7 @@ pub fn constats() -> Vec<Constat> {
     {
         noms.push("Python 2.7".to_string());
     }
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let flash = [
         std::path::PathBuf::from("/usr/lib/mozilla/plugins/libflashplayer.so"),
         std::path::PathBuf::from("/usr/lib64/mozilla/plugins/libflashplayer.so"),

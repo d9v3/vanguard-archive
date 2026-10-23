@@ -176,7 +176,7 @@ pub(crate) fn page(a: &Audit, arrivee: Option<u32>, date: &str, conseils: &[&str
 fn bureau() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
-        let maison = crate::nettoyer::maison();
+        let maison = crate::socle::maison();
         let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
         let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
         crate::protection::pieges::dossier_declare(&declares, "XDG_DESKTOP_DIR", &maison)
@@ -199,7 +199,7 @@ fn bureau() -> Option<PathBuf> {
     }
     #[cfg(target_os = "macos")]
     {
-        Some(crate::nettoyer::maison().join("Desktop")).filter(|d| d.is_dir())
+        Some(crate::socle::maison().join("Desktop")).filter(|d| d.is_dir())
     }
 }
 
@@ -235,7 +235,7 @@ pub(crate) fn laisser_avec(audit: &Audit, conseils: &[&str]) {
         .next()
         .is_none_or(|c| !matches!(c, 'n' | 'N'))
     });
-    let dossier = sur_le_bureau.unwrap_or_else(crate::reseau::dossier_local);
+    let dossier = sur_le_bureau.unwrap_or_else(crate::socle::dossier_local);
     let chemin = dossier.join(&nom);
     let ecrit = std::fs::create_dir_all(&dossier).and_then(|()| std::fs::write(&chemin, html));
     match ecrit {

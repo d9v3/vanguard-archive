@@ -144,7 +144,7 @@ fn dossiers_systeme() -> Vec<PathBuf> {
 
 /// Un chemin du dossier personnel, écrit court (« ~/.config/autostart/… »).
 fn court(p: &Path) -> String {
-    let maison = std::env::var_os("HOME").map(PathBuf::from);
+    let maison = crate::socle::personnel::dossier_personnel();
     match maison.as_deref().and_then(|m| p.strip_prefix(m).ok()) {
         Some(reste) if !reste.as_os_str().is_empty() => format!("~/{}", reste.display()),
         _ => p.display().to_string(),
@@ -392,7 +392,7 @@ impl Changement {
         Some(match v {
             Some(t) if t.starts_with('+') => {
                 p.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok())
-                    && crate::reseau::ecrire_atomique(p, &t[1..]).is_ok()
+                    && crate::socle::ecrire_atomique(p, &t[1..]).is_ok()
             }
             Some("-") => match std::fs::remove_file(p) {
                 Ok(()) => true,
@@ -603,7 +603,7 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
 /// du système qu'il ne remplace pas et qui se lancent sur ce bureau) et services de systemd --user installés par la
 /// personne.
 pub fn au_demarrage() -> Vec<Programme> {
-    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let maison = crate::socle::maison();
     let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
     let systeme = dossiers_systeme();
     let bureau = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
@@ -743,7 +743,7 @@ fn gnome() -> bool {
 /// pour l'annuler) : lu dans les dossiers de systemd quand c'est un état qu'un réglage sait remettre, sinon
 /// demandé à systemctl, qui sait nommer les autres.
 fn etat_unite_lu(nom: &str, utilisateur: bool) -> Valeur {
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
     let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
     // SAFETY : getuid ne peut pas échouer et ne touche à aucune mémoire du programme.
@@ -1275,7 +1275,7 @@ mod tests {
     /// toutes les unités des dossiers du système et du compte, quand il répond.
     #[test]
     fn etats_comme_systemctl_is_enabled() {
-        let maison = crate::nettoyer::maison();
+        let maison = crate::socle::maison();
         let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
         let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
         // SAFETY : getuid ne peut pas échouer et ne touche à aucune mémoire du programme.

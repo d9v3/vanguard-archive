@@ -66,7 +66,7 @@ fn lire(chemin: &Path) -> Tableau {
 
 fn ecrire(t: &Tableau, chemin: &Path) -> std::io::Result<()> {
     let texte = serde_json::to_string_pretty(t).map_err(std::io::Error::other)?;
-    crate::reseau::ecrire_atomique(chemin, &texte)
+    crate::socle::ecrire_atomique(chemin, &texte)
 }
 
 /// Les problèmes restants d'un bilan : catégorie et niveau, du moyen au critique, une fois par catégorie (son pire
@@ -152,10 +152,7 @@ pub fn noter(audit: Option<&Audit>, reseau: Option<&Rapport>) {
 #[cfg(target_os = "linux")]
 fn systeme_et_modele() -> (String, String) {
     let lire = |f: &str| std::fs::read_to_string(f).unwrap_or_default().trim().to_string();
-    let systeme = lire("/etc/os-release")
-        .lines()
-        .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
-        .unwrap_or_else(|| "Linux".into());
+    let systeme = crate::socle::systeme::nom();
     let modele = crate::fiche::avec_fabricant(
         &lire("/sys/class/dmi/id/sys_vendor"),
         &lire("/sys/class/dmi/id/product_name"),
@@ -496,7 +493,7 @@ mod tests {
     #[test]
     fn messages_dans_la_largeur() {
         assert_eq!(
-            crate::gaming::tests::textes_trop_larges(include_str!("ordinateurs.rs")),
+            crate::ui::textes_trop_larges(include_str!("ordinateurs.rs")),
             Vec::<String>::new()
         );
     }

@@ -76,17 +76,13 @@ fn origine(ip: IpAddr) -> Origine {
     if let Some(nom) = fournisseur(ip) {
         return Origine::Connu(nom);
     }
-    let local = match ip {
-        // 100.64.0.0/10 : adresses partagées (CGNAT, VPN maillés) : pas Internet.
-        IpAddr::V4(v4) => {
-            let o = v4.octets();
-            v4.is_private() || v4.is_link_local() || (o[0] == 100 && (64..128).contains(&o[1]))
-        }
-        // fec0::/10 (site-local, abandonné mais toujours là) : Windows met fec0:0:0:ffff::1 à 3
-        // quand le réseau n'annonce aucun DNS IPv6 ; jamais une adresse d'Internet.
-        IpAddr::V6(v6) => v6.is_unique_local() || v6.is_unicast_link_local() || (v6.segments()[0] & 0xffc0) == 0xfec0,
-    };
-    if local { Origine::Reseau } else { Origine::Inconnu }
+    // Adresses partagées (CGNAT, VPN maillés) et site local fec0::/10 (les DNS que Windows se donne quand le réseau
+    // n'en annonce aucun) comprises : la règle commune.
+    if crate::socle::adresses::du_reseau(ip) {
+        Origine::Reseau
+    } else {
+        Origine::Inconnu
+    }
 }
 
 /// Adresse d'une ligne de configuration : « 1.1.1.1#cloudflare-dns.com » (DNS chiffré de resolved) ou

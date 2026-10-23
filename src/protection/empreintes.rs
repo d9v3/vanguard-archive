@@ -114,7 +114,7 @@ pub(crate) fn premier_fichier_zip(archive: &[u8], max: usize) -> Option<Vec<u8>>
 }
 
 fn dossier() -> PathBuf {
-    crate::reseau::dossier_local().join("malwarebazaar")
+    crate::socle::dossier_local().join("malwarebazaar")
 }
 
 fn age(chemin: &Path) -> Option<Duration> {
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn fichier_connu_retrouve() {
-        let d = crate::reseau::dossier_local().join("empreintes");
+        let d = crate::socle::dossier_local().join("empreintes");
         std::fs::create_dir_all(&d).unwrap();
         let (mauvais, bon) = (d.join("facture.exe"), d.join("photo.jpg"));
         std::fs::write(&mauvais, b"contenu d'essai qui joue le logiciel malveillant").unwrap();

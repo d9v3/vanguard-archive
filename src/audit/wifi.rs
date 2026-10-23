@@ -493,18 +493,8 @@ fn ouverts(e: &Entree) -> Constat {
         Ok(p) => p,
         Err(raison) => return impossible(CATEGORIE, &format!("{sujet} : {raison}")),
     };
-    let ouverts: Vec<&ProfilEnregistre> = profils.iter().filter(|p| p.ouvert && p.automatique).collect();
-    let noms: Vec<String> = ouverts.iter().map(|p| p.nom.clone()).collect();
-    let commandes: Vec<String> = ouverts.iter().map(|p| p.commande.clone()).collect();
-    match wifi::ouverts_automatiques(&noms, &commandes) {
-        Some(mut c) => {
-            if let Some(k) = &mut c.correctif
-                && !ouverts.iter().all(|p| p.commande_sure)
-            {
-                k.automatique = false;
-            }
-            c
-        }
+    match wifi::ouverts_des_profils(profils) {
+        Some(c) => c,
         None => ok(
             CATEGORIE,
             trf!(
@@ -608,6 +598,7 @@ mod tests {
         Connexion {
             ssid: ssid.into(),
             bssid: bssid.into(),
+            securite: String::new(),
         }
     }
 

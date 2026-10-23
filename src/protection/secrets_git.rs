@@ -507,11 +507,7 @@ pub fn analyser() {
         );
         return;
     };
-    let maison = PathBuf::from(
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .unwrap_or_default(),
-    );
+    let maison = crate::socle::maison();
     let depots = depots(&maison);
     if depots.is_empty() {
         trp!(

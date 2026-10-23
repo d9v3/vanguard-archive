@@ -41,7 +41,7 @@ struct Fichier {
 const TAILLE_MAX: u64 = 64 << 10;
 
 fn fichier() -> PathBuf {
-    crate::reseau::dossier_local().join("parametres.json")
+    crate::socle::dossier_local().join("parametres.json")
 }
 
 /// Le fichier ; absent : les défauts ; `Err` (la raison) s'il est là mais ne se lit pas.
@@ -60,7 +60,7 @@ fn charger_de(chemin: &Path) -> Result<Fichier, String> {
 
 fn enregistrer_dans(f: &Fichier, chemin: &Path) -> std::io::Result<()> {
     let texte = serde_json::to_string_pretty(f).map_err(std::io::Error::other)?;
-    crate::reseau::ecrire_atomique(chemin, texte)
+    crate::socle::ecrire_atomique(chemin, texte)
 }
 
 /// Les réglages du lancement, lus une fois : un fichier abîmé vaut les défauts (le menu le dit).

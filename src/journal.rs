@@ -45,7 +45,7 @@ fn dossier() -> Option<&'static PathBuf> {
             if essai {
                 return None;
             }
-            partition_de_la_cle().or_else(|| Some(crate::reseau::dossier_local()))
+            partition_de_la_cle().or_else(|| Some(crate::socle::dossier_local()))
         })
         .as_ref()
 }
@@ -108,14 +108,7 @@ pub(crate) fn systeme() -> &'static str {
     SYSTEME.get_or_init(|| {
         #[cfg(target_os = "linux")]
         {
-            let nom = std::fs::read_to_string("/etc/os-release")
-                .ok()
-                .and_then(|t| {
-                    t.lines()
-                        .find_map(|l| l.strip_prefix("PRETTY_NAME="))
-                        .map(|v| v.trim_matches('"').to_string())
-                })
-                .unwrap_or_else(|| "Linux".into());
+            let nom = crate::socle::systeme::nom();
             let noyau = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
             format!("{nom} {}", noyau.trim())
         }
@@ -794,19 +787,9 @@ fn ipv4_commune(ip: Ipv4Addr) -> bool {
             | (185, 228, 168 | 169)
             | (76, 76, 2 | 10)
     ) || matches!((a, b, c, d), (8, 8, 8, 8) | (8, 8, 4, 4));
-    ip.is_private()
-        || ip.is_loopback()
-        || ip.is_link_local()
-        || ip.is_multicast()
-        || ip.is_broadcast()
-        || ip.is_unspecified()
-        || ip.is_documentation()
-        || a == 0
-        || a >= 240
-        // Adresses partagées des opérateurs (100.64/10) et réseaux d'essai (198.18/15).
-        || (a == 100 && b & 0xC0 == 64)
-        || (a == 198 && b & 0xFE == 18)
-        || resolveur
+    // Tout ce qui n'est pas une adresse d'Internet (règle commune : privée, partagée, exemple, réservée…) est la
+    // même chez tout le monde.
+    crate::socle::adresses::portee(ip.into()) != crate::socle::adresses::Portee::Internet || resolveur
 }
 
 /// La commande lancée, pour le journal : le surnom donné par « vanguard nommer » nomme souvent quelqu'un

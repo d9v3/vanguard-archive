@@ -237,10 +237,36 @@ fn connexion_de(octets: &[u8]) -> Option<Connexion> {
     let association = offset_of!(WlanConnectionAttributes, association);
     let ssid = ssid_a(octets, association + offset_of!(WlanAssociationAttributes, ssid))?;
     let debut = association + offset_of!(WlanAssociationAttributes, bssid);
+    let securite = offset_of!(WlanConnectionAttributes, securite);
     Some(Connexion {
         ssid,
         bssid: mac_texte(octets.get(debut..debut + 6)?),
+        securite: protection_negociee(
+            u32_a(octets, securite + offset_of!(WlanSecurityAttributes, authentification)).unwrap_or(0),
+            u32_a(octets, securite + offset_of!(WlanSecurityAttributes, chiffrement)).unwrap_or(0),
+        )
+        .to_string(),
     })
+}
+
+/// La protection négociée (DOT11_AUTH_ALGORITHM, DOT11_CIPHER_ALGORITHM), nommée comme `Protection::libelle` ; vide
+/// si inconnue. Une borne WPA2/WPA3 annonce les deux dans sa balise, mais une carte sans WPA3 s'y connecte en WPA2.
+#[cfg(any(windows, test))]
+fn protection_negociee(authentification: u32, chiffrement: u32) -> &'static str {
+    match authentification {
+        // Système ouvert avec une clé WEP (WEP40, WEP104, WEP) : chiffré quand même.
+        1 if matches!(chiffrement, 0x01 | 0x05 | 0x101) => "WEP",
+        1 => crate::tr!("ouvert", "open"),
+        2 => "WEP",
+        3 => "WPA-Enterprise",
+        4 => "WPA",
+        6 => "WPA2-Enterprise",
+        7 => "WPA2",
+        8 | 11 => "WPA3-Enterprise",
+        9 => "WPA3",
+        10 => "OWE",
+        _ => "",
+    }
 }
 
 /// Les noms des profils d'un WLAN_PROFILE_INFO_LIST copié.
@@ -678,6 +704,7 @@ mod tests {
         assert_eq!(size_of::<WlanSecurityAttributes>(), 16);
         assert_eq!(size_of::<WlanConnectionAttributes>(), 604);
         assert_eq!(offset_of!(WlanConnectionAttributes, association), 520);
+        assert_eq!(offset_of!(WlanConnectionAttributes, securite), 588);
     }
 
     fn liste(n: u32, elements: &[Vec<u8>]) -> Vec<u8> {
@@ -828,9 +855,18 @@ mod tests {
             connexion_de(&c),
             Some(Connexion {
                 ssid: "Salon".into(),
-                bssid: "02:00:00:aa:bb:01".into()
+                bssid: "02:00:00:aa:bb:01".into(),
+                securite: String::new(),
             })
         );
+        // Connectée en WPA2 (RSNA_PSK, CCMP) à une borne qui annonce aussi WPA3 : WPA2.
+        c[596..600].copy_from_slice(&7u32.to_le_bytes());
+        c[600..604].copy_from_slice(&4u32.to_le_bytes());
+        assert_eq!(connexion_de(&c).map(|c| c.securite), Some("WPA2".into()));
+        assert_eq!(super::super::force(protection_negociee(9, 4)), 3);
+        assert_eq!(protection_negociee(1, 0x101), "WEP");
+        assert_eq!(super::super::force(protection_negociee(1, 0)), 0);
+        assert_eq!(protection_negociee(5, 0), "");
         c[0..4].copy_from_slice(&4u32.to_le_bytes());
         assert_eq!(connexion_de(&c), None);
         assert_eq!(connexion_de(&c[..100]), None);

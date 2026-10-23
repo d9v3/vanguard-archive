@@ -1022,7 +1022,7 @@ mod tests {
 
     #[test]
     fn copies_de_cmd() {
-        let dossier = crate::reseau::dossier_local().join("accessibilite");
+        let dossier = crate::socle::dossier_local().join("accessibilite");
         std::fs::create_dir_all(&dossier).unwrap();
         let (cmd, sethc, osk) = (
             dossier.join("cmd.exe"),

@@ -14,11 +14,7 @@ use crate::ui::*;
 
 /// Fichiers et dossiers suivis (un dossier : les fichiers qu'il contient directement).
 fn cibles() -> Vec<PathBuf> {
-    let maison = PathBuf::from(
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .unwrap_or_default(),
-    );
+    let maison = crate::socle::maison();
     #[cfg(target_os = "linux")]
     let systeme: &[&str] = &[
         "/etc/passwd",
@@ -549,11 +545,11 @@ mod tests {
         let etat: Etat = [("/etc/hosts".to_string(), "b3:aa".to_string())].into_iter().collect();
         assert!(enregistrer(&etat));
         assert!(matches!(reference(), Reference::Valable(r) if r == etat));
-        std::fs::write(crate::reseau::dossier_local().join(crate::sceau::INTEGRITE), "{}").unwrap();
+        std::fs::write(crate::socle::dossier_local().join(crate::sceau::INTEGRITE), "{}").unwrap();
         assert!(matches!(reference(), Reference::Douteuse(_)));
         assert!(!constat().verifie);
         assert_eq!(changements_a_signaler(), None);
-        std::fs::remove_file(crate::reseau::dossier_local().join(crate::sceau::INTEGRITE)).unwrap();
+        std::fs::remove_file(crate::socle::dossier_local().join(crate::sceau::INTEGRITE)).unwrap();
         assert!(matches!(reference(), Reference::Douteuse(_)));
         crate::sceau::effacer(crate::sceau::INTEGRITE).unwrap();
         assert!(matches!(reference(), Reference::Absente));

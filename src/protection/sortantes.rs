@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::risk::Niveau;
+use crate::socle::adresses::sur_internet;
 use crate::ui::*;
 
 /// Une connexion établie vers un serveur.
@@ -121,14 +122,8 @@ fn lire_proc_net(texte: &str) -> Vec<(IpAddr, u16, u64)> {
 #[cfg(target_os = "linux")]
 pub(crate) fn proprietaires() -> HashMap<u64, u32> {
     let mut liste = HashMap::new();
-    let Ok(processus) = std::fs::read_dir("/proc") else {
-        return liste;
-    };
-    for p in processus.flatten() {
-        let Some(pid) = p.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
-            continue;
-        };
-        let Ok(descripteurs) = std::fs::read_dir(p.path().join("fd")) else {
+    for pid in crate::socle::processus::pids().unwrap_or_default() {
+        let Ok(descripteurs) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
             continue;
         };
         for d in descripteurs.flatten() {
@@ -264,11 +259,9 @@ fn connexions() -> Option<Vec<Connexion>> {
                 Connexion {
                     pid,
                     // Le nom court du programme, celui que ss montrait ; n'importe quel programme le choisit.
-                    programme: pid
-                        .and_then(|p| std::fs::read_to_string(format!("/proc/{p}/comm")).ok())
-                        .map(|n| affichable(n.trim_end_matches('\n'))),
+                    programme: pid.and_then(crate::socle::processus::nom_court).map(|n| affichable(&n)),
                     chemin: pid
-                        .and_then(|p| std::fs::read_link(format!("/proc/{p}/exe")).ok())
+                        .and_then(crate::socle::processus::programme)
                         .map(|c| c.display().to_string()),
                     udp,
                     ..Connexion::vers(distante, port)
@@ -304,11 +297,8 @@ pub(crate) fn processus_connectes() -> Option<BTreeSet<u32>> {
     if prises.is_empty() {
         return Some(pids);
     }
-    for p in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-        let Some(pid) = p.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
-            continue;
-        };
-        let tient = std::fs::read_dir(p.path().join("fd"))
+    for pid in crate::socle::processus::pids()? {
+        let tient = std::fs::read_dir(format!("/proc/{pid}/fd"))
             .into_iter()
             .flatten()
             .flatten()
@@ -451,13 +441,10 @@ fn connexions() -> Option<Vec<Connexion>> {
     let chemins: HashMap<u32, String> = pids
         .into_iter()
         .filter_map(|pid| {
-            let mut tampon = vec![0u8; 4096];
-            let taille = u32::try_from(tampon.len()).ok()?;
-            // SAFETY : proc_pidpath écrit au plus `taille` octets dans `tampon` et rend leur nombre (0 : refus).
-            let lus =
-                unsafe { libc::proc_pidpath(libc::c_int::try_from(pid).ok()?, tampon.as_mut_ptr().cast(), taille) };
-            let chemin = String::from_utf8_lossy(tampon.get(..usize::try_from(lus).ok()?)?).into_owned();
-            chemin.starts_with('/').then_some((pid, chemin))
+            Some((
+                pid,
+                crate::socle::processus::programme(pid)?.to_string_lossy().into_owned(),
+            ))
         })
         .collect();
     for c in &mut liste {
@@ -507,33 +494,6 @@ pub(crate) fn connexions_vues() -> Option<Vec<ConnexionVue>> {
 }
 
 // ───────────────────────────── Jugement ─────────────────────────────
-
-/// Un serveur sur Internet, pas un appareil de la maison (réseau privé, adresses partagées des fournisseurs, VPN).
-pub(crate) fn sur_internet(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            !(v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_multicast()
-                || (a == 100 && (64..128).contains(&b)))
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return sur_internet(IpAddr::V4(v4));
-            }
-            let s = v6.segments()[0];
-            !(v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || (s & 0xfe00) == 0xfc00
-                || (s & 0xffc0) == 0xfe80)
-        }
-    }
-}
 
 /// Le service derrière un port bien connu.
 fn service(port: u16, udp: bool) -> Option<&'static str> {
@@ -1005,7 +965,7 @@ fn botnets() -> (Botnets, Vec<String>) {
                     Duration::from_secs(40),
                 )
             };
-            let liste = abuse_ch::liste(demande, ("feodo", "botnets.txt"), URLHAUS_FRAICHE, |_| true);
+            let liste = crate::socle::cache::liste(demande, ("feodo", "botnets.txt"), URLHAUS_FRAICHE, |_| true);
             verifiee("Feodo Tracker", liste.resultat(false), en_texte(analyser_feodo_datee))
         });
         let api = s.spawn(|| {
@@ -1016,7 +976,7 @@ fn botnets() -> (Botnets, Vec<String>) {
                     taille_max: 256 << 20,
                     ..Demande::get("https://threatfox-api.abuse.ch/api/v1/", Duration::from_secs(40))
                 };
-                let liste = abuse_ch::liste(
+                let liste = crate::socle::cache::liste(
                     demande,
                     ("threatfox", abuse_ch::FICHIER_API),
                     THREATFOX_CLE_FRAICHE,
@@ -1113,7 +1073,7 @@ impl ServeursDeCommande {
 #[cfg(target_os = "linux")]
 pub(crate) fn serveurs_gardes() -> (ServeursDeCommande, Vec<String>) {
     let garde = |sous_dossier: &str, nom: &str| {
-        let fichier = crate::reseau::dossier_local().join(sous_dossier).join(nom);
+        let fichier = crate::socle::dossier_local().join(sous_dossier).join(nom);
         let age = std::fs::metadata(&fichier)
             .and_then(|m| m.modified())
             .ok()?
@@ -1178,7 +1138,7 @@ fn nouvelles_alertes<'a>(avant: &str, actuelles: &'a BTreeSet<String>) -> Vec<&'
 /// Les connexions vers un serveur de commande vues à la dernière passe de la surveillance, une par ligne : le
 /// tableau de bord les montre comme encore en cours.
 pub(crate) fn fichier_botnets() -> PathBuf {
-    crate::reseau::dossier_local().join(crate::sceau::BOTNETS)
+    crate::socle::dossier_local().join(crate::sceau::BOTNETS)
 }
 
 /// Ce que cet ordinateur envoie en ce moment vers un serveur de commande connu, en lecture seule (rien d'écrit) :
@@ -1312,7 +1272,7 @@ pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String)> {
         return Vec::new();
     };
     let actuels = sites_dangereux(&noms, &hotes);
-    let fichier = crate::reseau::dossier_local().join("surveillance-sites.txt");
+    let fichier = crate::socle::dossier_local().join("surveillance-sites.txt");
     let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
     let alertes = nouvelles_alertes(&avant, &actuels)
         .into_iter()
@@ -1330,7 +1290,7 @@ pub(crate) fn sites_dangereux_a_signaler() -> Vec<(String, String)> {
             )
         })
         .collect();
-    let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+    let _ = std::fs::create_dir_all(crate::socle::dossier_local());
     let _ = std::fs::write(&fichier, actuels.into_iter().collect::<Vec<_>>().join("\n"));
     alertes
 }

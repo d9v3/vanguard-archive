@@ -50,7 +50,7 @@ const ARGUMENT_MAX: usize = 1000;
 /// partagé, sur la clé VANGUARD ou hors du profil (Windows). Jamais le dossier du programme ni la clé : un plugin ne
 /// voyage pas, et un dossier que d'autres comptes peuvent écrire leur ferait lancer ce qu'ils veulent sous ce compte.
 pub fn dossier() -> Result<PathBuf, String> {
-    let local = crate::reseau::dossier_local();
+    let local = crate::socle::dossier_local();
     // Sans HOME ni XDG_DATA_HOME (LOCALAPPDATA sous Windows), le dossier local serait relatif : le dossier courant.
     if !local.is_absolute() {
         return Err(tr!(
@@ -232,7 +232,7 @@ fn approbations(racine: &Path) -> Approbations {
 
 fn enregistrer(racine: &Path, a: &Approbations) -> Result<(), String> {
     let texte = serde_json::to_string_pretty(a).map_err(|e| e.to_string())?;
-    crate::reseau::ecrire_atomique(&racine.join(APPROUVES), texte).map_err(|e| {
+    crate::socle::ecrire_atomique(&racine.join(APPROUVES), texte).map_err(|e| {
         trf!(
             "Approbation impossible à écrire : {e}",
             "Could not write the approval: {e}"
@@ -585,7 +585,7 @@ fn environnement(c: &mut Command) {
     c.env("PATH", path_systeme());
     #[cfg(unix)]
     {
-        if let Some(h) = std::env::var_os("HOME") {
+        if let Some(h) = crate::socle::personnel::dossier_personnel() {
             c.env("HOME", h);
         }
     }
@@ -1703,7 +1703,7 @@ pub fn a_signaler() -> Vec<(String, String)> {
 /// Où lire l'interrupteur des restrictions sans créer le dossier (Paramètres le montre) ; `None` en administrateur,
 /// où les réglages ne lèvent rien, ou sans dossier local connu.
 pub fn reglages_lisibles() -> Option<PathBuf> {
-    let local = crate::reseau::dossier_local();
+    let local = crate::socle::dossier_local();
     (!eleve() && local.is_absolute()).then(|| local.join("plugins"))
 }
 

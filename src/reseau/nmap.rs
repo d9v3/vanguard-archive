@@ -79,9 +79,12 @@ fn chemin() -> Option<std::path::PathBuf> {
         .find(|p| p.is_absolute() && p.is_file())
 }
 
-/// Une adresse du réseau local (privée, lien local ou cette machine) : nmap n'est jamais lancé vers Internet.
+/// Une adresse du réseau local (privée, lien local ou cette machine) : nmap n'est jamais lancé vers Internet. Le
+/// réseau partagé du fournisseur (100.64.0.0/10) en est exclu exprès, à la différence de `socle::adresses::du_reseau` :
+/// ce sont les box d'autres abonnés.
 pub fn locale(ip: Ipv4Addr) -> bool {
-    ip.is_private() || ip.is_link_local() || ip.is_loopback()
+    use crate::socle::adresses::{Portee, portee};
+    matches!(portee(std::net::IpAddr::V4(ip)), Portee::Locale | Portee::Machine)
 }
 
 /// Les services reconnus dans la sortie XML de nmap, pour cette adresse : port TCP ouvert → « logiciel version

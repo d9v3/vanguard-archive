@@ -114,10 +114,8 @@ pub(crate) fn arguments_extension(jetable: &Path, dossier: &Path, commande: &[St
         a.truncate(i);
     }
     let (j, d) = (jetable.display().to_string(), dossier.display().to_string());
-    if let Ok(maison) = std::env::var("HOME")
-        && !maison.is_empty()
-    {
-        a.extend(["--tmpfs".into(), maison]);
+    if let Some(maison) = crate::socle::personnel::dossier_personnel() {
+        a.extend(["--tmpfs".into(), maison.display().to_string()]);
     }
     // Après le masquage (le jetable et le dossier sont souvent dans le dossier personnel) : d'abord le jetable en
     // écriture, puis le dossier de l'extension par-dessus, en lecture seule.
@@ -292,8 +290,8 @@ fn lancer(source: &Path) {
     let Some((jetable, copie)) = copie_jetable(source, true) else {
         return;
     };
-    let maison = std::env::var("HOME").unwrap_or_default();
-    let maison = std::fs::canonicalize(&maison).map_or(maison, |m| m.display().to_string());
+    let maison = crate::socle::maison();
+    let maison = std::fs::canonicalize(&maison).unwrap_or(maison).display().to_string();
     trp!(
         "  {GRIS}Isolé : pas de réseau, dossier personnel illisible, écriture seulement dans la copie jetable : {}{RESET}\n",
         "  {GRIS}Isolated: no network, home folder unreadable, writing only in the disposable copy: {}{RESET}\n",

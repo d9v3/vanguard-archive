@@ -14,8 +14,8 @@ use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::nettoyer::taille_lisible;
 use crate::selection::{Ligne, choisir};
+use crate::socle::taille_lisible;
 use crate::ui::*;
 
 const MIO: u64 = 1 << 20;

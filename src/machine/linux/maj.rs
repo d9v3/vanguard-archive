@@ -547,7 +547,7 @@ fn paquets_exposes(gestion: Paquets) -> HashMap<String, u16> {
     for p in prises.iter().filter(|p| super::prise_exposee(p, &adresses)) {
         let programme = pids
             .get(&p.inode)
-            .and_then(|pid| std::fs::read_link(format!("/proc/{pid}/exe")).ok());
+            .and_then(|pid| crate::socle::processus::programme(*pid));
         let unite = || {
             let groupe = p.groupe.as_deref()?;
             fichier_d_unite(groupe.rsplit('/').next().filter(|u| u.ends_with(".service"))?)

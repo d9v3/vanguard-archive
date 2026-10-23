@@ -73,21 +73,11 @@ pub(super) fn docker() -> Vec<Constat> {
 
 /// Nom et ligne de commande de chaque processus, lus dans /proc (lisible par tous, sauf montage « hidepid »).
 pub(super) fn processus() -> Vec<(String, Vec<String>)> {
-    std::fs::read_dir("/proc")
+    use crate::socle::processus::{arguments, nom_court, pids};
+    pids()
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().bytes().all(|o| o.is_ascii_digit()))
-        .filter_map(|e| {
-            let nom = std::fs::read_to_string(e.path().join("comm")).ok()?.trim().to_string();
-            let args = std::fs::read(e.path().join("cmdline"))
-                .unwrap_or_default()
-                .split(|&o| o == 0)
-                .filter(|a| !a.is_empty())
-                .map(|a| String::from_utf8_lossy(a).into_owned())
-                .collect();
-            Some((nom, args))
-        })
+        .filter_map(|pid| Some((nom_court(pid)?.trim().to_string(), arguments(pid))))
         .collect()
 }
 

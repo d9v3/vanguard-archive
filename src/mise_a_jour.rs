@@ -211,7 +211,7 @@ fn etat_de(exe: &Path, cle_du_programme: Option<&Path>, copie: &Path, courante: 
 
 /// La copie de cet ordinateur (celle de `reseau::surveillance::executable`).
 pub(crate) fn copie_de_cet_ordinateur() -> PathBuf {
-    crate::reseau::dossier_local().join("bin").join(NOM)
+    crate::socle::dossier_local().join("bin").join(NOM)
 }
 
 fn programme() -> Option<PathBuf> {
@@ -840,7 +840,7 @@ mod tests {
 
     #[test]
     fn ce_que_dit_le_menu_selon_la_copie() {
-        let racine = crate::reseau::dossier_local().join("essai-mise-a-jour");
+        let racine = crate::socle::dossier_local().join("essai-mise-a-jour");
         let _ = std::fs::remove_dir_all(&racine);
         let cle = racine.join("cle");
         let sur_la_cle = cle.join("Linux").join(NOM);
@@ -933,7 +933,7 @@ mod tests {
 
     #[test]
     fn la_copie_remplacee_d_un_coup() {
-        let racine = crate::reseau::dossier_local().join("essai-remplacement");
+        let racine = crate::socle::dossier_local().join("essai-remplacement");
         let _ = std::fs::remove_dir_all(&racine);
         let source = racine.join("cle").join(NOM);
         let cible = racine.join("bin").join(NOM);
@@ -972,7 +972,7 @@ mod tests {
     /// plus récente, jamais si l'essai échoue, rien qui traîne à côté.
     #[test]
     fn copie_locale_par_le_chemin_sur() {
-        let racine = crate::reseau::dossier_local().join("essai-copie-locale");
+        let racine = crate::socle::dossier_local().join("essai-copie-locale");
         let _ = std::fs::remove_dir_all(&racine);
         let source = racine.join("cle").join(NOM);
         let cible = racine.join("bin").join(NOM);
@@ -1002,7 +1002,7 @@ mod tests {
     #[test]
     fn essai_de_la_nouvelle_copie() {
         use std::os::unix::fs::PermissionsExt;
-        let racine = crate::reseau::dossier_local().join("essai-demarrage");
+        let racine = crate::socle::dossier_local().join("essai-demarrage");
         std::fs::create_dir_all(&racine).unwrap();
         let script = |nom: &str, corps: &str| {
             let f = racine.join(nom);

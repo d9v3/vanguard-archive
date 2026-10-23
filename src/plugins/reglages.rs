@@ -88,7 +88,7 @@ pub fn enregistrer(racine: &Path, r: &Reglages) -> Result<(), String> {
         );
     }
     let texte = serde_json::to_string_pretty(r).map_err(|e| e.to_string())?;
-    crate::reseau::ecrire_atomique(&chemin, texte)
+    crate::socle::ecrire_atomique(&chemin, texte)
         .map_err(|e| trf!("Réglage impossible à écrire : {e}", "Could not write the setting: {e}"))
 }
 

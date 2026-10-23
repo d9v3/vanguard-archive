@@ -456,10 +456,7 @@ fn nom_du_processeur(cpuinfo: &str, midr: &str) -> String {
 fn lire() -> Fiche {
     let fichier = |chemin: &str| std::fs::read_to_string(chemin).unwrap_or_default().trim().to_string();
     let dmi = |f: &str| fichier(&format!("/sys/class/dmi/id/{f}"));
-    let os = fichier("/etc/os-release")
-        .lines()
-        .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
-        .unwrap_or_else(|| "Linux".into());
+    let os = crate::socle::systeme::nom();
     let mut f = Fiche {
         systeme: trf!(
             "{os} · noyau {}",

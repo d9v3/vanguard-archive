@@ -23,7 +23,7 @@ struct Vus {
 }
 
 fn fichier() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("administrateurs.json")
+    crate::socle::dossier_local().join("administrateurs.json")
 }
 
 /// Les membres des groupes d'administration dans /etc/group (« wheel:x:998:alice,bob »).
@@ -200,8 +200,8 @@ pub fn constat() -> Option<Constat> {
     if avant.as_ref() != Some(&apres)
         && let Ok(texte) = serde_json::to_string_pretty(&apres)
     {
-        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
-        let _ = crate::reseau::ecrire_atomique(&fichier(), texte);
+        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
+        let _ = crate::socle::ecrire_atomique(&fichier(), texte);
     }
     Some(c)
 }

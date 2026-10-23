@@ -762,7 +762,7 @@ fn chemin_saisi(r: &str) -> Option<PathBuf> {
         return None;
     }
     Some(match r.strip_prefix("~/") {
-        Some(reste) => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(reste),
+        Some(reste) => crate::socle::maison().join(reste),
         None => PathBuf::from(r),
     })
 }
@@ -1047,7 +1047,7 @@ Reply-To: r@autre example.org\r\n\r\nbonjour";
         );
         assert_eq!(chemin_saisi("  \"/tmp/a+b.eml\" "), Some(PathBuf::from("/tmp/a+b.eml")));
         assert_eq!(chemin_saisi("  "), None);
-        let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let maison = crate::socle::maison();
         assert_eq!(chemin_saisi("~/x.eml"), Some(maison.join("x.eml")));
     }
 

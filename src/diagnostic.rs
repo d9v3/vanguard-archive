@@ -374,12 +374,7 @@ mod systeme {
 
     pub fn sections() -> Vec<Section> {
         let mut systeme = Vec::new();
-        let os = lire("/etc/os-release")
-            .and_then(|t| {
-                t.lines()
-                    .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| affichable(v.trim_matches('"'))))
-            })
-            .unwrap_or_else(|| "Linux".into());
+        let os = affichable(&crate::socle::systeme::nom());
         // Une valeur d'une ligne lue dans /proc ou /sys, prête à montrer.
         let valeur = |chemin: &str| lire(chemin).map(|v| affichable(&v));
         systeme.push(ligne(
@@ -616,7 +611,7 @@ mod systeme {
             ));
         }
 
-        let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let maison = crate::socle::maison();
         let dossiers = [
             maison.join("Library/Logs/DiagnosticReports"),
             std::path::PathBuf::from("/Library/Logs/DiagnosticReports"),

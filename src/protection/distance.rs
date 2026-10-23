@@ -359,13 +359,13 @@ fn pids_dans_ss(sortie: &str) -> std::collections::BTreeSet<u32> {
 #[allow(clippy::unnecessary_wraps)]
 #[cfg(target_os = "linux")]
 fn relever() -> Option<Vec<Trouvaille>> {
-    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let maison = crate::socle::maison();
     let mut t = Vec::new();
     paquets(&mut t);
     flatpaks(&mut t, &maison);
     snaps(&mut t);
     dossiers_opt(&mut t);
-    processus(&mut t);
+    let processus_lus = processus(&mut t);
     demarrage_linux(&mut t, &maison);
     let declares = std::fs::read_to_string(maison.join(".config/user-dirs.dirs")).unwrap_or_default();
     let declare = |cle: &str, defaut: &str| {
@@ -379,7 +379,8 @@ fn relever() -> Option<Vec<Trouvaille>> {
             PathBuf::from("/tmp"),
         ],
     );
-    Some(sans_doublons(t))
+    // Sans les processus, « rien trouvé » ne se conclut pas : non vérifié ; ce qui a été trouvé reste dit.
+    (processus_lus || !t.is_empty()).then(|| sans_doublons(t))
 }
 
 /// Date de modification du premier fichier ou dossier de `dossier` dont le nom commence par `prefixe`.
@@ -411,7 +412,7 @@ fn paquets(t: &mut Vec<Trouvaille>) {
     let lue = match gestionnaire {
         Paquets::Pacman => crate::machine::linux::natif::paquets_pacman()
             .map(|l| l.into_iter().map(|(nom, _)| nom).collect::<Vec<_>>()),
-        Paquets::Apt => crate::gaming::linux::paquets_dpkg_installes().map(|l| {
+        Paquets::Apt => crate::machine::linux::natif::paquets_dpkg_installes().map(|l| {
             let mut noms: Vec<String> = l.into_iter().map(|(nom, _)| nom).collect();
             noms.dedup();
             noms
@@ -457,7 +458,7 @@ fn paquets(t: &mut Vec<Trouvaille>) {
 fn flatpaks(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
     // Lues dans les dossiers de Flatpak ; sa commande en secours, quand d'autres installations sont réglées.
     // Sans le programme flatpak, `applications_flatpak` ne rend rien (voir là).
-    let Some(liste) = crate::gaming::linux::applications_flatpak() else {
+    let Some(liste) = crate::machine::linux::paquets::applications_flatpak() else {
         return;
     };
     for id in liste.iter().map(String::as_str) {
@@ -550,22 +551,23 @@ fn dossiers_opt(t: &mut Vec<Trouvaille>) {
     }
 }
 
-/// Processus en cours, d'après /proc : le nom court (comm) et, quand il se lit, le programme lancé.
+/// Processus en cours, d'après /proc : le nom court (comm) et, quand il se lit, le programme lancé. `false` : /proc
+/// ne se lit pas (la liste vide d'avant passait pour « rien en cours »).
 #[cfg(target_os = "linux")]
-fn processus(t: &mut Vec<Trouvaille>) {
+fn processus(t: &mut Vec<Trouvaille>) -> bool {
     // Lu dans /proc par le module des connexions sortantes ; ss en secours, quand /proc/net ne se lit pas.
     let connectes = crate::protection::sortantes::processus_connectes()
         .or_else(|| sortie_de("ss", &["-tnpH", "state", "established"], 15).map(|s| pids_dans_ss(&s)))
         .unwrap_or_default();
-    for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-        let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else {
-            continue;
-        };
-        let comm = std::fs::read_to_string(e.path().join("comm"))
+    let Some(pids) = crate::socle::processus::pids() else {
+        return false;
+    };
+    for pid in pids {
+        let comm = crate::socle::processus::nom_court(pid)
             .unwrap_or_default()
             .trim()
             .to_string();
-        let exe = std::fs::read_link(e.path().join("exe")).ok();
+        let exe = crate::socle::processus::programme(pid);
         let nom_exe = exe
             .as_ref()
             .and_then(|p| p.file_name())
@@ -585,6 +587,7 @@ fn processus(t: &mut Vec<Trouvaille>) {
             arret: vec![format!("pkill -x {} || true", sh_chaine(&comm))],
         });
     }
+    true
 }
 
 /// Lancements automatiques : fichiers .desktop d'autostart (nom ou ligne Exec), services systemd activés (système et
@@ -819,7 +822,7 @@ fn nom_active(lien: &str, chemin: &std::path::Path) -> String {
 #[allow(clippy::unnecessary_wraps)]
 #[cfg(target_os = "macos")]
 fn relever() -> Option<Vec<Trouvaille>> {
-    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let maison = crate::socle::maison();
     let mut t = Vec::new();
     for (dossier, sudo) in [
         (PathBuf::from("/Applications"), "sudo "),
@@ -937,21 +940,7 @@ fn sur_une_ligne(v: &str) -> String {
 fn installes_du_registre(sortie: &mut String) {
     use std::fmt::Write;
     use winreg::RegKey;
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
-    for (racine, chemin) in [
-        (
-            HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-        (
-            HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-        (
-            HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
-        ),
-    ] {
+    for (racine, chemin) in crate::machine::windows::installes::CLES_UNINSTALL {
         let Ok(liste) = RegKey::predef(racine).open_subkey(chemin) else {
             continue;
         };
@@ -1012,37 +1001,22 @@ fn processus_et_connexions(sortie: &mut String) {
     }
 }
 
-/// Les clés Run du compte et de la machine : « RUN|clé|nom|commande ». La clé est écrite comme PowerShell l'écrit
-/// (« HKCU:\… ») : c'est elle que la commande de retrait reprend.
+/// Les clés Run et RunOnce du compte et de la machine : « RUN|clé|nom|commande ». La clé est écrite comme
+/// PowerShell l'écrit (« HKCU:\… ») : c'est elle que la commande de retrait reprend. Lues par la lecture commune
+/// (`machine::windows::persistance::lignes_run`), qui garde les noms mal formés et lit aussi RunOnce. Une clé
+/// illisible n'a pas encore de place dans ce relevé, qui ne sait pas dire « non vérifié » pour une partie.
 #[cfg(windows)]
 fn run_du_registre(sortie: &mut String) {
     use std::fmt::Write;
-    use winreg::RegKey;
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
-    for (racine, chemin, ecrit) in [
-        (
-            HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
-        ),
-        (
-            HKEY_LOCAL_MACHINE,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            r"HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
-        ),
-        (
-            HKEY_LOCAL_MACHINE,
-            r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
-            r"HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
-        ),
-    ] {
-        let Ok(cle) = RegKey::predef(racine).open_subkey(chemin) else {
-            continue;
-        };
-        for (nom, _) in cle.enum_values().flatten() {
-            let valeur = cle.get_value::<String, _>(&nom).unwrap_or_default();
-            let _ = writeln!(sortie, "RUN|{ecrit}|{}|{}", sur_une_ligne(&nom), sur_une_ligne(&valeur));
-        }
+    let (valeurs, _illisibles) = crate::machine::windows::persistance::lignes_run();
+    for v in valeurs {
+        let _ = writeln!(
+            sortie,
+            "RUN|{}|{}|{}",
+            v.cle,
+            sur_une_ligne(&v.nom),
+            sur_une_ligne(&v.valeur)
+        );
     }
     sortie.push_str("RUN_FIN\n");
 }
@@ -1106,7 +1080,7 @@ fn fichiers_poses_windows(sortie: &mut String) {
 fn services_du_registre() -> String {
     use std::fmt::Write;
     let Ok(services) =
-        winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE).open_subkey(r"SYSTEM\CurrentControlSet\Services")
+        winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE).open_subkey(crate::machine::windows::CLE_SERVICES)
     else {
         return String::new();
     };
@@ -1830,7 +1804,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn unites_comme_systemctl() {
-        let maison = crate::nettoyer::maison();
+        let maison = crate::socle::maison();
         for (args, utilisateur) in [
             (
                 &["list-unit-files", "--state=enabled", "--no-legend", "--plain"][..],

@@ -59,7 +59,7 @@ pub(crate) fn chemin() -> Option<PathBuf> {
     {
         let donnees = std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
+            .or_else(|| crate::socle::personnel::dossier_personnel().map(|h| h.join(".local/share")))?;
         Some(donnees.join("applications/Vanguard.desktop"))
     }
     #[cfg(windows)]
@@ -74,7 +74,7 @@ pub(crate) fn chemin() -> Option<PathBuf> {
     }
     #[cfg(target_os = "macos")]
     {
-        Some(crate::nettoyer::maison().join("Desktop/Vanguard.command"))
+        Some(crate::socle::maison().join("Desktop/Vanguard.command"))
     }
 }
 
@@ -343,7 +343,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn retrait_du_raccourci_et_de_son_icone() {
-        let d = crate::reseau::dossier_local().join("raccourci-retrait");
+        let d = crate::socle::dossier_local().join("raccourci-retrait");
         let _ = std::fs::remove_dir_all(&d);
         let ou = d.join("applications/Vanguard.desktop");
         let i = icone(&ou).unwrap();

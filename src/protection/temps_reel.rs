@@ -16,6 +16,8 @@
 //! malveillant. Une coupure ne reste donc jamais muette : la surveillance la notifie à sa première passe, puis une
 //! fois par jour tant qu'elle dure, et l'entretien du mois la redit.
 
+#[cfg(unix)]
+use crate::socle::personnel::dossier_personnel_de;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -143,12 +145,12 @@ fn fichier() -> PathBuf {
     {
         return d.join("temps-reel.json");
     }
-    crate::reseau::dossier_local().join("temps-reel.json")
+    crate::socle::dossier_local().join("temps-reel.json")
 }
 
 /// Le fichier du rappel : quand la coupure a été notifiée pour la dernière fois.
 fn fichier_rappel() -> PathBuf {
-    crate::reseau::dossier_local().join("temps-reel-rappel.txt")
+    crate::socle::dossier_local().join("temps-reel-rappel.txt")
 }
 
 /// Sous sudo ou pkexec (root, avec le numéro du compte qui l'a lancé) : le dossier de données de ce compte. Sous
@@ -165,32 +167,13 @@ fn dossier_appelant(
     }
     let uid: libc::uid_t = appelant?.trim().parse().ok().filter(|&u| u != 0)?;
     let maison = dossier_de(uid).filter(|d| d.is_absolute())?;
-    // Le dossier par défaut de `reseau::dossier_local` (le XDG_DATA_HOME du compte ne se lit pas d'ici).
+    // Le dossier par défaut de `crate::socle::dossier_local` (le XDG_DATA_HOME du compte ne se lit pas d'ici).
     let sous = if cfg!(target_os = "macos") {
         "Library/Application Support/vanguard"
     } else {
         ".local/share/vanguard"
     };
     Some(maison.join(sous))
-}
-
-/// Le dossier personnel du compte `uid`, d'après la base des comptes du système.
-#[cfg(unix)]
-fn dossier_personnel_de(uid: libc::uid_t) -> Option<PathBuf> {
-    use std::os::unix::ffi::OsStrExt;
-    let mut tampon: Vec<libc::c_char> = vec![0; 16 << 10];
-    // SAFETY : passwd n'a que des entiers et des pointeurs, valides à zéro ; getpwuid_r les remplit.
-    let mut compte: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut trouve: *mut libc::passwd = std::ptr::null_mut();
-    // SAFETY : `compte`, `tampon` (avec sa vraie longueur) et `trouve` vivent jusqu'à la fin de la fonction ;
-    // getpwuid_r n'écrit que dans eux.
-    let r = unsafe { libc::getpwuid_r(uid, &raw mut compte, tampon.as_mut_ptr(), tampon.len(), &raw mut trouve) };
-    if r != 0 || trouve.is_null() || compte.pw_dir.is_null() {
-        return None;
-    }
-    // SAFETY : pw_dir pointe dans `tampon`, encore vivant, et getpwuid_r l'a terminé par un zéro.
-    let dossier = unsafe { std::ffi::CStr::from_ptr(compte.pw_dir) };
-    Some(PathBuf::from(std::ffi::OsStr::from_bytes(dossier.to_bytes())))
 }
 
 fn maintenant() -> i64 {
@@ -275,7 +258,7 @@ fn couper_dans(chemin: &Path, duree: Duree, maintenant: i64) -> Result<Coupure, 
         jusqu_a: duree.secondes().map(|s| maintenant.saturating_add(s)),
     };
     let texte = serde_json::to_string_pretty(&f).map_err(|e| e.to_string())?;
-    crate::reseau::ecrire_atomique(chemin, texte).map_err(|e| e.to_string())?;
+    crate::socle::ecrire_atomique(chemin, texte).map_err(|e| e.to_string())?;
     Ok(Coupure {
         depuis: f.coupee_le,
         jusqu_a: f.jusqu_a,
@@ -525,7 +508,7 @@ fn rappeler(c: &Coupure) {
     let (titre, texte) = texte_du_rappel(c, maintenant);
     crate::reseau::surveillance::alerter(crate::reseau::tableau::Genre::Autre, titre, &texte);
     // Non noté (disque plein, dossier refusé) : la passe suivante la redit, plutôt que de se taire.
-    let _ = crate::reseau::ecrire_atomique(&chemin, maintenant.to_string());
+    let _ = crate::socle::ecrire_atomique(&chemin, maintenant.to_string());
 }
 
 /// Au début de chaque passe de la surveillance : `true` si la passe s'arrête là (coupée ; c'est notifié à la première

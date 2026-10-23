@@ -11,8 +11,8 @@ use std::io::{ErrorKind, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::nettoyer::taille_lisible;
 use crate::selection::{Case, Ligne, choisir, cocher};
+use crate::socle::taille_lisible;
 use crate::ui::*;
 
 /// Témoin d'une copie pas finie, dans son dossier daté : sa présence propose la reprise.
@@ -77,7 +77,7 @@ pub(crate) fn sources() -> Vec<(Sorte, PathBuf)> {
 #[cfg(target_os = "linux")]
 fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
     let &(_, cle, noms, _) = DOSSIERS.iter().find(|d| d.0 == sorte)?;
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
     let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
     crate::protection::pieges::dossier_declare(&declares, cle, &maison)
@@ -99,7 +99,7 @@ fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
 #[cfg(target_os = "macos")]
 fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
     let &(.., [_, _, nom]) = DOSSIERS.iter().find(|d| d.0 == sorte)?;
-    Some(crate::nettoyer::maison().join(nom))
+    Some(crate::socle::maison().join(nom))
 }
 
 pub struct Disque {
@@ -120,7 +120,7 @@ pub(crate) fn est_la_cle(racine: &Path) -> bool {
 #[cfg(target_os = "linux")]
 fn sur_le_systeme(p: &Path) -> Option<bool> {
     let montages = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
-    sur_le_systeme_selon(&montages, &p.canonicalize().ok()?, &crate::nettoyer::maison())
+    sur_le_systeme_selon(&montages, &p.canonicalize().ok()?, &crate::socle::maison())
 }
 
 /// D'après /proc/self/mountinfo : le système de fichiers (« majeur:mineur ») du montage le plus profond qui contient
@@ -246,7 +246,7 @@ fn sur_le_systeme(p: &Path) -> Option<bool> {
     use std::os::unix::fs::MetadataExt;
     let volume = |p: &Path| std::fs::metadata(p).ok().map(|m| m.dev());
     let v = volume(p)?;
-    Some([volume(Path::new("/")), volume(&crate::nettoyer::maison())].contains(&Some(v)))
+    Some([volume(Path::new("/")), volume(&crate::socle::maison())].contains(&Some(v)))
 }
 
 #[cfg(windows)]
@@ -300,7 +300,7 @@ pub(crate) fn disques() -> Vec<Disque> {
             && !options.split(',').any(|o| o == "ro")
             && !est_la_cle(&point)
             && sur_le_systeme(&point) == Some(false)
-            && let Some((libre, total)) = crate::nettoyer::volume(&point)
+            && let Some((libre, total)) = crate::socle::volume(&point)
         {
             // Le nom d'un disque vient de son étiquette, choisie par qui l'a formaté : lu prêt à montrer.
             let nom = affichable(&point.file_name().unwrap_or_default().to_string_lossy());
@@ -386,7 +386,7 @@ pub(crate) fn disques() -> Vec<Disque> {
             if Some(dev) == systeme || nom.starts_with("com.apple.") || est_la_cle(&racine) || sur_la_cle(&racine) {
                 return None;
             }
-            let (libre, total) = crate::nettoyer::volume(&racine)?;
+            let (libre, total) = crate::socle::volume(&racine)?;
             Some(Disque {
                 racine,
                 nom: affichable(&nom),
@@ -1016,7 +1016,7 @@ pub fn commande(destination: Option<&Path>) {
     // En reprise, ce qui est déjà copié ne reprend pas de place.
     let deja = if dossier.is_dir() { mesurer(&dossier).1 } else { 0 };
     #[cfg(unix)]
-    let libre = crate::nettoyer::volume(&racine).map(|(libre, _)| libre);
+    let libre = crate::socle::volume(&racine).map(|(libre, _)| libre);
     #[cfg(windows)]
     let libre = disques()
         .into_iter()
