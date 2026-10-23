@@ -9,6 +9,30 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
+  carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
+  `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la
+  catégorie Public compte parmi ce qui ferme les entrées : un réseau resté en Privé, d'entreprise ou à la catégorie
+  illisible laisse le mode « allumé, entrées ouvertes », et un réglage qui ne se relit pas s'affiche non vérifié, jamais
+  ✔. Sous Linux, un DNS, un DNS chiffré, mDNS ou LLMNR défait par un programme du compte (NetworkManager le permet sans
+  mot de passe) se voit au bilan (Moyen), sur la ligne du menu et dans son en-tête, avec de quoi le reposer. Le DNS
+  n'est plus gardé « déjà chiffré et filtrant » quand un seul de ses serveurs filtre : il faut qu'ils filtrent tous,
+  sinon le Bouclier est posé ; le bilan ne dit plus non plus qu'un tel DNS bloque les sites dangereux.
+- **Campagne d'attaque n° 2 : huit faiblesses fermées.** « Tout remettre comme avant » ne rejoue plus jamais le
+  texte d'une commande lu dans changements.jsonl (que tout programme du compte peut écrire) : chaque blocage se défait
+  par les commandes refaites depuis ses champs typés, comme une annulation seule, et un blocage non reconnu est refusé
+  et montré, au lieu de partir en administrateur. Le journal des événements se lit borné en tout (mois, octets,
+  événements), les plus récents d'abord, et dit ce qu'il n'a pas lu ; des fichiers posés aux noms de mois à venir
+  (2099…) n'y comptent pas, ne sont plus suivis par l'écriture ni comptés par l'élagage, et ne font plus sortir le
+  vrai mois en cours de la lecture et des traces : ils sont dits. formula.json, cask.json et endoflife.date se
+  lisent en flux, avec un plafond d'entrées : un petit fichier hostile ne fait plus allouer des Gio. Le nom d'une pièce
+  jointe d'un courriel suspect passe filtré (caractères de direction, contrôles) dans le résultat, le journal et le
+  rapport, et tout message écrit d'un constat aussi. L'inventaire des logiciels dont une borne est atteinte (sous-clés,
+  entrées d'un dossier, 20 000 logiciels, clés sans nom en nombre) est non vérifié, jamais tronqué en silence. Les
+  résultats des outils (examens/*.json) sont scellés : un « rien trouvé » réécrit hors de Vanguard se montre non
+  vérifié, jamais vert. La veille de nuit ne dépose plus dans la VM le programme d'une branche écrite par l'IA (à
+  lancer après relecture, `vm-tester.sh --branche`), et ne transmet plus à l'IA qui corrige que le sujet, le fichier
+  et la ligne d'une proposition.
 - **Parité des règles du bilan : SSH et Defender sous Windows, mots de passe, démarrage et persistance sous macOS, une
   référence par règle, un délai par règle.** Windows gagne le serveur OpenSSH (service, configuration de
   %ProgramData%\ssh, connexion par mot de passe, droits de administrators_authorized_keys, lus en Rust : registre, WMI,

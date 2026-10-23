@@ -181,12 +181,13 @@ fn protection(a: &Actuel, passerelle: Option<IpAddr>) -> Option<String> {
 
 /// Le DNS actuel bloque-t-il les sites dangereux ? `None` : rien ne permet de le dire (résolveur sur cet ordinateur,
 /// comme NextDNS ; serveur du réseau qui n'est pas la box, comme Pi-hole) ; il peut filtrer, on ne le pousse pas.
-/// Chiffrer seul ne bloque rien.
+/// Chiffrer seul ne bloque rien. Un serveur qui filtre parmi d'autres qui ne filtrent pas ne compte pas : le
+/// système passe de l'un à l'autre (`tous_filtrants`).
 pub(crate) fn bloque_les_dangereux(a: &Actuel, passerelle: Option<IpAddr>) -> Option<bool> {
     if a.resolveur_local.is_some() || a.serveurs.iter().any(|(ip, _)| ip.is_loopback()) {
         return None;
     }
-    if a.serveurs.iter().any(|(ip, _)| filtrant(*ip).is_some()) {
+    if tous_filtrants(a) {
         return Some(true);
     }
     if a.serveurs
@@ -196,6 +197,12 @@ pub(crate) fn bloque_les_dangereux(a: &Actuel, passerelle: Option<IpAddr>) -> Op
         return None;
     }
     Some(false)
+}
+
+/// Tous les serveurs DNS actuels sont-ils des services publics qui filtrent ? Un seul serveur filtrant parmi
+/// d'autres ne garde rien : le système passe de l'un à l'autre, et celui d'un réseau hostile répond aussi.
+pub(crate) fn tous_filtrants(a: &Actuel) -> bool {
+    !a.serveurs.is_empty() && a.serveurs.iter().all(|(ip, _)| filtrant(*ip).is_some())
 }
 
 /// Le nom d'un serveur DNS actuel, pour l'écran.
@@ -550,6 +557,24 @@ mod tests {
             None
         );
         assert_eq!(bloque_les_dangereux(&actuel(&["192.168.1.53"], None, None), box_), None);
+        // Un serveur qui filtre à côté d'un autre qui ne filtre pas : le système passe de l'un à l'autre, rien
+        // n'est gardé ; à côté d'un Pi-hole, on ne sait pas.
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["9.9.9.9", "8.8.8.8"], None, None), box_),
+            Some(false)
+        );
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["1.1.1.2", "192.168.1.1"], None, None), box_),
+            Some(false)
+        );
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["9.9.9.9", "192.168.1.53"], None, None), box_),
+            None
+        );
+        assert_eq!(
+            bloque_les_dangereux(&actuel(&["9.9.9.9", "149.112.121.20"], None, None), box_),
+            Some(true)
+        );
     }
 
     #[test]

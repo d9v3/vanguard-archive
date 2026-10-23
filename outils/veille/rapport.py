@@ -573,8 +573,9 @@ def alerte(rapport, signature, sortie, donnees, evidente=None):
         # Une proposition évidente de la relecture hebdomadaire : écrite par l'IA en lisant le code du dépôt (jamais
         # Internet), reprise bornée et filtrée.
         e = lire_json(evidente, {})
-        al = {"type": "hebdo", "sujet": e.get("sujet"), "fichier": e.get("fichier"), "ligne": e.get("ligne"),
-              "pourquoi": e.get("pourquoi")}
+        # Sujet, fichier et ligne seulement (liste blanche) : le « pourquoi », texte libre d'une IA qui a lu du code
+        # que n'importe qui peut proposer, porterait des consignes jusqu'à l'IA qui écrit dans le dépôt.
+        al = {"type": "hebdo", "sujet": e.get("sujet"), "fichier": e.get("fichier"), "ligne": e.get("ligne")}
     if al is None:
         print(f"alerte inconnue : {signature}", file=sys.stderr)
         return 1
@@ -610,7 +611,6 @@ def alerte(rapport, signature, sortie, donnees, evidente=None):
     elif genre == "hebdo":
         entree |= {"sujet": sur("slug", al.get("sujet")), "fichier": sur("chemin", al.get("fichier")),
                    "ligne": al.get("ligne") if isinstance(al.get("ligne"), int) else None,
-                   "pourquoi": affichable(al.get("pourquoi") or "", 400),
                    "origine": "relecture hebdomadaire (texte d'une IA, à vérifier dans le code, pas à croire)"}
     elif genre == "lien":
         entree |= {"url": sur("url", al.get("url")), "nuits": al.get("nuits") if isinstance(al.get("nuits"), int) else 0}
@@ -755,8 +755,8 @@ def hebdo(a):
         sujet = slug(str(evidente.get("sujet", "")))
         ecrire_json(d / "evidente.json", {
             "sujet": sur("slug", sujet), "fichier": sur("chemin", evidente.get("fichier") or ""),
-            "ligne": evidente.get("ligne") if isinstance(evidente.get("ligne"), int) else None,
-            "pourquoi": borne(evidente.get("pourquoi"), 400)})
+            # Le pourquoi reste dans le compte rendu pour l'auteur, jamais dans ce qui part vers alerte.sh.
+            "ligne": evidente.get("ligne") if isinstance(evidente.get("ligne"), int) else None})
     if isinstance(brut, dict):
         print(f"{brut.get('num_turns', '?')}")
     return 0

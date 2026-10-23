@@ -117,22 +117,56 @@ pub(crate) fn texte(cle: &RegKey, nom: &str) -> Option<String> {
 
 /// Les noms des sous-clés, bornés.
 pub(crate) fn sous_cles(cle: &RegKey) -> Vec<String> {
-    cle.enum_keys().take(SOUS_CLES_MAX).flatten().collect()
+    sous_cles_comptees(cle).0
+}
+
+/// Les noms des sous-clés, bornés, et si la borne a été atteinte : une sous-clé de plus que `SOUS_CLES_MAX` est
+/// demandée pour le savoir, jamais gardée.
+fn sous_cles_comptees(cle: &RegKey) -> (Vec<String>, bool) {
+    let mut noms: Vec<String> = cle.enum_keys().take(SOUS_CLES_MAX + 1).flatten().collect();
+    let coupee = noms.len() > SOUS_CLES_MAX;
+    noms.truncate(SOUS_CLES_MAX);
+    (noms, coupee)
+}
+
+/// Ce que la lecture des clés Uninstall n'a pas pu prendre, par portée : les clés coupées à `SOUS_CLES_MAX`
+/// sous-clés (les suivantes ne sont pas lues : un programme peut y être caché derrière des milliers de clés vides)
+/// et le nombre de clés sans nom affiché, écartées. Pour que la liste ne passe jamais pour entière quand elle ne
+/// l'est pas.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Laisses {
+    pub coupees: Vec<(Portee, String)>,
+    pub sans_nom: Vec<(Portee, usize)>,
 }
 
 /// Les programmes d'une clé Uninstall déjà ouverte (`nom` la désigne dans `Programme::cle`). Écartés : les
 /// composants du système (`SystemComponent` = 1), les correctifs et mises à jour d'un autre programme
-/// (`ParentKeyName`), les clés sans nom affiché.
-pub(crate) fn programmes_de(cle: &RegKey, nom: &str, vue: u32, portee: &Portee) -> Vec<Programme> {
-    sous_cles(cle)
+/// (`ParentKeyName`), les clés sans nom affiché (comptées dans `laisses`, avec la borne atteinte).
+pub(crate) fn programmes_de(
+    cle: &RegKey,
+    nom: &str,
+    vue: u32,
+    portee: &Portee,
+    laisses: &mut Laisses,
+) -> Vec<Programme> {
+    let (sous_cles, coupee) = sous_cles_comptees(cle);
+    if coupee {
+        laisses.coupees.push((portee.clone(), nom.to_string()));
+    }
+    let mut sans_nom = 0;
+    let programmes = sous_cles
         .into_iter()
         .filter_map(|sous| {
             let k = ouvrir(cle, &sous, vue)?;
             if k.get_value::<u32, _>("SystemComponent").is_ok_and(|v| v == 1) || texte(&k, "ParentKeyName").is_some() {
                 return None;
             }
+            let Some(affiche) = texte(&k, "DisplayName") else {
+                sans_nom += 1;
+                return None;
+            };
             Some(Programme {
-                nom: texte(&k, "DisplayName")?,
+                nom: affiche,
                 version: texte(&k, "DisplayVersion").unwrap_or_default(),
                 editeur: texte(&k, "Publisher").unwrap_or_default(),
                 emplacement: texte(&k, "InstallLocation").and_then(|e| emplacement_local(&e)),
@@ -140,7 +174,11 @@ pub(crate) fn programmes_de(cle: &RegKey, nom: &str, vue: u32, portee: &Portee) 
                 cle: format!(r"{nom}\{sous}"),
             })
         })
-        .collect()
+        .collect();
+    if sans_nom > 0 {
+        laisses.sans_nom.push((portee.clone(), sans_nom));
+    }
+    programmes
 }
 
 /// Un `InstallLocation` gardé seulement sur une lettre de lecteur locale (« C:\… »). La valeur peut venir de la
@@ -209,9 +247,15 @@ pub(crate) fn developper(texte: &str, variable: &dyn Fn(&str) -> Option<String>)
 /// Les programmes installés : machine (vues 64 et 32 bits), ce compte, et chaque autre compte dont la session est
 /// ouverte (lisible en administrateur seulement ; sinon rien, et l'inventaire le dit).
 pub(crate) fn programmes() -> Vec<Programme> {
+    programmes_et_laisses().0
+}
+
+/// Les programmes installés (`programmes`) et ce que leur lecture a laissé (`Laisses`).
+pub(crate) fn programmes_et_laisses() -> (Vec<Programme>, Laisses) {
     const CHEMIN: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
     let mut tous = Vec::new();
+    let mut laisses = Laisses::default();
     for (vue, nom) in [
         (
             KEY_WOW64_64KEY,
@@ -223,7 +267,7 @@ pub(crate) fn programmes() -> Vec<Programme> {
         ),
     ] {
         if let Some(cle) = ouvrir(&machine, UNINSTALL, vue) {
-            tous.extend(programmes_de(&cle, nom, vue, &Portee::Machine));
+            tous.extend(programmes_de(&cle, nom, vue, &Portee::Machine, &mut laisses));
         }
     }
     // HKCU\Software n'a qu'une vue (partagée entre 32 et 64 bits).
@@ -233,16 +277,23 @@ pub(crate) fn programmes() -> Vec<Programme> {
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall",
             KEY_WOW64_64KEY,
             &Portee::CompteCourant,
+            &mut laisses,
         ));
     }
     let utilisateurs = RegKey::predef(HKEY_USERS);
     for sid in ruches_chargees() {
         if let Some(cle) = ouvrir(&utilisateurs, &format!(r"{sid}\{CHEMIN}"), KEY_WOW64_64KEY) {
             let nom = format!(r"HKU\{sid}\{CHEMIN}");
-            tous.extend(programmes_de(&cle, &nom, KEY_WOW64_64KEY, &Portee::Compte(sid)));
+            tous.extend(programmes_de(
+                &cle,
+                &nom,
+                KEY_WOW64_64KEY,
+                &Portee::Compte(sid),
+                &mut laisses,
+            ));
         }
     }
-    tous
+    (tous, laisses)
 }
 
 /// winget trouvable par son nom, comme `Get-Command winget` : un fichier « winget » + une extension de PATHEXT dans
@@ -364,8 +415,16 @@ mod tests {
             .unwrap();
         ecrire("KB1", &[("DisplayName", "Correctif"), ("ParentKeyName", "Office")]);
         ecrire("SansNom", &[("DisplayVersion", "1.0")]);
-        let lus = programmes_de(&cle, "HKCU", KEY_WOW64_64KEY, &Portee::CompteCourant);
+        let mut laisses = Laisses::default();
+        let lus = programmes_de(&cle, "HKCU", KEY_WOW64_64KEY, &Portee::CompteCourant, &mut laisses);
         let _ = hkcu.delete_subkey_all(format!(r"Software\VanguardTest-{}", std::process::id()));
+        assert_eq!(
+            laisses,
+            Laisses {
+                coupees: Vec::new(),
+                sans_nom: vec![(Portee::CompteCourant, 1)],
+            }
+        );
         let mut noms: Vec<&str> = lus.iter().map(|p| p.nom.as_str()).collect();
         noms.sort_unstable();
         assert_eq!(noms, ["Adobe Acrobat (64-bit)", "Google Chrome"]);
@@ -378,5 +437,27 @@ mod tests {
         assert_eq!(acrobat.cle, r"HKCU\{AC76BA86-1033-FFFF-7760-BC15014EA700}");
         let chrome = lus.iter().find(|p| p.nom == "Google Chrome").unwrap();
         assert_eq!(chrome.emplacement, None, "valeur trop longue oubliée");
+    }
+
+    /// Une clé Uninstall remplie de milliers de clés vides, pour cacher un programme derrière la borne : la borne
+    /// atteinte est dite (`Laisses::coupees`), jamais tue.
+    #[test]
+    fn cle_coupee_dite() {
+        let chemin = format!(r"Software\VanguardTest-coupee-{}\Uninstall", std::process::id());
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let Ok((cle, _)) = hkcu.create_subkey(&chemin) else {
+            return crate::essais::saute("registre inaccessible");
+        };
+        for i in 0..=SOUS_CLES_MAX {
+            if cle.create_subkey(format!("{i:05}")).is_err() {
+                let _ = hkcu.delete_subkey_all(format!(r"Software\VanguardTest-coupee-{}", std::process::id()));
+                return crate::essais::saute("registre : clés non créées");
+            }
+        }
+        let mut laisses = Laisses::default();
+        let lus = programmes_de(&cle, "HKCU", KEY_WOW64_64KEY, &Portee::CompteCourant, &mut laisses);
+        let _ = hkcu.delete_subkey_all(format!(r"Software\VanguardTest-coupee-{}", std::process::id()));
+        assert_eq!(lus, Vec::<Programme>::new());
+        assert_eq!(laisses.coupees, [(Portee::CompteCourant, "HKCU".to_string())]);
     }
 }

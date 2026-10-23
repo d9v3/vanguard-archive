@@ -11,7 +11,7 @@ et ne publie jamais rien.
 | Quoi | Quand | IA | Durée |
 |---|---|---|---|
 | Nuit (`nuit.sh`) | chaque jour à 03 h 30 (après le renouvellement du quota du vendredi à 3 h) | non | ~1 h 45 |
-| Correction sur alerte (`alerte.sh`) | lancée par la nuit, si une alerte tient dans le budget | oui | ≤ 5 h 45 (correction, verifier.sh, relecture : 90 min chacun au plus ; VM 41 min) |
+| Correction sur alerte (`alerte.sh`) | lancée par la nuit, si une alerte tient dans le budget | oui | ≤ 4 h 30 (correction, verifier.sh, relecture : 90 min chacun au plus ; pas de VM) |
 | Relecture hebdomadaire (`hebdo.sh`) | vendredi à 05 h 30 | oui, lecture seule | ≤ 90 min |
 | Rappel (`matin.sh`) | 08 h 30, si la notification de la nuit n'a pas été vue | non | secondes |
 
@@ -61,8 +61,9 @@ avec un test et committe ; **garde-fous mécaniques** (refus d'un diff qui touch
 pre-commit), `outils/verifier.sh`, `outils/vm-tester.sh`, un `build.rs`, `rust-toolchain`, qui ajoute `#[ignore]`,
 retire un test, change les dépendances hors d'une alerte RUSTSEC, ou n'ajoute aucun test ; refus aussi si le lien
 `.git` du worktree a été réécrit) ; `verifier.sh` dans l'arbre, **dans un bac à sable** ; **relecture adversariale**
-par un second `claude -p` neuf en lecture seule (`consignes-relecture.md`) ; la **VM** seulement si verifier.sh est
-vert et la relecture favorable ; compte rendu `ia/<jour>-<sujet>/resultat.md`, puis la notification. Le worktree est
+par un second `claude -p` neuf en lecture seule (`consignes-relecture.md`) ; **jamais la VM** : ce qui y est déposé
+tourne en administrateur sans clic, l'auteur la lance après sa relecture (`outils/vm-tester.sh --branche <branche>`) ;
+compte rendu `ia/<jour>-<sujet>/resultat.md`, puis la notification. Le worktree est
 retiré, la branche reste.
 
 ### Le code de l'IA ne tourne jamais hors bac à sable
@@ -71,14 +72,14 @@ Une branche écrite par l'IA exécute son code dès qu'on la compile (build.rs, 
 
 - git de la veille sur l'arbre de l'IA : jamais de crochet (`core.hooksPath=/dev/null`, `--no-verify`), jamais de
   fsmonitor, et seulement si le lien `.git` est celui que git a écrit (sinon un faux dépôt ferait lancer son filtre).
-- verifier.sh de la proposition et le programme Windows pour la VM : dans `bwrap` (`bac_a_sable`, commun.sh), sans
+- verifier.sh de la proposition : dans `bwrap` (`bac_a_sable`, commun.sh), sans
   réseau ni prises de la session (D-Bus, Wayland, agents), dossier personnel masqué sauf les outils de compilation,
   écriture dans l'arbre et dans sa compilation et son cargo seulement. Sans bwrap, verifier.sh n'est pas lancé.
 - Compilation (`<sujet>.cible`) et cargo (`<sujet>.cargo` : registre et base RUSTSEC de l'auteur copiés, reflink sur
   btrfs) **jetables**, propres à la correction, supprimés à la fin : jamais `target-veille` ni `~/.cargo`, qu'un
   build.rs empoisonnerait pour la nuit suivante et pour l'auteur.
-- vm-tester.sh : celui de l'arbre de veille (la base), jamais celui de la branche, avec `--exe` (rien n'est compilé
-  hors bac à sable).
+- La VM : jamais déposée d'office pour une branche de l'IA (son programme y tournerait en administrateur, sans
+  relecture humaine) ; l'auteur la lance après sa relecture, par `outils/vm-tester.sh --branche <branche>`.
 
 ### Données hostiles
 

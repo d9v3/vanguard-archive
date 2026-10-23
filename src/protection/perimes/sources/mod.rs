@@ -416,18 +416,68 @@ impl<E: Forme> Forme for Souple<E> {
     }
 }
 
-/// Un tableau dont un seul élément n'a pas la forme attendue est refusé en entier ; la suite est parcourue sans
-/// rien garder.
+/// Les entrées d'un tableau lu, au plus. Les vrais fichiers en ont au plus quelques milliers (8 667 formules et
+/// 7 803 casks le 23 oct. 2026) ; sans plafond, 100 Kio de `{},` en gzip, décompressés jusqu'à leur limite, faisaient
+/// allouer des Gio d'entrées vides, et le programme s'arrêtait faute de mémoire.
+pub(crate) const ENTREES_MAX: usize = 50_000;
+
+/// Les éléments d'un tableau dans une entrée (branches d'un produit, CVE d'un avis, autres noms), au plus : quelques
+/// centaines dans les vrais fichiers.
+pub(crate) const SOUS_ENTREES_MAX: usize = 2_000;
+
+/// Un tableau dont un seul élément n'a pas la forme attendue, ou qui dépasse `SOUS_ENTREES_MAX`, est refusé en
+/// entier ; la suite est parcourue sans rien garder.
 impl<E: Forme> Forme for Vec<E> {
     fn suite<'de, A: SeqAccess<'de>>(mut suite: A) -> Result<Option<Self>, A::Error> {
         let mut garde = Some(Vec::new());
+        let mut n = 0usize;
         while let Some(e) = suite.next_element::<Souple<E>>()? {
+            n += 1;
             match (e.bon(), garde.as_mut()) {
-                (Some(e), Some(v)) => v.push(e),
+                (Some(e), Some(v)) if n <= SOUS_ENTREES_MAX => v.push(e),
                 _ => garde = None,
             }
         }
         Ok(garde)
+    }
+}
+
+/// Ce qu'on garde d'une entrée d'un tableau lu en flux (`Choisis`) : les autres sont oubliées dès qu'elles sont lues.
+pub(crate) trait Choix {
+    fn garder(&self) -> bool;
+}
+
+/// Un tableau JSON lu en flux : chaque entrée est lue, gardée si elle est choisie (`Choix`), oubliée sinon ; jamais le
+/// tableau entier en mémoire avant le tri. Au-delà de `ENTREES_MAX` entrées, c'est une erreur : le fichier est
+/// refusé, pas tronqué. Le second champ : le nombre d'entrées lues, gardées ou non.
+pub(crate) struct Choisis<T>(pub Vec<T>, pub usize);
+
+impl<'de, T: Deserialize<'de> + Choix> Deserialize<'de> for Choisis<T> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V<T>(PhantomData<T>);
+        impl<'de, T: Deserialize<'de> + Choix> Visitor<'de> for V<T> {
+            type Value = Choisis<T>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("un tableau JSON")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut suite: A) -> Result<Self::Value, A::Error> {
+                let mut gardes = Vec::new();
+                let mut n = 0usize;
+                while let Some(e) = suite.next_element::<T>()? {
+                    n += 1;
+                    if n > ENTREES_MAX {
+                        return Err(de::Error::custom("trop d'entrées"));
+                    }
+                    if e.garder() {
+                        gardes.push(e);
+                    }
+                }
+                Ok(Choisis(gardes, n))
+            }
+        }
+        d.deserialize_seq(V(PhantomData))
     }
 }
 

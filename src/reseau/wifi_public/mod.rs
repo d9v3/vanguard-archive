@@ -294,7 +294,8 @@ fn dns_garde(a: &crate::machine::dns::Actuel, chiffre_possible: bool) -> Option<
     if a.chiffre != Some(true) {
         return None;
     }
-    if crate::dns_rapide::bloque_les_dangereux(a, None) == Some(true) {
+    // Tous, pas un seul : un serveur filtrant connu mêlé à celui du réseau laisserait ce dernier répondre.
+    if crate::dns_rapide::tous_filtrants(a) {
         return Some(
             tr!(
                 "DNS gardé : il est déjà chiffré et bloque les sites dangereux.",
@@ -514,20 +515,27 @@ fn relever() -> Result<Plan, String> {
             false,
         ),
         "Public" => {}
-        "DomainAuthenticated" => plan.notes.push(
-            tr!(
-                "Réseau d'entreprise (domaine) : sa catégorie est gérée, pas touchée.",
-                "Company (domain) network: its category is managed, not touched."
-            )
-            .to_string(),
-        ),
-        _ => plan.notes.push(
-            tr!(
-                "Catégorie du réseau illisible : pas changée.",
-                "Network category unreadable: not changed."
-            )
-            .to_string(),
-        ),
+        // Le profil Public du pare-feu, seul réglé par le mode, ne s'applique pas à ces réseaux-là.
+        "DomainAuthenticated" => {
+            plan.entrees_ouvertes = true;
+            plan.notes.push(
+                tr!(
+                    "Réseau d'entreprise (domaine) : sa catégorie est gérée, pas touchée.",
+                    "Company (domain) network: its category is managed, not touched."
+                )
+                .to_string(),
+            );
+        }
+        _ => {
+            plan.entrees_ouvertes = true;
+            plan.notes.push(
+                tr!(
+                    "Catégorie du réseau illisible : pas changée.",
+                    "Network category unreadable: not changed."
+                )
+                .to_string(),
+            );
+        }
     }
     if let Some(f) = &lu.pare_feu {
         let session = crate::protection::blocage::session_a_distance();
@@ -781,12 +789,50 @@ fn point_de_restauration() -> Result<Option<String>, ()> {
     }
 }
 
-/// Un élément qui ferme les entrées de l'ordinateur.
+/// Un élément qui ferme les entrées de l'ordinateur. La catégorie Public en est un : les réglages du profil Public
+/// du pare-feu ne s'appliquent pas à un réseau resté en Privé, dont le partage et la découverte restent ouverts.
 fn ferme_les_entrees(x: &Element) -> bool {
     matches!(
         x,
-        Element::NftTable { .. } | Element::ProfilPublic { .. } | Element::MacPareFeu { .. }
+        Element::NftTable { .. }
+            | Element::ProfilPublic { .. }
+            | Element::MacPareFeu { .. }
+            | Element::Categorie { .. }
     )
+}
+
+/// Les entrées restent-elles ouvertes après l'allumage ? Oui si le relevé le disait, si un élément qui les ferme
+/// n'a pas été pris, ou s'il a été gardé sans avoir pu être relu (non vérifié, jamais compté comme fermé).
+fn entrees_ouvertes<'a>(
+    deja: bool,
+    elements: impl IntoIterator<Item = &'a Element>,
+    changes: &[String],
+    non_relus: &[String],
+) -> bool {
+    deja || elements
+        .into_iter()
+        .any(|x| ferme_les_entrees(x) && (!changes.contains(&x.cle()) || non_relus.contains(&x.cle())))
+}
+
+/// Comment un élément est jugé après sa commande, d'après sa relecture et la réussite de son lot.
+#[derive(Debug, PartialEq, Eq)]
+enum Pris {
+    Oui,
+    Non,
+    /// Gardé dans l'état pour pouvoir l'éteindre, mais pas relu : rien ne dit qu'il a pris.
+    NonVerifie,
+}
+
+/// Relu, il se juge sur sa valeur. Pas relu : sous Windows, il reste dans l'état (l'éteindre ne fera que remettre
+/// l'avant) mais n'est pas vérifié, même si sa commande a réussi ; ailleurs, il se juge sur sa commande (la table
+/// nft, qui ne se relit pas sans droits, est relue par la commande qui la pose).
+fn juger(relu: Option<bool>, ok: bool, windows: bool) -> Pris {
+    match relu {
+        Some(false) => Pris::Oui,
+        None if windows => Pris::NonVerifie,
+        None if ok => Pris::Oui,
+        Some(true) | None => Pris::Non,
+    }
 }
 
 /// Le message quand il n'y a rien à changer : jamais « tout est en place » si les entrées restent ouvertes.
@@ -995,35 +1041,39 @@ fn allumer() {
     }
     let lots: Vec<&Lot> = d_abord.into_iter().chain(ensuite).collect();
     // Relu : un élément confirmé à sa valeur d'avant n'a pas changé et sort de l'état ; un élément qui ne se relit
-    // pas se juge sur sa commande (sauf sous Windows, où il reste : l'éteindre ne fera que remettre l'avant).
+    // pas se juge sur sa commande, sauf sous Windows, où il reste sans être dit pris (voir `juger`).
     let r = Relecture::maintenant(&e);
     let mut changes = Vec::new();
+    let mut non_relus = Vec::new();
     println!();
     for (lot, ok) in lots.iter().zip(reussis.iter().chain(std::iter::repeat(&false))) {
         for x in &lot.elements {
-            let pris = match r.a_l_avant(x) {
-                Some(avant) => !avant,
-                None => *ok || cfg!(windows),
-            };
-            if pris {
-                println!("  {VERT}✔{RESET} {}", decrire(x));
-                changes.push(x.cle());
-            } else {
-                trp!(
+            match juger(r.a_l_avant(x), *ok, cfg!(windows)) {
+                Pris::Oui => {
+                    println!("  {VERT}✔{RESET} {}", decrire(x));
+                    changes.push(x.cle());
+                }
+                Pris::NonVerifie => {
+                    trp!("  ? {} : non vérifié", "  ? {}: not verified", decrire(x));
+                    changes.push(x.cle());
+                    non_relus.push(x.cle());
+                }
+                Pris::Non => trp!(
                     "  ✖ {} : pas changé, voir le message ci-dessus",
                     "  ✖ {}: not changed, see the message above",
                     decrire(x)
-                );
+                ),
             }
         }
     }
     let nouveaux: Vec<String> = lots.iter().flat_map(|l| l.elements.iter().map(Element::cle)).collect();
     let manque = rallumage_incomplet(&anciens, &nouveaux, &changes);
-    let ouvertes = plan.entrees_ouvertes
-        || lots
-            .iter()
-            .flat_map(|l| &l.elements)
-            .any(|x| ferme_les_entrees(x) && !changes.contains(&x.cle()));
+    let ouvertes = entrees_ouvertes(
+        plan.entrees_ouvertes,
+        lots.iter().flat_map(|l| &l.elements),
+        &changes,
+        &non_relus,
+    );
     e.elements.retain(|x| {
         anciens.iter().any(|a| a.cle() == x.cle()) || !nouveaux.contains(&x.cle()) || changes.contains(&x.cle())
     });
@@ -1455,6 +1505,36 @@ fn situation(e: &Element, relu: Option<bool>, meme_demarrage: bool) -> String {
     }
 }
 
+/// Un réglage du mode allumé a-t-il été défait hors de Vanguard ? `defait` : l'élément relu n'est plus à la valeur
+/// du mode (`None` : non vérifié, qui ne compte pas ici). Un élément éphémère parti au redémarrage se dit « à
+/// moitié », et un pare-feu trouvé coupé n'est jamais remis : ni l'un ni l'autre n'est un réglage défait.
+fn defait_selon(e: &Etat, defait: &dyn Fn(&Element) -> Option<bool>) -> bool {
+    e.elements.iter().any(|x| element_defait(x, defait))
+}
+
+fn element_defait(x: &Element, defait: &dyn Fn(&Element) -> Option<bool>) -> bool {
+    !x.ephemere() && !x.jamais_remis() && defait(x) == Some(true)
+}
+
+/// Un élément du mode a-t-il été défait hors de Vanguard ? Relu sous Linux seulement : le compte de la session y
+/// modifie le profil NetworkManager sans mot de passe. Ailleurs, ces réglages demandent les droits
+/// d'administrateur, et les relire lancerait PowerShell à chaque affichage du menu : non relu (`None`).
+fn defait_element(x: &Element) -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    return linux::lecture::defait(x);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = x;
+        None
+    }
+}
+
+/// Le mode allumé, mais un de ses réglages défait hors de Vanguard : le bilan, la ligne du menu et son en-tête le
+/// disent, au lieu de « allumé ».
+fn defait_ailleurs(e: &Etat) -> bool {
+    defait_selon(e, &defait_element)
+}
+
 /// L'état d'un mode allumé est-il à moitié (un redémarrage a emporté le pare-feu du mode) ?
 fn a_moitie(e: &Etat) -> bool {
     e.elements.iter().any(Element::ephemere) && e.demarrage != demarrage()
@@ -1498,10 +1578,21 @@ fn menu() {
         }
         Lu::Fiable(e) => {
             let nom = affichable(&e.reseau.nom);
+            // Relu une fois : l'en-tête et chaque ligne s'en servent.
+            let defaits: Vec<bool> = e
+                .elements
+                .iter()
+                .map(|x| e.etape == Etape::Allume && element_defait(x, &defait_element))
+                .collect();
+            let defait = defaits.iter().any(|d| *d);
             let entete = match e.etape {
                 Etape::Allume if a_moitie(e) => trf!(
                     "  ⚠ À moitié : le pare-feu du mode est parti au redémarrage (« {nom} »).",
                     "  ⚠ Half on: the mode's firewall went away at restart (“{nom}”)."
+                ),
+                Etape::Allume if defait => trf!(
+                    "  ⚠ Allumé sur « {nom} », mais un réglage a été défait ailleurs.",
+                    "  ⚠ On for “{nom}”, but a setting was undone elsewhere."
                 ),
                 Etape::Allume => trf!(
                     "  {VERT}●{RESET} Allumé depuis le {} sur « {nom} ».",
@@ -1533,14 +1624,18 @@ fn menu() {
                 )));
             }
             let r = Relecture::maintenant(e);
-            for x in &e.elements {
+            for (x, defait_ici) in e.elements.iter().zip(&defaits) {
+                let relu = r.a_l_avant(x);
                 let ou = if e.etape == Etape::Portail
                     && uuid_dot(e).is_some()
                     && matches!(x, Element::Nm { propriete, .. } if propriete == "connection.dns-over-tls")
                 {
                     tr!("relâché : opportuniste", "relaxed: opportunistic").to_string()
+                } else if *defait_ici && relu != Some(true) {
+                    // Ni l'avant ni la valeur du mode : une autre, posée ailleurs.
+                    tr!("changé ailleurs", "changed elsewhere").to_string()
                 } else {
-                    situation(x, r.a_l_avant(x), r.meme_demarrage)
+                    situation(x, relu, r.meme_demarrage)
                 };
                 let texte = format!("{} {GRIS}({ou}){RESET}", decrire(x));
                 for (i, l) in envelopper(&texte, LARGEUR - 6).into_iter().enumerate() {
@@ -1564,6 +1659,12 @@ fn menu() {
                     "3",
                     tr!("Rallumer le mode", "Turn the mode on again"),
                     tr!("finir l'allumage", "finish turning on"),
+                ));
+            } else if defait {
+                lignes.push(Ligne::choix(
+                    "3",
+                    tr!("Rallumer le mode", "Turn the mode on again"),
+                    tr!("reposer le réglage défait", "put the undone setting back"),
                 ));
             }
             #[cfg(target_os = "linux")]
@@ -1666,6 +1767,9 @@ pub(crate) fn etat_court() -> &'static str {
         Lu::Fiable(e) if e.etape == Etape::Allume && !a_moitie(&e) && e.entrees_ouvertes => {
             tr!("allumé, entrées ouvertes", "on, incoming open")
         }
+        Lu::Fiable(e) if e.etape == Etape::Allume && !a_moitie(&e) && defait_ailleurs(&e) => {
+            tr!("allumé, réglage défait", "on, setting undone")
+        }
         Lu::Fiable(e) if e.etape == Etape::Allume && !a_moitie(&e) => tr!("allumé", "on"),
         Lu::Fiable(_) => tr!("à finir : interrompu ou à moitié", "to finish: interrupted or half"),
         Lu::NonFiable(_) => tr!("état changé hors de Vanguard", "state changed outside Vanguard"),
@@ -1707,8 +1811,8 @@ pub(crate) fn proposer_d_eteindre() {
     }
 }
 
-/// Au bilan : le mode allumé (Info, à éteindre en partant), interrompu ou à moitié (Moyen), ou un état qu'on ne peut
-/// pas croire (Moyen). Rien quand il est éteint.
+/// Au bilan : le mode allumé (Info, à éteindre en partant), interrompu, à moitié ou un réglage défait ailleurs
+/// (Moyen), ou un état qu'on ne peut pas croire (Moyen). Rien quand il est éteint.
 pub(crate) fn constat() -> Vec<Constat> {
     let c = match lire_etat() {
         Lu::Absent => return Vec::new(),
@@ -1744,6 +1848,16 @@ pub(crate) fn constat() -> Vec<Constat> {
             trf!(
                 "Le mode Wi-Fi public est à finir (« {} ») : allumage ou extinction interrompus, ou pare-feu du mode parti au redémarrage.",
                 "Public Wi-Fi mode is unfinished (“{}”): turning on or off was interrupted, or the mode's firewall went away at restart.",
+                affichable(&e.reseau.nom)
+            ),
+        ),
+        // Les bras d'avant ont pris le reste : l'étape est forcément Allume ici.
+        Lu::Fiable(e) if defait_ailleurs(&e) => alerte(
+            CAT,
+            Niveau::Moyen,
+            trf!(
+                "Mode Wi-Fi public allumé (« {} »), mais un de ses réglages (DNS chiffré, mDNS, LLMNR ou DNS) a été défait hors de Vanguard : « vanguard wifi-public on » le repose.",
+                "Public Wi-Fi mode on (“{}”), but one of its settings (encrypted DNS, mDNS, LLMNR or DNS) was undone outside Vanguard: “vanguard public-wifi on” puts it back.",
                 affichable(&e.reseau.nom)
             ),
         ),
@@ -1923,6 +2037,57 @@ mod tests {
         assert!(!ferme_les_entrees(&Element::Dns { avant: String::new() }));
     }
 
+    /// Windows : la catégorie Public ferme les entrées (le profil Public du pare-feu ne s'applique pas à un réseau
+    /// en Privé). Pas prise, ou gardée sans être relue : les entrées restent ouvertes.
+    #[test]
+    fn categorie_privee_laisse_les_entrees_ouvertes() {
+        let categorie = Element::Categorie {
+            guid: "{0B8C2F4E-1A2B-4C3D-9E8F-001122334455}".into(),
+            avant: "Private".into(),
+        };
+        let profil = Element::ProfilPublic {
+            parametre: "DefaultInboundAction".into(),
+            avant: "NotConfigured".into(),
+        };
+        assert!(ferme_les_entrees(&categorie));
+        let tous = [categorie.clone(), profil.clone()];
+        let les_deux = [categorie.cle(), profil.cle()];
+        // Seul le profil Public a pris : la catégorie est restée Privé.
+        assert!(entrees_ouvertes(false, &tous, &[profil.cle()], &[]));
+        // Les deux pris et relus.
+        assert!(!entrees_ouvertes(false, &tous, &les_deux, &[]));
+        // La catégorie gardée sans relecture : non vérifié, jamais compté comme fermé.
+        assert!(entrees_ouvertes(false, &tous, &les_deux, &[categorie.cle()]));
+        assert!(entrees_ouvertes(true, &tous, &les_deux, &[]));
+        // Sous Windows, un élément pas relu n'est jamais dit pris, même si sa commande a réussi ; ailleurs, sa
+        // commande le juge.
+        assert_eq!(juger(None, false, true), Pris::NonVerifie);
+        assert_eq!(juger(None, true, true), Pris::NonVerifie);
+        assert_eq!(juger(None, true, false), Pris::Oui);
+        assert_eq!(juger(None, false, false), Pris::Non);
+        assert_eq!(juger(Some(false), false, true), Pris::Oui);
+        assert_eq!(juger(Some(true), true, false), Pris::Non);
+    }
+
+    /// Un réglage défait hors de Vanguard (le compte modifie le profil NetworkManager sans mot de passe) : seul un
+    /// élément relu hors de la valeur du mode compte, jamais un non vérifié ni un éphémère (« à moitié »).
+    #[test]
+    fn reglage_defait_ailleurs_seulement_s_il_est_relu() {
+        let e = exemple();
+        let nm = |x: &Element| matches!(x, Element::Nm { .. });
+        assert!(defait_selon(&e, &|x| nm(x).then_some(true)));
+        assert!(!defait_selon(&e, &|x| nm(x).then_some(false)));
+        assert!(!defait_selon(&e, &|_| None));
+        let ephemeres = |x: &Element| x.ephemere().then_some(true);
+        assert!(!defait_selon(&e, &ephemeres));
+        // Un pare-feu trouvé coupé n'est jamais remis : pas un réglage défait.
+        let coupe = etat(vec![Element::ProfilPublic {
+            parametre: "Enabled".into(),
+            avant: "False".into(),
+        }]);
+        assert!(!defait_selon(&coupe, &|_| Some(true)));
+    }
+
     /// Le DNS chiffré passé en « opportuniste » (à la demande ou pour le portail) est noté : étape Portail, que le
     /// menu et le bilan disent ; l'échéance du portail se fait respecter au lancement suivant.
     #[test]
@@ -1960,6 +2125,12 @@ mod tests {
         assert!(unbound.contains(tr!("non vérifié", "not verified")), "{unbound}");
         let (v4, _) = crate::dns_rapide::bouclier_protege();
         assert!(dns_garde(&actuel(&[v4[0]], Some(true), None), true).is_some());
+        // Le DHCP d'un réseau hostile ajoute son serveur à une adresse filtrante connue : le Bouclier est posé.
+        assert_eq!(
+            dns_garde(&actuel(&[v4[0], "203.0.113.7"], Some(true), None), true),
+            None
+        );
+        assert!(dns_garde(&actuel(&[v4[0], v4[1]], Some(true), None), true).is_some());
     }
 
     #[test]
@@ -1995,6 +2166,10 @@ mod tests {
             "allumé, entrées ouvertes",
             "on, incoming open",
             "relâché : opportuniste",
+            "allumé, réglage défait",
+            "on, setting undone",
+            "reposer le réglage défait",
+            "put the undone setting back",
         ] {
             assert!(largeur_affichee(p) <= 33, "{p}");
         }

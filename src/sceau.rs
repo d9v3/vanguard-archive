@@ -101,7 +101,7 @@ fn proteges() -> impl Iterator<Item = &'static str> {
 /// Les fichiers protégés après le premier sceau : une version d'avant les écrivait déjà sans sceau, et des sceaux
 /// existants les feraient passer pour falsifiés à la mise à jour. La première fois que des sceaux les rencontrent,
 /// ils sont acceptés tels quels (« adoptés », dit au bilan comme tout premier usage), puis jugés comme les autres.
-const TARDIFS: [&str; 9] = [
+const TARDIFS: [&str; 12] = [
     REGLAGES,
     NORMALES,
     TEMPS_REEL,
@@ -111,6 +111,10 @@ const TARDIFS: [&str; 9] = [
     PASSERELLE,
     TELECHARGEMENTS,
     BLOCAGE_SIGNALEES,
+    // Les résultats des outils, écrits sans sceau jusqu'à la 0.85.
+    crate::modele::resultat::FICHIERS[0],
+    crate::modele::resultat::FICHIERS[1],
+    crate::modele::resultat::FICHIERS[2],
 ];
 
 const REGISTRE: &str = "sceaux.json";

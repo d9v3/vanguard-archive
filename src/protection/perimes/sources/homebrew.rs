@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use super::Souple;
+use super::{Choisis, Choix, Souple};
 
 /// Au-dessous, ce n'est pas le fichier complet (7 803 casks le 23 oct. 2026).
 const CASKS_MIN: usize = 1000;
@@ -43,9 +43,17 @@ pub(crate) fn casks(octets: &[u8]) -> Option<HashMap<String, Cask>> {
     casks_au_moins(octets, CASKS_MIN)
 }
 
+/// Un cask sans version utile ne sert à rien : oublié dès qu'il est lu.
+impl Choix for CaskBrut {
+    fn garder(&self) -> bool {
+        matches!(&self.version, Some(Souple::Bon(_)))
+    }
+}
+
 fn casks_au_moins(octets: &[u8], minimum: usize) -> Option<HashMap<String, Cask>> {
-    let bruts: Vec<CaskBrut> = serde_json::from_slice(octets).ok()?;
-    if bruts.len() < minimum {
+    // En flux et plafonné (`Choisis`) : jamais le tableau entier en mémoire avant le tri.
+    let Choisis(bruts, n) = serde_json::from_slice::<Choisis<CaskBrut>>(octets).ok()?;
+    if n < minimum {
         return None;
     }
     Some(
@@ -96,9 +104,17 @@ pub(crate) fn formules(octets: &[u8]) -> Option<HashMap<String, String>> {
     formules_au_moins(octets, FORMULES_MIN)
 }
 
+/// Seules les formules suivies sont gardées ; les autres sont comptées puis oubliées dès qu'elles sont lues.
+impl Choix for FormuleBrute {
+    fn garder(&self) -> bool {
+        matches!(&self.name, Some(Souple::Bon(n)) if FORMULES_SUIVIES.contains(&n.as_str()))
+    }
+}
+
 fn formules_au_moins(octets: &[u8], minimum: usize) -> Option<HashMap<String, String>> {
-    let bruts: Vec<FormuleBrute> = serde_json::from_slice(octets).ok()?;
-    if bruts.len() < minimum {
+    // En flux et plafonné (`Choisis`) : un fichier de millions d'entrées vides ne les fait plus toutes allouer.
+    let Choisis(bruts, n) = serde_json::from_slice::<Choisis<FormuleBrute>>(octets).ok()?;
+    if n < minimum {
         return None;
     }
     Some(
@@ -247,6 +263,25 @@ mod tests {
         let (lus, alloue) = super::super::tests::allocations(|| casks_au_moins(gros.as_bytes(), 1));
         assert!(lus.unwrap().is_empty());
         assert!(alloue < 4 << 20, "{alloue} octets alloués");
+    }
+
+    /// Beaucoup de petites entrées (des `{}` par millions tiennent dans 100 Kio de gzip) : lues en flux, les formules
+    /// non suivies ne sont pas gardées, et au-delà du plafond le fichier est refusé, jamais tronqué.
+    #[test]
+    fn beaucoup_de_petites_entrees() {
+        let tableau = |n: usize| format!("[{}]", vec!["{}"; n].join(","));
+        let sous = tableau(20_000);
+        let (lues, alloue) = super::super::tests::allocations(|| formules_au_moins(sous.as_bytes(), 1));
+        assert_eq!(lues, Some(HashMap::new()));
+        assert!(alloue < 1 << 20, "{alloue} octets alloués");
+        let sous_casks = sous.replace("{}", r#"{"token":"a"}"#);
+        let (casks, alloue) = super::super::tests::allocations(|| casks_au_moins(sous_casks.as_bytes(), 1));
+        assert_eq!(casks, Some(HashMap::new()));
+        assert!(alloue < 1 << 20, "{alloue} octets alloués");
+        let trop = tableau(super::super::ENTREES_MAX + 1);
+        let (lues, alloue) = super::super::tests::allocations(|| formules_au_moins(trop.as_bytes(), 1));
+        assert_eq!(lues, None);
+        assert!(alloue < 1 << 20, "{alloue} octets alloués");
     }
 
     /// Sur la vraie copie gardée par un essai à la main, si `VANGUARD_ESSAI_PERIMES` donne son dossier

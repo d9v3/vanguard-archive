@@ -39,7 +39,14 @@ pub(super) fn resultat(c: &Constats, pire_en_ligne: Option<Niveau>, debut: Debut
                 constats.push(alerte(
                     CAT,
                     Niveau::Critique,
-                    format!("{} : {moteur} {}", p.nom, detection.join(", ")),
+                    // Le nom vient de l'expéditeur : un caractère de direction (U+202E) retournerait la fin du nom
+                    // (« facture », U+202E, « fdp.exe » se lit « facture.exe.pdf ») dans le résultat, le journal et le rapport ;
+                    // filtré et coupé comme à l'écran. Le nom de la détection vient d'un moteur : filtré aussi.
+                    format!(
+                        "{} : {moteur} {}",
+                        crate::modele::resultat::nom_sans_piege(&p.nom, 44),
+                        crate::modele::resultat::sans_piege(&detection.join(", "), false)
+                    ),
                 ));
             }
         }
@@ -102,5 +109,28 @@ mod tests {
         assert_eq!(r.pire(), Some(Niveau::Eleve));
         assert_eq!(r.constats.len(), 2);
         assert_eq!(refuse("pas un courriel", debut).verdict(), "non-verifie");
+    }
+
+    /// Un nom de pièce jointe piégé (U+202E retourne la fin, un saut de ligne ajoute une fausse ligne) n'arrive
+    /// jamais brut dans le résultat, que le rapport et le journal reprennent.
+    #[test]
+    fn nom_de_piece_piege_filtre() {
+        let debut = (chrono::Utc::now(), std::time::Instant::now());
+        let mut c = Constats::default();
+        c.pieces.push(super::super::pieces::Piece {
+            nom: "facture\u{202e}fdp.exe\n✔ Rien de suspect".into(),
+            type_declare: "application/pdf".into(),
+            taille: 10,
+            signes: Vec::new(),
+            manques: Vec::new(),
+            moteurs: vec![("ClamAV".into(), Examen::Trouve(vec!["Essai.Trojan\u{1b}[2K".into()]))],
+        });
+        let r = resultat(&c, None, debut);
+        let message = &r.constats[0].message;
+        assert!(
+            !crate::ui::contient_un_piege(message) && !message.contains('\n'),
+            "{message:?}"
+        );
+        assert!(message.contains("facture\u{fffd}fdp.exe"), "{message:?}");
     }
 }

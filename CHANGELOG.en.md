@@ -9,6 +9,29 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
+  adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
+  can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category
+  counts among what closes incoming connections: a network left Private, a company network or an unreadable category
+  leaves the mode “on, incoming open”, and a setting that cannot be re-read shows as not verified, never ✔. On Linux, a
+  DNS, encrypted DNS, mDNS or LLMNR undone by a program of the account (NetworkManager allows it without a password)
+  shows in the check (Medium), on the menu line and in its header, with a way to put it back. DNS is no longer kept as
+  “already encrypted and filtering” when only one of its servers filters: they must all filter, otherwise the Shield is
+  set; the check no longer says such a DNS blocks dangerous sites either.
+- **Attack campaign no. 2: eight weaknesses closed.** “Put everything back” never replays a command text read from
+  changements.jsonl (which any program of the account can write): each block is undone by the commands rebuilt from
+  its typed fields, like a single undo, and an unrecognized block is refused and shown instead of running as
+  administrator. The event log is read with an overall bound (months, bytes, events), most recent first, and says what
+  it did not read; files placed under the names of future months (2099…) do not count there, are no longer followed
+  by writing nor counted by pruning, and no longer push the real current month out of the read and the traces: they
+  are reported. formula.json, cask.json and endoflife.date are read as a stream, with a cap on entries: a small
+  hostile file no longer makes the program allocate gigabytes. The attachment name of a suspicious email goes filtered
+  (direction marks, control characters) into the result, the log and the report, and so does every written finding
+  message. A software inventory that hits a bound (subkeys, entries in a folder, 20,000 programs, many keys without a
+  name) is not verified, never silently truncated. Tool results (examens/*.json) are sealed: a “nothing found”
+  rewritten outside Vanguard shows as not verified, never green. The nightly watch no longer deposits into the VM the
+  program of a branch written by the AI (to run after review, `vm-tester.sh --branche`), and only passes the subject,
+  file and line of a proposal to the AI that fixes.
 - **Check rule parity: SSH and Defender on Windows, passwords, startup and persistence on macOS, one reference per rule,
   one time limit per rule.** Windows gains the OpenSSH server (service, %ProgramData%\ssh configuration, password
   sign-in, administrators_authorized_keys rights, read in Rust: registry, WMI, files and their rights) and the keys in

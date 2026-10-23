@@ -471,8 +471,9 @@ fn plus_recente_sur_le_meme(h: &Historique, id: &str) -> Option<String> {
 }
 
 /// Défait ces notes d'un passage (une demande administrateur), avec `en_plus`, les commandes d'autres annulations
-/// (un blocage) lancées dans la même demande. Rend l'issue de chaque note, relue, et la réussite de chaque groupe en
-/// plus.
+/// (un blocage) lancées dans la même demande : refaites par Vanguard depuis des champs typés
+/// (`gestes::commandes_d_annulation`), jamais un texte relu d'un fichier non scellé. Rend l'issue de chaque note,
+/// relue, et la réussite de chaque groupe en plus.
 pub(crate) fn defaire(ids: &[String], en_plus: &[Vec<String>]) -> (Vec<(String, Issue)>, Vec<bool>) {
     let tient = crate::reseau::wifi_public::tient_le_dns();
     defaire_dans(ids, en_plus, tient, &crate::reseau::dossier_local())
