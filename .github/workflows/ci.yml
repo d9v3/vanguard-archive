@@ -142,6 +142,30 @@ jobs:
       - name: Dépendances et failles connues (outils/verifier.sh)
         run: outils/verifier.sh --seulement dependances,failles-connues
 
+  # Les canaris de format (src/canaris.rs), chaque nuit et à la demande : chaque vraie source (Échap, KEV,
+  # endoflife.date, Homebrew, Edge, Chrome, Mozilla…), téléchargée par la même demande que le programme, relue par son
+  # lecteur. Le code de master ne change pas la nuit, les sources si : un format changé se voit ici, même l'ordinateur
+  # de l'auteur éteint (sa veille de nuit fait de même sur « prochaine »). Un échec = un courriel de GitHub.
+  canaris:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust et compilation musl
+        run: |
+          rustup toolchain install
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools
+      - name: Canaris (sources téléchargées, relues par les lecteurs du programme)
+        run: |
+          d="$RUNNER_TEMP/canaris"
+          mkdir -p "$d"
+          VANGUARD_CANARIS="$d" cargo test -q --bin vanguard canaris::canaris_telecharger -- --ignored --exact
+          VANGUARD_CANARIS="$d" cargo test -q --bin vanguard canaris::canaris_kev -- --ignored --exact
+          VANGUARD_ESSAI_PERIMES="$d" VANGUARD_ESSAI_ECHAP="$d/ioc.yaml" cargo test -q --bin vanguard -- \
+            vraies_copies_si_presentes vraie_copie_si_presente vrai_fichier_d_echap
+
   # Le banc de fuzzing (fuzz/), cinq minutes par cible chaque nuit, et à la demande : verifier.sh n'y passe que
   # quelques secondes. Le corpus appris d'une nuit est repris la suivante (cache de GitHub) ; une donnée qui fait
   # planter un lecteur est gardée dans les artefacts, pour en faire un test de non-régression.
