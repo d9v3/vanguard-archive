@@ -363,6 +363,19 @@ fn non_verifies(b: &Bilan) -> Vec<String> {
 
 // ───────────────────────────── Bilan ─────────────────────────────
 
+/// L'objet d'un constat des logiciels périmés : chaque logiciel jugé, son produit et sa version lue (« firefox@128.0 »),
+/// sans langue. Une autre version encore périmée est un autre objet : déclarer normal une version ne tait jamais la
+/// suivante.
+fn objet_des(juges: &[&Juge], genre: &str) -> crate::modele::Objet {
+    let mut tous: Vec<String> = juges
+        .iter()
+        .map(|j| format!("{:?}@{}", j.installe.produit, j.installe.brute).to_lowercase())
+        .collect();
+    tous.sort();
+    tous.dedup();
+    crate::modele::Objet::de(genre, &tous.join(","))
+}
+
 /// Les constats du bilan, d'après un relevé.
 pub(crate) fn constats_de(b: &Bilan) -> Vec<Constat> {
     let mut constats = Vec::new();
@@ -383,12 +396,12 @@ pub(crate) fn constats_de(b: &Bilan) -> Vec<Constat> {
             ),
         ),
     ] {
-        let touches: Vec<String> = b
+        let juges: Vec<&Juge> = b
             .juges
             .iter()
             .filter(|j| j.touche() && j.installe.produit == produit)
-            .map(ligne)
             .collect();
+        let touches: Vec<String> = juges.iter().map(|j| ligne(j)).collect();
         if !touches.is_empty() {
             constats.push(
                 alerte(
@@ -396,6 +409,7 @@ pub(crate) fn constats_de(b: &Bilan) -> Vec<Constat> {
                     Niveau::Critique,
                     format!("{} {}", touches.join(" "), mention_bilan()),
                 )
+                .avec_objet(objet_des(&juges, "exploite"))
                 .manuel(manuel, &[]),
             );
         }
@@ -427,7 +441,9 @@ pub(crate) fn constats_de(b: &Bilan) -> Vec<Constat> {
             }
         }
         constats.push(
-            alerte(CAT, Niveau::Moyen, format!("{message} {}", mention_bilan())).manuel(
+            alerte(CAT, Niveau::Moyen, format!("{message} {}", mention_bilan()))
+                .avec_objet(objet_des(&depasses, "perimes"))
+                .manuel(
                 tr!(
                     "Ouvrir chacun, puis Aide › À propos (navigateurs) ou Fichier › Compte › Options de mise à jour (Office) ; sinon le réinstaller depuis le site de son éditeur. Détail : vanguard logiciels-perimes",
                     "Open each one, then Help › About (browsers) or File › Account › Update Options (Office); otherwise reinstall it from its publisher's site. Details: vanguard outdated-software"
@@ -1045,5 +1061,26 @@ mod tests {
         }
         assert!(mention(Some(Duration::from_hours(80))).contains("3 jours"));
         assert!(!mention(None).contains("copies"));
+    }
+
+    /// T4 : le produit et la version lus, sans langue ; une autre version est une autre clé.
+    #[test]
+    fn cles_sans_langue() {
+        let b = bilan(
+            vec![
+                installe(Produit::Chrome, "150.0.1.2", Branche::Release),
+                installe(Produit::Firefox, "131.0.1", Branche::Release),
+            ],
+            vec![],
+            &|_| Some(10),
+        );
+        let cles = crate::machine::controler_regle("WIN-MAJ-002", || constats_de(&b));
+        assert_eq!(
+            cles,
+            [
+                "WIN-MAJ-002|exploite:firefox@131.0.1",
+                "WIN-MAJ-002|perimes:chrome@150.0.1.2"
+            ]
+        );
     }
 }

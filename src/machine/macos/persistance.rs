@@ -204,6 +204,8 @@ fn persistance_dans(dossiers: impl IntoIterator<Item = (PathBuf, bool)>) -> Vec<
                                 "Agent “{nom}” is unreadable or built to hinder analysis (looping references, multiplied copies or an outsized file): no legitimate program writes that, but a damaged file gives this message too."
                             ),
                         )
+                        // Illisible : un autre objet que l'agent lisible accepté avant, jamais tu par ce choix.
+                        .avec_objet(crate::modele::Objet::agent(&chemin.to_string_lossy(), None))
                         .manuel(
                             tr!(
                                 "Regarde-le avec « plutil -p » dans le Terminal ; s'il ne vient d'aucun programme que tu connais, mets-le à la corbeille et redémarre",
@@ -217,6 +219,10 @@ fn persistance_dans(dossiers: impl IntoIterator<Item = (PathBuf, bool)>) -> Vec<
             };
             tiers.push(nom.clone());
             let Some(raison) = soupcon(&prog, &args) else { continue };
+            // L'objet : le fichier de l'agent et ce qu'il lance, valeurs brutes (avant `affichable`, jamais le nom
+            // montré). Une autre commande dans le même fichier est un autre objet : le « c'est normal » d'avant ne
+            // la tait pas. Les arguments comptent, `soupcon` les juge aussi.
+            let objet = crate::modele::Objet::agent(&chemin.to_string_lossy(), Some(&format!("{prog} {args}")));
             let prog = crate::ui::affichable(&prog);
             let (arret, retrait) = arret_et_retrait(&chemin, &dossier, systeme);
             constats.push(
@@ -228,6 +234,7 @@ fn persistance_dans(dossiers: impl IntoIterator<Item = (PathBuf, bool)>) -> Vec<
                         "“{nom}” restarts at every boot, {raison}: {prog}. This is the usual mark of Mac malware."
                     ),
                 )
+                .avec_objet(objet)
                 .corriger(
                     trf!(
                         "Arrêter « {nom} » et mettre son fichier à la corbeille (récupérable)",
@@ -373,6 +380,28 @@ mod tests {
         let perso = Path::new("/Users/alice/Library/LaunchAgents/com.exemple.p.plist");
         let (arret, retrait) = arret_et_retrait(perso, Path::new("/Users/alice/Library/LaunchAgents"), false);
         assert!(arret.starts_with("launchctl bootout gui/$(id -u) ") && retrait.starts_with("mv "));
+    }
+
+    /// Le même fichier d'agent réécrit pour lancer un autre programme : autre clé, le choix d'avant ne la tait pas.
+    #[test]
+    fn agent_reecrit_autre_cle() {
+        let dossier = std::env::temp_dir().join(format!("vanguard-agents-cle-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let ecrire = |prog: &str| {
+            std::fs::write(
+                dossier.join("com.exemple.aide.plist"),
+                format!("<plist><dict><key>Program</key><string>{prog}</string></dict></plist>"),
+            )
+            .unwrap();
+            let c = persistance_dans([(dossier.clone(), false)]);
+            let alerte = c.iter().find(|c| c.probleme == Some(Niveau::Eleve)).unwrap();
+            alerte.objet.clone()
+        };
+        let avant = ecrire("/private/tmp/aide");
+        let apres = ecrire("/private/tmp/autre");
+        assert_ne!(avant, apres);
+        assert_eq!(avant, ecrire("/private/tmp/aide"));
+        std::fs::remove_dir_all(&dossier).unwrap();
     }
 
     #[test]

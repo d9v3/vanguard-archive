@@ -6,6 +6,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::modele::{Absence, Cle, Etat, Objet, Precision, Raison};
 use crate::risk::Niveau;
 use crate::ui::*;
 
@@ -57,7 +58,7 @@ pub struct Correctif {
     pub bloque: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Clone)]
 pub struct Constat {
     pub categorie: &'static str,
     /// `None` = tout va bien.
@@ -68,8 +69,49 @@ pub struct Constat {
     /// qui décide de la note : reformuler un message ne doit pas désactiver ce garde-fou.
     pub verifie: bool,
     /// L'identifiant de la règle qui l'a produit (« LNX-PLT-001 »), pour les règles du registre (`regles`) ; vide sinon.
-    #[serde(skip_serializing_if = "str::is_empty")]
     pub regle: &'static str,
+    /// Ce que juge ce constat, à côté de sa règle : avec elle, sa clé (`cle`), qui le reconnaît d'un bilan à l'autre
+    /// sans dépendre de la langue ni de la tournure du message. `NonMigre` : reconnu à son texte, comme avant.
+    pub objet: Objet,
+    /// Ce que `probleme` et `verifie` ne disent pas : l'absence d'un « sans objet », la raison d'un « non vérifié ».
+    pub precision: Precision,
+}
+
+/// Le JSON d'un constat : les champs d'avant, tels quels (des scripts les lisent), puis sa clé et son état, calculés.
+impl Serialize for Constat {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let etat = self.etat();
+        let mut m = s.serialize_struct("Constat", 11)?;
+        m.serialize_field("categorie", self.categorie)?;
+        m.serialize_field("probleme", &self.probleme)?;
+        m.serialize_field("message", &self.message)?;
+        m.serialize_field("correctif", &self.correctif)?;
+        m.serialize_field("verifie", &self.verifie)?;
+        if self.regle.is_empty() {
+            m.skip_field("regle")?;
+        } else {
+            m.serialize_field("regle", self.regle)?;
+        }
+        match &self.objet {
+            Objet::De(o) => m.serialize_field("objet", o)?,
+            _ => m.skip_field("objet")?,
+        }
+        match self.cle() {
+            Some(c) => m.serialize_field("cle", &c.to_string())?,
+            None => m.skip_field("cle")?,
+        }
+        m.serialize_field("etat", etat.code())?;
+        match &etat {
+            Etat::NonVerifie(r) => m.serialize_field("raison", r.code())?,
+            _ => m.skip_field("raison")?,
+        }
+        match &etat {
+            Etat::SansObjet(a) => m.serialize_field("absence", a.code())?,
+            _ => m.skip_field("absence")?,
+        }
+        m.end()
+    }
 }
 
 #[derive(Serialize)]
@@ -88,12 +130,22 @@ impl Audit {
     /// Une note n'a de sens que si le pare-feu a été vérifié et qu'au plus un tiers des vérifications a échoué :
     /// sinon une machine peu vérifiée obtiendrait un « A » rassurant (vu en test sur Fedora en conteneur). Il faut un
     /// constat du pare-feu vérifié, pas seulement l'absence d'un non vérifié : une règle du pare-feu qui plante rend
-    /// une « erreur interne » d'une autre catégorie, reconnue à son identifiant (« LNX-PFE-001 »).
+    /// une « erreur interne » d'une autre catégorie, reconnue à son identifiant (« LNX-PFE-001 »). Un constat
+    /// « sans objet » ne compte pas parmi les vérifications : rien n'y a été jugé, il ne dilue pas les non vérifiés.
+    /// Le garde-fou vise la lecture du pare-feu lui-même (règle `*-PFE-001`, plantage et règle muette compris) : un
+    /// réglage secondaire illisible, comme le mode furtif de macOS, compte comme toute vérification dans la limite du
+    /// tiers, sans retirer la note à lui seul. Un constat sans règle (les tests) compte par sa catégorie.
     pub fn fiable(&self) -> bool {
-        let pare_feu = |c: &&Constat| c.categorie == "Pare-feu" || c.regle.contains("-PFE-");
+        let pare_feu =
+            |c: &&Constat| c.regle.ends_with("-PFE-001") || (c.regle.is_empty() && c.categorie == "Pare-feu");
         let mut constats_pare_feu = self.constats.iter().filter(pare_feu);
         let pare_feu_verifie = constats_pare_feu.clone().any(|c| c.verifie) && constats_pare_feu.all(|c| c.verifie);
-        pare_feu_verifie && self.impossibles() * 3 < self.constats.len()
+        let juges = self
+            .constats
+            .iter()
+            .filter(|c| !matches!(c.etat(), Etat::SansObjet(_)))
+            .count();
+        pare_feu_verifie && self.impossibles() * 3 < juges
     }
 }
 
@@ -105,6 +157,8 @@ pub(crate) fn ok(categorie: &'static str, message: impl Into<String>) -> Constat
         correctif: None,
         verifie: true,
         regle: "",
+        objet: Objet::NonMigre,
+        precision: Precision::Aucune,
     }
 }
 
@@ -116,6 +170,8 @@ pub(crate) fn alerte(categorie: &'static str, niveau: Niveau, message: impl Into
         correctif: None,
         verifie: true,
         regle: "",
+        objet: Objet::NonMigre,
+        precision: Precision::Aucune,
     }
 }
 
@@ -131,7 +187,47 @@ pub(crate) fn impossible(categorie: &'static str, raison: &str) -> Constat {
     }
 }
 
+/// `impossible`, avec sa raison typée (`modele::Raison`) : le JSON et l'historique la comparent par son code.
+pub(crate) fn impossible_par(categorie: &'static str, raison: Raison, message: impl Into<String>) -> Constat {
+    Constat {
+        verifie: false,
+        precision: Precision::NonVerifie(raison),
+        ..alerte(categorie, Niveau::Info, message)
+    }
+}
+
+/// Rien à juger ici, et c'est prouvé (pas de carte Wi-Fi, aucun réseau connecté) : jamais compté comme sain dans la
+/// fiabilité de la note, jamais confondu avec une lecture qui a échoué.
+pub(crate) fn sans_objet(categorie: &'static str, absence: Absence, message: impl Into<String>) -> Constat {
+    Constat {
+        precision: Precision::SansObjet(absence),
+        ..ok(categorie, message)
+    }
+}
+
 impl Constat {
+    /// Sa clé (règle + objet), si sa règle pose un objet ; sinon on le reconnaît à son texte.
+    pub(crate) fn cle(&self) -> Option<Cle> {
+        Cle::de(self.regle, &self.objet)
+    }
+
+    /// Son état : sain, sans objet, non vérifié ou problème (`modele::Etat`).
+    pub(crate) fn etat(&self) -> Etat {
+        Etat::de(self.probleme, self.verifie, &self.precision)
+    }
+
+    /// Pas une combinaison impossible (`modele::etat::coherent`).
+    #[cfg(test)]
+    pub(crate) fn coherent(&self) -> bool {
+        crate::modele::etat::coherent(self.probleme, self.verifie, self.correctif.is_some(), &self.precision)
+    }
+
+    /// Pose l'objet de ce constat.
+    pub(crate) fn avec_objet(mut self, objet: Objet) -> Self {
+        self.objet = objet;
+        self
+    }
+
     pub(crate) fn corriger(mut self, action: impl Into<String>, commandes: &[impl ToString]) -> Self {
         self.correctif = Some(Correctif {
             action: action.into(),
@@ -1076,6 +1172,8 @@ mod tests {
                 message: m.to_string(),
                 correctif: None,
                 regle: "",
+                objet: crate::modele::Objet::NonMigre,
+                precision: crate::modele::Precision::Aucune,
             })
             .collect();
         Audit {
@@ -1238,6 +1336,30 @@ Host *
         assert!(!plante.fiable());
     }
 
+    /// macOS : le mode furtif illisible (MAC-PFE-002) ne retire plus la note quand le pare-feu, lui, a été lu ; le
+    /// pare-feu illisible (MAC-PFE-001), toujours.
+    #[test]
+    fn mode_furtif_illisible_garde_la_note() {
+        let inconnu = "Impossible de vérifier (mode furtif illisible).";
+        let mut a = audit(&[
+            ("Pare-feu", None, "Pare-feu de macOS actif."),
+            ("Pare-feu", Some(Niveau::Info), inconnu),
+            ("SSH", None, "Serveur SSH désactivé."),
+            ("Mises à jour", None, "Système à jour."),
+            ("Comptes", None, "Seul root a l'UID 0."),
+        ]);
+        a.constats[0].regle = "MAC-PFE-001";
+        a.constats[1].regle = "MAC-PFE-002";
+        a.constats[1].verifie = false;
+        for c in &mut a.constats[2..] {
+            c.regle = "MAC-TST-001";
+        }
+        assert!(a.fiable());
+        a.constats[0].verifie = false;
+        a.constats[0].probleme = Some(Niveau::Info);
+        assert!(!a.fiable());
+    }
+
     /// Une règle qui plante ne fait pas tomber le bilan : son constat « erreur interne » n'est pas vérifié et garde
     /// l'identifiant de la règle.
     #[test]
@@ -1331,6 +1453,170 @@ mod tests_au_hasard {
             prop_assert!(!joker(&nom, &ajout));
             let interrogations = "?".repeat(nom.chars().count());
             prop_assert!(joker(&interrogations, &nom));
+        }
+    }
+}
+
+/// T4 : une règle jugée en français puis en anglais rend les mêmes clés et les mêmes états, et deux constats d'une
+/// même exécution ne partagent jamais une clé. Rend les clés (triées), que chaque test compare à celles qu'il
+/// attend : un instantané qui montre une clé qui change.
+#[cfg(test)]
+pub(crate) fn controler_regle(regle: &'static str, juger: impl Fn() -> Vec<Constat>) -> Vec<String> {
+    let lire = |constats: Vec<Constat>| {
+        let mut vus: Vec<(String, &'static str)> = Vec::new();
+        for mut c in constats {
+            c.regle = regle;
+            assert!(c.coherent(), "{regle} : constat incohérent « {} »", c.message);
+            if let Some(k) = c.cle() {
+                let k = k.to_string();
+                assert!(vus.iter().all(|(v, _)| *v != k), "{regle} : clé en double {k}");
+                vus.push((k, c.etat().code()));
+            }
+        }
+        vus.sort();
+        vus
+    };
+    let fr = lire(juger());
+    let en = lire(crate::langue::en_anglais(&juger));
+    assert_eq!(fr, en, "{regle} : les clés ou les états changent avec la langue");
+    fr.into_iter().map(|(k, _)| k).collect()
+}
+
+/// L'état des constats (`modele::Etat`) : quatre cas jamais confondus, un JSON qui garde ses champs d'avant, et une
+/// note qui ne monte jamais quand une vérification se perd (T7).
+#[cfg(test)]
+mod tests_etat {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn quatre_cas_et_json() {
+        let sain = ok("Pare-feu", "ufw actif.");
+        let probleme = alerte("Ports en écoute", Niveau::Moyen, "8080/tcp ouvert.").avec_objet(Objet::port(
+            8080,
+            "tcp",
+            Some("python3"),
+        ));
+        let ancien = impossible("SSH", "sshd absent");
+        let muette = impossible_par("Audit", Raison::Muette, "rien");
+        let sans = sans_objet("Wi-Fi", Absence::Materiel, "Pas de carte Wi-Fi.");
+        assert_eq!(sain.etat(), Etat::Sain);
+        assert_eq!(probleme.etat(), Etat::Probleme { niveau: Niveau::Moyen });
+        assert_eq!(ancien.etat(), Etat::NonVerifie(Raison::NonPrecisee));
+        assert_eq!(muette.etat(), Etat::NonVerifie(Raison::Muette));
+        assert_eq!(sans.etat(), Etat::SansObjet(Absence::Materiel));
+        for c in [&sain, &probleme, &ancien, &muette, &sans] {
+            assert!(c.coherent(), "{}", c.message);
+        }
+        // Sans règle, pas de clé ; avec, « règle|objet ».
+        assert_eq!(probleme.cle(), None);
+        let mut avec_regle = probleme.clone();
+        avec_regle.regle = "LNX-RES-001";
+        assert_eq!(
+            avec_regle.cle().map(|c| c.to_string()).as_deref(),
+            Some("LNX-RES-001|port:8080/tcp:python3")
+        );
+        let json = serde_json::to_value(&avec_regle).unwrap();
+        assert_eq!(json["probleme"], "Moyen");
+        assert_eq!(json["verifie"], true);
+        assert_eq!(json["regle"], "LNX-RES-001");
+        assert_eq!(json["objet"], "port:8080/tcp:python3");
+        assert_eq!(json["cle"], "LNX-RES-001|port:8080/tcp:python3");
+        assert_eq!(json["etat"], "probleme");
+        let json = serde_json::to_value(&muette).unwrap();
+        assert_eq!(
+            (json["etat"].as_str(), json["raison"].as_str()),
+            (Some("non-verifie"), Some("muette"))
+        );
+        assert!(json.get("regle").is_none() && json.get("cle").is_none() && json.get("objet").is_none());
+        let json = serde_json::to_value(&sans).unwrap();
+        assert_eq!(
+            (json["etat"].as_str(), json["absence"].as_str()),
+            (Some("sans-objet"), Some("materiel"))
+        );
+    }
+
+    /// Un « sans objet » ne dilue pas les non vérifiés : deux non vérifiés sur six constats laissent une note, pas
+    /// sur trois constats jugés et trois sans objet.
+    #[test]
+    fn sans_objet_jamais_compte_sain() {
+        let mut constats = vec![
+            ok("Pare-feu", "ufw actif."),
+            impossible("SSH", "x"),
+            impossible("DNS", "y"),
+        ];
+        let jugee = |c: Vec<Constat>| Audit {
+            systeme: "Linux",
+            score: score(&c),
+            constats: c,
+        };
+        let mut avec_sains = constats.clone();
+        avec_sains.extend((0..4).map(|_| ok("Comptes", "Seul root a l'UID 0.")));
+        assert!(jugee(avec_sains).fiable());
+        constats.extend((0..4).map(|_| sans_objet("Wi-Fi", Absence::Inactif, "Aucun réseau Wi-Fi connecté.")));
+        assert!(!jugee(constats).fiable());
+    }
+
+    /// Un constat au hasard, décrit (cas, niveau, catégorie) : sain, problème, non vérifié ou sans objet.
+    fn description() -> impl Strategy<Value = (u8, u8, &'static str)> {
+        (
+            0u8..4,
+            0u8..4,
+            prop::sample::select(vec!["Comptes", "SSH", "DNS", "Ports en écoute"]),
+        )
+    }
+
+    fn fabriquer(&(cas, n, categorie): &(u8, u8, &'static str)) -> Constat {
+        let niveau = [Niveau::Info, Niveau::Moyen, Niveau::Eleve, Niveau::Critique][usize::from(n)];
+        match cas {
+            0 => ok(categorie, "sain"),
+            1 => alerte(categorie, niveau, "problème"),
+            2 => impossible(categorie, "raison"),
+            _ => sans_objet(categorie, Absence::Inactif, "rien à juger"),
+        }
+    }
+
+    fn jugee(c: &[Constat]) -> (u32, bool) {
+        let mut tous = vec![ok("Pare-feu", "ufw actif.")];
+        tous.extend_from_slice(c);
+        let a = Audit {
+            systeme: "Linux",
+            score: score(&tous),
+            constats: tous,
+        };
+        (a.score, a.fiable())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        /// T7 : perdre une vérification (sain → non vérifié, sain → sans objet) ne fait jamais monter la note ni
+        /// passer la fiabilité de faux à vrai ; aggraver un problème ne fait jamais monter la note.
+        #[test]
+        fn la_note_ne_monte_jamais_quand_on_voit_moins(
+            d in prop::collection::vec(description(), 0..14),
+            i in any::<prop::sample::Index>(),
+        ) {
+            let c: Vec<Constat> = d.iter().map(fabriquer).collect();
+            let note = jugee(&c).0;
+            for remplacant in [impossible("Comptes", "perdu"), sans_objet("Comptes", Absence::Inactif, "rien")] {
+                let mut moins = c.clone();
+                moins.push(ok("Comptes", "sain"));
+                let (note_avant, fiable_avant) = jugee(&moins);
+                let dernier = moins.len() - 1;
+                moins[dernier] = remplacant;
+                let (note_apres, fiable_apres) = jugee(&moins);
+                prop_assert!(note_apres <= note_avant);
+                prop_assert!(!fiable_apres || fiable_avant);
+            }
+            if !c.is_empty() {
+                let k = i.index(c.len());
+                if let Some(n) = c[k].probleme.filter(|_| c[k].verifie) {
+                    let mut pire = c.clone();
+                    pire[k].probleme = Some(Niveau::Critique.max(n));
+                    prop_assert!(jugee(&pire).0 <= note);
+                }
+            }
         }
     }
 }

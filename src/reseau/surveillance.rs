@@ -175,6 +175,53 @@ struct EtatMachine {
     score: Option<u32>,
     /// Problèmes moyens ou plus graves des catégories surveillées, « catégorie : message ».
     alertes: Vec<String>,
+    /// La clé de chaque alerte (`Constat::cle`), dans l'ordre de `alertes` ; `None` pour une règle qui ne pose pas
+    /// encore d'objet, vide dans l'état d'une version d'avant les clés (on compare alors le texte). Scellée avec le
+    /// reste : une clé écrite d'avance ne tait rien sans se voir.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    cles: Vec<Option<String>>,
+    /// Le niveau de chaque alerte, dans l'ordre de `alertes` ; vide dans l'état d'une version d'avant. Une alerte qui
+    /// s'aggrave sans changer de clé (une extension qui gagne l'accès à tous les sites) se renotifie ainsi.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    niveaux: Vec<Option<Niveau>>,
+}
+
+impl EtatMachine {
+    /// Les alertes avec leur clé.
+    fn alertes_et_cles(&self) -> impl Iterator<Item = (&str, Option<&str>)> {
+        self.alertes
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (a.as_str(), self.cles.get(i).and_then(Option::as_deref)))
+    }
+
+    /// Le niveau de l'alerte `i`, s'il a été noté.
+    fn niveau(&self, i: usize) -> Option<Niveau> {
+        self.niveaux.get(i).copied().flatten()
+    }
+
+    /// Ajoute une alerte, sa clé et son niveau, en gardant les trois listes alignées.
+    fn ajouter(&mut self, alerte: String, cle: Option<String>, niveau: Option<Niveau>) {
+        if self.cles.len() < self.alertes.len() {
+            self.cles.resize(self.alertes.len(), None);
+        }
+        if self.niveaux.len() < self.alertes.len() {
+            self.niveaux.resize(self.alertes.len(), None);
+        }
+        self.alertes.push(alerte);
+        self.cles.push(cle);
+        self.niveaux.push(niveau);
+    }
+
+    /// Aucune clé, aucun niveau : l'état garde la forme d'avant.
+    fn compacter(&mut self) {
+        if self.cles.iter().all(Option::is_none) {
+            self.cles.clear();
+        }
+        if self.niveaux.iter().all(Option::is_none) {
+            self.niveaux.clear();
+        }
+    }
 }
 
 /// L'état du passage d'avant, d'après ses sceaux. Changé hors de Vanguard (une alerte écrite d'avance), adopté
@@ -196,14 +243,27 @@ fn machine_surveillee(c: &crate::machine::Constat) -> bool {
 }
 
 fn etat_machine(a: &crate::machine::Audit) -> EtatMachine {
-    EtatMachine {
+    let mut etat = EtatMachine {
         score: a.fiable().then_some(a.score),
-        alertes: a
-            .constats
-            .iter()
-            .filter(|c| machine_surveillee(c))
-            .map(|c| format!("{} : {}", c.categorie, c.message))
-            .collect(),
+        ..EtatMachine::default()
+    };
+    for c in a.constats.iter().filter(|c| machine_surveillee(c)) {
+        etat.ajouter(
+            format!("{} : {}", c.categorie, c.message),
+            c.cle().map(|k| k.to_string()),
+            c.probleme,
+        );
+    }
+    etat.compacter();
+    etat
+}
+
+/// Deux alertes sont-elles la même ? Par leur clé quand les deux en ont une (une autre langue ne renotifie rien),
+/// sinon par leur texte sans ses nombres (`cle_alerte`), comme avant les clés.
+fn meme_alerte(a: (&str, Option<&str>), b: (&str, Option<&str>)) -> bool {
+    match (a.1, b.1) {
+        (Some(x), Some(y)) => x == y,
+        _ => cle_alerte(a.0) == cle_alerte(b.0),
     }
 }
 
@@ -231,15 +291,23 @@ pub(crate) fn cle_alerte(alerte: &str) -> String {
 
 /// Notifications à envoyer entre deux passages : (titre, texte).
 fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, String)> {
-    let connues: Vec<String> = avant.alertes.iter().map(|a| cle_alerte(a)).collect();
-    let nouvelles: Vec<&String> = apres
-        .alertes
-        .iter()
-        .filter(|a| !connues.contains(&cle_alerte(a)))
+    // Une gravité plus forte renotifie, comme l'apprentissage : la même alerte d'avant ne la tait que si elle était
+    // au moins aussi grave. Un niveau non noté (état d'une version d'avant) ne renotifie rien.
+    let aggravee = |apres: Option<Niveau>, avant: Option<Niveau>| matches!((apres, avant), (Some(x), Some(y)) if x > y);
+    let nouvelles: Vec<&str> = apres
+        .alertes_et_cles()
+        .enumerate()
+        .filter(|(i, a)| {
+            !avant
+                .alertes_et_cles()
+                .enumerate()
+                .any(|(j, b)| meme_alerte(*a, b) && !aggravee(apres.niveau(*i), avant.niveau(j)))
+        })
+        .map(|(_, a)| a.0)
         .collect();
     let mut notes = Vec::new();
     for a in nouvelles.iter().take(3) {
-        let (cat, msg) = a.split_once(" : ").unwrap_or(("", a.as_str()));
+        let (cat, msg) = a.split_once(" : ").unwrap_or(("", a));
         notes.push((
             trf!("Vanguard : {}", "Vanguard: {}", crate::langue::categorie(cat)),
             msg.to_string(),
@@ -282,13 +350,12 @@ fn veiller_machine() -> crate::machine::Audit {
             .iter()
             .any(|c| c.categorie == FAILLES_CRITIQUES && !c.verifie)
     {
-        apres.alertes.extend(
-            avant
-                .alertes
-                .iter()
-                .filter(|a| a.starts_with(&format!("{FAILLES_CRITIQUES} : ")))
-                .cloned(),
-        );
+        for (i, (a, cle)) in avant.alertes_et_cles().enumerate() {
+            if a.starts_with(&format!("{FAILLES_CRITIQUES} : ")) {
+                apres.ajouter(a.to_string(), cle.map(str::to_string), avant.niveau(i));
+            }
+        }
+        apres.compacter();
     }
     if let Some(avant) = &avant {
         for (titre, texte) in nouveautes_machine(avant, &apres) {
@@ -2186,6 +2253,8 @@ mod tests {
         EtatMachine {
             score: Some(score),
             alertes: alertes.iter().map(ToString::to_string).collect(),
+            cles: Vec::new(),
+            niveaux: Vec::new(),
         }
     }
 
@@ -2201,6 +2270,67 @@ mod tests {
         assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Maison", "bb:bb:bb:bb:bb:bb")).is_some());
         // Autre Wi-Fi (chez un ami) avec la même adresse de box : pas une alerte.
         assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Ami", "bb:bb:bb:bb:bb:bb")).is_none());
+    }
+
+    /// L'état laissé par la 0.85 (sans clés) se relit et se compare par le texte ; ensuite, avec les clés, passer à
+    /// l'anglais ne renotifie rien, et un autre programme sur le même port, si.
+    #[test]
+    fn etat_de_la_085_puis_comparaison_par_cle() {
+        let ancien: EtatMachine =
+            serde_json::from_str(include_str!("../../tests/donnees/surveillance-machine-0.85.json")).unwrap();
+        assert!(ancien.cles.is_empty() && ancien.alertes.len() == 2);
+        let cle = "LNX-RES-001|port:8080/tcp:python3";
+        let mut fr = etat(86, &[]);
+        fr.ajouter(ancien.alertes[0].clone(), Some(cle.into()), Some(Niveau::Moyen));
+        fr.ajouter(ancien.alertes[1].clone(), None, Some(Niveau::Moyen));
+        assert_eq!(nouveautes_machine(&ancien, &fr), Vec::new());
+        let mut en = etat(86, &[]);
+        en.ajouter(
+            "Ports en écoute : 8080/tcp (HTTP) open to the network by “python3”. A development web server.".into(),
+            Some(cle.into()),
+            Some(Niveau::Moyen),
+        );
+        en.ajouter(ancien.alertes[1].clone(), None, Some(Niveau::Moyen));
+        assert_eq!(nouveautes_machine(&fr, &en), Vec::new());
+        let mut intrus = etat(86, &[]);
+        intrus.ajouter(
+            en.alertes[0].clone(),
+            Some("LNX-RES-001|port:8080/tcp:intrus".into()),
+            Some(Niveau::Moyen),
+        );
+        assert_eq!(nouveautes_machine(&en, &intrus).len(), 1);
+        // Relu tel qu'écrit : les clés suivent leurs alertes.
+        let relu: EtatMachine = serde_json::from_str(&serde_json::to_string(&en).unwrap()).unwrap();
+        assert_eq!(
+            relu.alertes_et_cles().collect::<Vec<_>>(),
+            en.alertes_et_cles().collect::<Vec<_>>()
+        );
+    }
+
+    /// Même clé, plus grave : une note (avant, la clé seule comptait et l'aggravation passait en silence). Même
+    /// niveau ou moins grave : rien. Un niveau non noté (état d'avant) ne renotifie rien.
+    #[test]
+    fn aggravation_renotifiee() {
+        let cle = "COM-NAV-001|extension:firefox/exemple@example.com";
+        let avec = |niveau: Option<Niveau>, texte: &str| {
+            let mut e = etat(86, &[]);
+            e.ajouter(format!("Extensions : {texte}"), Some(cle.into()), niveau);
+            e
+        };
+        let moyen = avec(Some(Niveau::Moyen), "Extension d'origine inconnue : Exemple.");
+        let eleve = avec(
+            Some(Niveau::Eleve),
+            "Extension d'origine inconnue : Exemple, avec accès à tous les sites.",
+        );
+        assert_eq!(nouveautes_machine(&moyen, &eleve).len(), 1);
+        assert_eq!(nouveautes_machine(&eleve, &eleve), Vec::new());
+        assert_eq!(nouveautes_machine(&eleve, &moyen), Vec::new());
+        let sans = avec(None, "Extension d'origine inconnue : Exemple.");
+        assert_eq!(nouveautes_machine(&sans, &eleve), Vec::new());
+        // Relu tel qu'écrit : les niveaux suivent leurs alertes ; sans niveau, rien n'est écrit.
+        let relu: EtatMachine = serde_json::from_str(&serde_json::to_string(&eleve).unwrap()).unwrap();
+        assert_eq!(relu.niveau(0), Some(Niveau::Eleve));
+        assert!(!serde_json::to_string(&etat(86, &["x"])).unwrap().contains("niveaux"));
     }
 
     #[test]

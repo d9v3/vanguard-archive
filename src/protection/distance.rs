@@ -238,7 +238,8 @@ fn juger(trouvailles: &[Trouvaille], aujourd_hui: NaiveDate) -> Vec<Constat> {
                 "{nom} is present: {etats}. It is a remote control tool: whoever installed it can see this screen and operate this computer; it is the tech-support scammers' tool (“your computer is infected, let me fix it”). If you use it yourself, mark it as normal (“i” at the fix step)."
             )
         };
-        let constat = alerte(CAT, niveau, message);
+        // L'objet : le logiciel par son nom français, le même quelle que soit la langue de l'interface.
+        let constat = alerte(CAT, niveau, message).avec_objet(crate::modele::Objet::de("logiciel", logiciel.nom[0]));
         let retrait = sans_repetition(siens.iter().flat_map(|t| t.retrait.iter().cloned()));
         constats.push(if en_cours {
             constat.manuel(
@@ -1913,6 +1914,20 @@ mod tests {
         assert_eq!(
             sans_repetition(["a".to_string(), "b".to_string(), "a".to_string()]),
             ["a", "b"]
+        );
+    }
+
+    /// T4 : le logiciel par son nom français, la même clé dans les deux langues.
+    #[test]
+    fn cles_sans_langue() {
+        let t = [
+            trouvaille("AnyDesk", Trace::Installe, Some(jour("2026-10-03")), &["x"]),
+            trouvaille("Assistance rapide", Trace::EnCours { connecte: true }, None, &[]),
+        ];
+        let cles = crate::machine::controler_regle("COM-DIS-001", || juger(&t, jour("2026-10-18")));
+        assert_eq!(
+            cles,
+            ["COM-DIS-001|logiciel:AnyDesk", "COM-DIS-001|logiciel:Assistance rapide"]
         );
     }
 }

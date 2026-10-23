@@ -938,6 +938,8 @@ mod tests {
                     correctif: None,
                     verifie: true,
                     regle: "",
+                    objet: crate::modele::Objet::NonMigre,
+                    precision: crate::modele::Precision::Aucune,
                 },
                 Constat {
                     categorie: "Ports en écoute",
@@ -946,6 +948,8 @@ mod tests {
                     correctif: None,
                     verifie: true,
                     regle: "",
+                    objet: crate::modele::Objet::NonMigre,
+                    precision: crate::modele::Precision::Aucune,
                 },
             ],
         };

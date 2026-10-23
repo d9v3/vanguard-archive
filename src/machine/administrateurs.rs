@@ -167,6 +167,12 @@ fn juger(admins: &[String], avant: Option<&Vus>, aujourd_hui: NaiveDate) -> (Con
                 recents.join(", ")
             ),
         )
+        // Les comptes nouveaux eux-mêmes : un autre administrateur ajouté plus tard est un autre objet.
+        .avec_objet(crate::modele::Objet::de("administrateurs", &{
+            let mut r = recents.clone();
+            r.sort();
+            r.join(",")
+        }))
         .manuel(retrait(), &[])
     };
     (constat, Vus { vus })

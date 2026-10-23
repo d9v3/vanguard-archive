@@ -1,0 +1,201 @@
+# Tous les identifiants que Vanguard a donnés : règles du bilan (regle!), fiches de l'audit du réseau
+# (audit/fiches.rs), outils et surveillances (modele/registre.rs). Une ligne par identifiant, suivie de ses marques :
+#   sans-reference  la règle ne cite encore aucune référence (cliquet : la liste ne peut que rétrécir) ;
+#   retire          l'identifiant n'est plus utilisé et ne doit jamais revenir (une autre règle le reprendrait
+#                   sans que l'historique ni les alertes acceptées ne le voient).
+# Lu par les tests de machine/regles.rs.
+
+COM-AGT-001
+COM-AGT-002
+COM-APP-001
+COM-APP-002
+COM-APP-003
+COM-APP-004
+COM-APP-005
+COM-ARP-001
+COM-ARP-002
+COM-ARP-003
+COM-ARP-004
+COM-BLU-001 sans-reference
+COM-CLE-001 sans-reference
+COM-CLE-002 sans-reference
+COM-CLE-003 sans-reference
+COM-CPT-001 sans-reference
+COM-CPT-002 sans-reference
+COM-CPT-003
+COM-CRT-001 sans-reference
+COM-DIS-001 sans-reference
+COM-DNS-001 sans-reference
+COM-DNS-002
+COM-DNS-003
+COM-DNS-004
+COM-DNS-005
+COM-ESP-001 sans-reference
+COM-ETA-001 sans-reference
+COM-EXP-001
+COM-EXP-002
+COM-EXP-003
+COM-EXP-004
+COM-FIC-001 sans-reference
+COM-HEU-001 sans-reference
+COM-HIS-001 sans-reference
+COM-INT-001 sans-reference
+COM-INT-002 sans-reference
+COM-JRN-001 sans-reference
+COM-MAJ-001 sans-reference
+COM-MAT-001 sans-reference
+COM-MDP-001 sans-reference
+COM-NAV-001 sans-reference
+COM-NAV-002 sans-reference
+COM-NAV-003 sans-reference
+COM-PAR-001 sans-reference
+COM-PRG-001
+COM-PST-001
+COM-PST-002
+COM-PST-003
+COM-PUB-001 sans-reference
+COM-SAV-001 sans-reference
+COM-SEG-001
+COM-SEG-002
+COM-SEG-004
+COM-SEG-005
+COM-SUR-001 sans-reference
+COM-SUR-002 sans-reference
+COM-SUR-003 sans-reference
+COM-TLS-001
+COM-TLS-002
+COM-TLS-003
+COM-WIF-001
+COM-WIF-002
+COM-WIF-003
+COM-WIF-004
+COM-WIF-005
+LNX-CHF-001 sans-reference
+LNX-CPT-001 sans-reference
+LNX-CPT-002 sans-reference
+LNX-CTN-001 sans-reference
+LNX-DEM-001 sans-reference
+LNX-JRN-001
+LNX-MAJ-001 sans-reference
+LNX-MAJ-002 sans-reference
+LNX-MAJ-003 sans-reference
+LNX-MAJ-004 sans-reference
+LNX-MAJ-005 sans-reference
+LNX-MAJ-006 sans-reference
+LNX-MAT-001 sans-reference
+LNX-NOY-001
+LNX-NOY-002
+LNX-NOY-003 sans-reference
+LNX-NOY-004 sans-reference
+LNX-NOY-005
+LNX-NOY-006
+LNX-PFE-001 sans-reference
+LNX-PLT-001
+LNX-PRS-001 sans-reference
+LNX-PRS-002 sans-reference
+LNX-PRS-003 sans-reference
+LNX-PRS-004 sans-reference
+LNX-PRV-001 sans-reference
+LNX-PRV-002 sans-reference
+LNX-PRV-003 sans-reference
+LNX-PRV-004 sans-reference
+LNX-RES-001 sans-reference
+LNX-RES-002 sans-reference
+LNX-SAV-001 sans-reference
+LNX-SES-001 sans-reference
+LNX-SES-002 sans-reference
+LNX-SES-003 sans-reference
+LNX-SRV-001 sans-reference
+LNX-SSH-001 sans-reference
+LNX-SSH-002 sans-reference
+LNX-SSH-003 sans-reference
+LNX-SSH-004 sans-reference
+LNX-SSH-005 sans-reference
+LNX-SSH-006
+LNX-SUR-001 sans-reference
+LNX-WIF-001 sans-reference
+MAC-ANV-001 sans-reference
+MAC-CHF-001 sans-reference
+MAC-CPT-001 sans-reference
+MAC-DIS-001 sans-reference
+MAC-MAJ-001 sans-reference
+MAC-MAJ-002 sans-reference
+MAC-MAJ-003 sans-reference
+MAC-MAJ-004 sans-reference
+MAC-PAR-001 sans-reference
+MAC-PFE-001 sans-reference
+MAC-PFE-002 sans-reference
+MAC-PRF-001 sans-reference
+MAC-PRS-001 sans-reference
+MAC-PRV-001 sans-reference
+MAC-PRV-002 sans-reference
+MAC-PRV-003 sans-reference
+MAC-PRV-004 sans-reference
+MAC-RES-001 sans-reference
+MAC-RES-002 sans-reference
+MAC-SAV-001 sans-reference
+MAC-SAV-002 sans-reference
+MAC-SES-001 sans-reference
+MAC-SES-002 sans-reference
+MAC-SSH-001 sans-reference
+MAC-SSH-002 sans-reference
+MAC-SYS-001 sans-reference
+MAC-SYS-002 sans-reference
+MAC-SYS-003 sans-reference
+MAC-WIF-001 sans-reference
+PRO-ACC-001
+PRO-ANV-001
+PRO-CAM-001
+PRO-COU-001
+PRO-CTN-001
+PRO-ESP-001
+PRO-GIT-001
+PRO-LIE-001
+PRO-MEM-001
+PRO-TEL-001
+PRO-YAR-001
+SUR-APP-001
+SUR-BLO-001
+SUR-BOT-001
+SUR-EMP-001
+SUR-FIC-001
+SUR-MAC-001
+SUR-PAS-001
+SUR-PRT-001
+SUR-TEL-001
+SUR-WIF-001
+VEI-CNX-001
+VEI-PRG-001
+WIN-ANV-001 sans-reference
+WIN-ANV-002 sans-reference
+WIN-CHF-001 sans-reference
+WIN-CPT-001 sans-reference
+WIN-CPT-002 sans-reference
+WIN-DEM-001 sans-reference
+WIN-DIS-001 sans-reference
+WIN-DUR-001 sans-reference
+WIN-JRN-001
+WIN-JRN-002
+WIN-JRN-003
+WIN-MAJ-001 sans-reference
+WIN-MAJ-002 sans-reference
+WIN-PFE-001 sans-reference
+WIN-PRS-001 sans-reference
+WIN-PRS-002
+WIN-PRS-003
+WIN-PRS-004
+WIN-PRS-005
+WIN-PRS-006
+WIN-PRS-007
+WIN-PRS-008
+WIN-PRS-009
+WIN-PRS-010
+WIN-PRS-011
+WIN-PRS-012
+WIN-PRV-001 sans-reference
+WIN-RES-001 sans-reference
+WIN-RES-002 sans-reference
+WIN-RES-003 sans-reference
+WIN-SES-001 sans-reference
+WIN-SRV-001 sans-reference
+WIN-WIF-001 sans-reference

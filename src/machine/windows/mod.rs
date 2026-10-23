@@ -1030,6 +1030,9 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
             continue;
         }
         vus.push(port);
+        // La clé garde le nom tel que Windows le donne (sans casse), jamais « ? » traduit ni rendu affichable.
+        let nom = programme.to_lowercase();
+        let objet = crate::modele::Objet::port(port, "tcp", (nom != "?").then_some(nom.as_str()));
         // Chaque programme choisit son nom : montré, il est rendu inoffensif.
         let programme = crate::ui::affichable(programme);
         let i = info_port(port);
@@ -1041,7 +1044,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
                     "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « Vanguard : bloquer {port} » du pare-feu Windows.", "{port}/tcp ({}) opened by “{programme}”, blocked inbound by the “Vanguard : bloquer {port}” Windows firewall rule.",
                     i.service
                 ),
-            ));
+            ).avec_objet(objet));
             continue;
         }
         let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
@@ -1054,7 +1057,8 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
                 i.service,
                 i.conseil
             ),
-        );
+        )
+        .avec_objet(objet);
         // RDP : pas de blocage aveugle, il coupe l'accès aux machines pilotées à distance (VM…).
         // Le constat « Bureau à distance » propose déjà NLA ou la désactivation propre.
         constats.push(if niveau >= Niveau::Moyen && port != 3389 {
@@ -1087,10 +1091,17 @@ fn wifi() -> Vec<Constat> {
         15,
     )
     .map(|r| r.sortie) else {
-        return Vec::new();
+        return vec![super::impossible_par(
+            "Wi-Fi",
+            crate::modele::Raison::Absente("netsh".into()),
+            tr!(
+                "Impossible de vérifier le Wi-Fi (netsh n'a pas répondu).",
+                "Could not check Wi-Fi (netsh did not answer)."
+            ),
+        )];
     };
     let Some(connexion) = super::wifi::connexion_netsh(&texte) else {
-        return Vec::new();
+        return vec![wifi_sans_connexion()];
     };
     let mut constats = vec![super::wifi::securite(&connexion.ssid, &connexion.securite, &[])];
     // Windows 11 24H2 réserve la liste à l'autorisation de localisation : sans elle, netsh ne liste rien, et il n'y a
@@ -1101,6 +1112,44 @@ fn wifi() -> Vec<Constat> {
         constats.extend(super::wifi::jumeau(&visibles));
     }
     constats
+}
+
+/// Aucun réseau connecté selon netsh : sans objet seulement si l'API Wi-Fi le confirme (pas de carte, ou aucune
+/// connectée). Une carte connectée que netsh ne montre pas, c'est Windows 11 24H2 sans l'autorisation de
+/// localisation : non vérifié, jamais un silence.
+fn wifi_sans_connexion() -> Constat {
+    use crate::modele::{Absence, Raison};
+    match super::wifi::wlanapi::cartes() {
+        Ok(cartes) if cartes.is_empty() => super::sans_objet(
+            "Wi-Fi",
+            Absence::Materiel,
+            tr!(
+                "Pas de carte Wi-Fi sur cet ordinateur.",
+                "No Wi-Fi card on this computer."
+            ),
+        ),
+        Ok(cartes) if !cartes.contains(&true) => super::sans_objet(
+            "Wi-Fi",
+            Absence::Inactif,
+            tr!(
+                "Aucun réseau Wi-Fi connecté : rien à juger.",
+                "No Wi-Fi network connected: nothing to judge."
+            ),
+        ),
+        Ok(_) => super::impossible_par(
+            "Wi-Fi",
+            Raison::Illisible("netsh".into()),
+            tr!(
+                "Impossible de vérifier le Wi-Fi : connecté, mais Windows ne montre le réseau qu'avec la localisation (Paramètres > Confidentialité et sécurité > Localisation).",
+                "Could not check Wi-Fi: connected, but Windows shows the network only with location access (Settings > Privacy & security > Location)."
+            ),
+        ),
+        Err(e) => super::impossible_par(
+            "Wi-Fi",
+            Raison::Illisible(e.to_string()),
+            trf!("Impossible de vérifier le Wi-Fi ({e}).", "Could not check Wi-Fi ({e})."),
+        ),
+    }
 }
 
 /// Ports UDP ouverts sur le réseau. Windows en ouvre beaucoup lui-même (découverte, heure, VPN) : on ne garde
@@ -1156,6 +1205,8 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
             continue;
         }
         vus.push(port);
+        let nom = programme.to_lowercase();
+        let objet = crate::modele::Objet::port(port, "udp", Some(nom.as_str()));
         // Chaque programme choisit son nom : montré, il est rendu inoffensif.
         let programme = if programme.is_empty() {
             tr!("programme inconnu", "unknown program").to_string()
@@ -1172,6 +1223,7 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
                 i.conseil
             ),
         );
+        let constat = constat.avec_objet(objet.clone());
         // Services de découverte de Windows : une correction qui les coupe proprement (138 suit 137, une seule fois).
         constats.push(match port {
             5355 if llmnr_coupe => alerte(
@@ -1181,7 +1233,8 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
                     "5355/udp (LLMNR) encore ouvert, mais LLMNR est coupé : ce sera effectif au prochain redémarrage.",
                     "5355/udp (LLMNR) still open, but LLMNR is turned off: it takes effect at the next restart."
                 ),
-            ),
+            )
+            .avec_objet(objet),
             5355 => constat.corriger(
                 tr!(
                     "Couper LLMNR (résolution de noms usurpable ; le DNS suffit)",
@@ -1276,6 +1329,21 @@ mod tests {
         assert_eq!(
             coupee.correctif.unwrap().commandes,
             ["Set-MpPreference -MAPSReporting Advanced"]
+        );
+    }
+
+    /// T4 : un port UDP se reconnaît à son numéro et à son programme, sans casse ni langue.
+    #[test]
+    fn ports_udp_cles_sans_langue() {
+        let liste = "0.0.0.0|161|snmp\n0.0.0.0|27036|Steam\n0.0.0.0|5355|svchost";
+        let cles = crate::machine::controler_regle("WIN-RES-002", || lire_ports_udp(liste, true, None));
+        assert_eq!(
+            cles,
+            [
+                "WIN-RES-002|port:161/udp:snmp",
+                "WIN-RES-002|port:27036/udp:steam",
+                "WIN-RES-002|port:5355/udp:svchost"
+            ]
         );
     }
 

@@ -599,6 +599,8 @@ fn constat_de(donnees: &Path) -> Option<crate::machine::Constat> {
         }),
         verifie: true,
         regle: "",
+        objet: crate::modele::Objet::NonMigre,
+        precision: crate::modele::Precision::Aucune,
     })
 }
 

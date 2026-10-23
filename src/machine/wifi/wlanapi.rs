@@ -633,6 +633,13 @@ mod natif {
         Ok(lecture)
     }
 
+    /// Les cartes Wi-Fi de cet ordinateur, connectée ou non chacune : WlanEnumInterfaces ne demande pas la
+    /// localisation, là où netsh (Windows 11 24H2) cache le réseau connecté sans elle. Le bilan y distingue « pas de
+    /// carte » ou « pas connecté » (sans objet) d'un réseau qu'il ne voit pas (non vérifié). `Err` : API absente.
+    pub(crate) fn cartes() -> Result<Vec<bool>, &'static str> {
+        Ok(Session::ouvrir()?.interfaces().iter().map(|i| i.connectee).collect())
+    }
+
     /// Les profils Wi-Fi enregistrés de toutes les cartes. `Err` : API absente ou service arrêté.
     pub(crate) fn profils() -> Result<Vec<ProfilEnregistre>, &'static str> {
         let session = Session::ouvrir()?;
@@ -649,7 +656,7 @@ mod natif {
 }
 
 #[cfg(windows)]
-pub(crate) use natif::{lire, profils};
+pub(crate) use natif::{cartes, lire, profils};
 
 #[cfg(test)]
 mod tests {

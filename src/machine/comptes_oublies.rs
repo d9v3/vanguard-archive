@@ -37,7 +37,12 @@ fn juger(comptes: &[Compte], aujourd_hui: chrono::NaiveDate) -> Vec<Constat> {
                 ),
                 Some(_) => return None,
             };
-            Some(alerte(CAT, Niveau::Info, message).manuel(desactiver(), &[]))
+            // Le compte par son nom tel que le système le donne : la date qui change ne fait pas un autre objet.
+            Some(
+                alerte(CAT, Niveau::Info, message)
+                    .avec_objet(crate::modele::Objet::de("compte", &c.nom))
+                    .manuel(desactiver(), &[]),
+            )
         })
         .collect()
 }
@@ -399,5 +404,22 @@ mod tests {
         let j = jour_unix(1_792_238_400).unwrap();
         assert!((jour(2026, 10, 17) - j).num_days().abs() <= 1);
         assert_eq!(jour_unix(i64::MAX), None);
+    }
+
+    /// T4 : un compte oublié se reconnaît à son nom, pas à sa date ni à la langue.
+    #[test]
+    fn cles_sans_langue() {
+        let comptes = [
+            Compte {
+                nom: "ancien".into(),
+                derniere: Some(jour(2025, 12, 1)),
+            },
+            Compte {
+                nom: "depannage".into(),
+                derniere: None,
+            },
+        ];
+        let cles = crate::machine::controler_regle("COM-CPT-002", || juger(&comptes, jour(2026, 10, 19)));
+        assert_eq!(cles, ["COM-CPT-002|compte:ancien", "COM-CPT-002|compte:depannage"]);
     }
 }

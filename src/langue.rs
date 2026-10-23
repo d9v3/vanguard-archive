@@ -47,7 +47,28 @@ fn detecter() -> bool {
 }
 
 pub fn anglais() -> bool {
+    #[cfg(test)]
+    if let Some(forcee) = FORCEE.with(std::cell::Cell::get) {
+        return forcee;
+    }
     *ANGLAIS.get_or_init(detecter)
+}
+
+// La langue forcée pour ce fil seulement, le temps d'un test (`en_anglais`) : les autres tests, qui tournent en
+// même temps sur d'autres fils, restent en français.
+#[cfg(test)]
+thread_local! {
+    static FORCEE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Lance `f` en anglais sur ce fil, puis revient au français : pour vérifier qu'un jugement ne dépend pas de la
+/// langue (les clés des constats).
+#[cfg(test)]
+pub(crate) fn en_anglais<R>(f: impl FnOnce() -> R) -> R {
+    FORCEE.with(|l| l.set(Some(true)));
+    let r = f();
+    FORCEE.with(|l| l.set(None));
+    r
 }
 
 /// Le texte dans la langue de l'interface (deux littéraux) : `tr!("Annulé.", "Cancelled.")`.

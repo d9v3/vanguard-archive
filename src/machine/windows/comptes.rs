@@ -17,6 +17,7 @@ pub(super) fn comptes() -> Vec<Constat> {
 }
 
 fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> Vec<Constat> {
+    use crate::modele::Objet;
     let mut constats = Vec::new();
     for u in utilisateurs {
         let c: Vec<&str> = u.trim().splitn(4, '|').collect();
@@ -25,6 +26,8 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
             continue;
         }
         let nom_ps = crate::commande::ps_texte(nom);
+        // L'objet : le compte par son SID, que Windows ne réattribue jamais (le nom, lui, se renomme).
+        let compte = |genre: &str| Objet::de(genre, &sid.to_uppercase());
         if sid.ends_with("-501") {
             constats.push(
                 alerte(
@@ -32,6 +35,7 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                     Niveau::Eleve,
                     trf!("Compte invité « {nom} » activé.", "Guest account “{nom}” enabled."),
                 )
+                .avec_objet(compte("invite"))
                 .corriger(
                     tr!("Désactiver le compte invité", "Disable the guest account"),
                     &[&format!("Disable-LocalUser -Name '{nom_ps}'")],
@@ -47,7 +51,8 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                     "Compte Administrateur intégré « {nom} » activé : son nom est connu de tous, c'est la cible préférée des attaques par mot de passe.",
                     "Built-in Administrator account “{nom}” enabled: its name is known to everyone, it is the favorite target of password attacks."
                 ),
-            );
+            )
+            .avec_objet(compte("administrateur-integre"));
             // On ne coupe pas le compte avec lequel on travaille.
             constats.push(if moi == Some(sid) {
                 constat.manuel(
@@ -79,6 +84,7 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                         "The “{nom}” account accepts an empty password (Windows does not require one for it): if it has none, it opens without typing anything."
                     ),
                 )
+                .avec_objet(compte("mot-de-passe-non-exige"))
                 // À faire soi-même : -PasswordRequired lève seulement le drapeau, sans donner de mot de passe. Un compte
                 // déjà vide s'ouvrirait toujours sans rien taper, et le bilan le dirait sain. Le mot de passe d'abord
                 // (Paramètres), puis le drapeau.
@@ -660,6 +666,27 @@ mod tests {
             [
                 "Start-Process ms-settings:otherusers",
                 "Set-LocalUser -Name 'enfant' -PasswordRequired $true"
+            ]
+        );
+    }
+
+    /// T4 : un compte se reconnaît à son SID, dans les deux langues.
+    #[test]
+    fn cles_sans_langue() {
+        let usr = [
+            "True|True|S-1-5-21-1-1-1-501|Invité",
+            "True|False|S-1-5-21-1-1-1-1002|alice",
+            "True|True|S-1-5-21-1-1-1-500|Administrateur",
+        ];
+        let cles = crate::machine::controler_regle("WIN-CPT-001", || {
+            juger_comptes(&usr, Some("S-1-5-21-1-1-1-1001"), Some(1))
+        });
+        assert_eq!(
+            cles,
+            [
+                "WIN-CPT-001|administrateur-integre:S-1-5-21-1-1-1-500",
+                "WIN-CPT-001|invite:S-1-5-21-1-1-1-501",
+                "WIN-CPT-001|mot-de-passe-non-exige:S-1-5-21-1-1-1-1002"
             ]
         );
     }

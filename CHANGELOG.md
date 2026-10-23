@@ -9,6 +9,33 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Un problème reconnu à sa règle et à son objet, plus à son texte traduit.** Les ports ouverts, les lancements
+  automatiques suspects, les extensions de navigateur, les comptes oubliés ou ajoutés aux administrateurs, les
+  logiciels espions, la prise de contrôle à distance, les logiciels périmés et le carnet de la clé VANGUARD portent
+  maintenant une clé (« LNX-RES-001|port:8080/tcp:python3 ») : changer de langue ne fait plus revenir une alerte
+  déclarée normale, ne fait plus voir de « nouveau » problème dans l'historique et ne renotifie rien dans la
+  surveillance. Les choix d'avant sont retrouvés par leur texte puis complétés de leur clé ; un choix ne vaut que pour
+  son objet (un autre programme sur le même port, une autre version périmée reviennent). Sous macOS, un agent de
+  démarrage est reconnu à son fichier et à ce qu'il lance, sous Linux chaque ligne de lancement suspecte à son
+  empreinte : une commande réécrite ou une ligne ajoutée dans un fichier déjà signalé n'est jamais tue par un choix
+  d'avant. Un seul choix par clé, le plus récent. La surveillance renotifie une alerte qui s'aggrave sans changer de
+  clé (une extension qui gagne l'accès à tous les sites) ; l'historique ne montre plus « réglé » puis « nouveau » pour
+  un logiciel dont la version change sans être à jour. L'inventaire des fichiers d'état gagne le carnet des appareils,
+  ses verrous, la reprise d'une version d'avant et le dossier des traces, et son test lit aussi les variables du
+  dossier de données. L'historique garde sa première empreinte telle quelle et en gagne une seconde, qui couvre les
+  clés et les notes de l'audit du réseau : une clé n'est jamais hors d'une empreinte, et un bilan sans elle est dit
+  non vérifié, comparé sur son texte. Le JSON du bilan gagne `objet`, `cle` et `etat` (sain, sans objet, non vérifié
+  avec sa raison, problème).
+- **Une règle qui ne rend rien dit « non vérifié », jamais un silence lu comme sain** (hors d'une liste de règles
+  tolérées, qui ne peut que rétrécir). Le Wi-Fi n'est plus tu quand NetworkManager manque (iwd, systemd-networkd) :
+  sans carte, « rien à juger » ; avec une carte, non vérifié. Sous Windows, un réseau que netsh cache faute
+  d'autorisation de localisation est dit non vérifié ; sous macOS, le mode furtif illisible et la session à distance
+  aussi. Seule la lecture du pare-feu lui-même décide si la note tient : le mode furtif illisible ne la retire plus à
+  lui seul. Sans NetworkManager, une liste des cartes réseau illisible (/sys/class/net) donne « non vérifié », jamais
+  « pas de carte Wi-Fi ». Un constat « sans objet » ne compte plus parmi les vérifications pour la fiabilité de la
+  note. `vanguard regles` montre aussi les règles de l'audit du réseau et les outils : un seul registre
+  d'identifiants, vérifié par les tests, avec l'inventaire des fichiers d'état dont les sceaux tirent la liste à
+  protéger.
 - **Mode Wi-Fi public** (`vanguard wifi-public`, Réseau et Internet › Mode Wi-Fi public). On l'allume en arrivant dans
   un café, un hôtel ou un aéroport, on l'éteint en partant : l'ordinateur n'accepte plus aucune connexion venue de ce
   réseau (une session SSH déjà ouverte reste), le partage de fichiers et l'annonce de son nom sont coupés (sous macOS,

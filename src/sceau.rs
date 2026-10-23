@@ -43,15 +43,11 @@ pub(crate) const INTEGRITE_SIGNALE: &str = "integrite-signale.json";
 /// d'administrateur.
 pub(crate) const WIFI_PUBLIC: &str = "wifi-public.json";
 
-const PROTEGES: [&str; 7] = [
-    APPRIS,
-    INTEGRITE,
-    INTEGRITE_SIGNALE,
-    BOTNETS,
-    VERSIONS,
-    MACHINE,
-    WIFI_PUBLIC,
-];
+/// Les fichiers protégés : ceux que l'inventaire des fichiers d'état dit scellés (`modele::inventaire`). Un fichier
+/// d'état s'ajoute là, avec sa constante ici : on ne peut plus en sceller un sans l'inventorier.
+fn proteges() -> impl Iterator<Item = &'static str> {
+    crate::modele::inventaire::scelles()
+}
 
 const REGISTRE: &str = "sceaux.json";
 const VERROU: &str = "sceaux.verrou";
@@ -64,6 +60,10 @@ struct Registre {
     fichiers: BTreeMap<String, String>,
     #[serde(default)]
     adoptes: BTreeSet<String>,
+    /// La version du format de chaque fichier tel que Vanguard l'a écrit (`modele::inventaire`) : notée ici et non
+    /// dans le fichier, qui garde sa forme (l'historique reste un tableau). Absente des sceaux d'avant.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    versions: BTreeMap<String, u16>,
 }
 
 /// Ce que Vanguard retrouve d'un de ses fichiers.
@@ -144,7 +144,7 @@ fn adopter(dossier: &Path) -> Registre {
         depuis: chrono::Local::now().format("%Y-%m-%d").to_string(),
         ..Registre::default()
     };
-    for nom in PROTEGES {
+    for nom in proteges() {
         if let Ok(Some(o)) = contenu(&dossier.join(nom)) {
             r.fichiers.insert(nom.to_string(), empreinte(nom, &o));
             r.adoptes.insert(nom.to_string());
@@ -204,6 +204,9 @@ fn ecrire_dans(dossier: &Path, nom: &str, octets: &[u8]) -> std::io::Result<()> 
     crate::reseau::ecrire_atomique(&dossier.join(nom), octets)?;
     sceaux.fichiers.insert(nom.to_string(), empreinte(nom, octets));
     sceaux.adoptes.remove(nom);
+    sceaux
+        .versions
+        .insert(nom.to_string(), crate::modele::inventaire::schema(nom));
     enregistrer_registre(dossier, &sceaux)
 }
 
@@ -215,7 +218,7 @@ fn effacer_dans(dossier: &Path, nom: &str) -> std::io::Result<()> {
         _ => {}
     }
     if let Ok(Some(mut r)) = registre(dossier)
-        && (r.fichiers.remove(nom).is_some() | r.adoptes.remove(nom))
+        && (r.fichiers.remove(nom).is_some() | r.adoptes.remove(nom) | r.versions.remove(nom).is_some())
     {
         enregistrer_registre(dossier, &r)?;
     }
@@ -256,7 +259,7 @@ fn falsifies_dans(dossier: &Path) -> Releve {
         illisibles: registre(dossier).is_err(),
         ..Releve::default()
     };
-    for nom in PROTEGES {
+    for nom in proteges() {
         match lire_dans(dossier, nom) {
             Lecture::Falsifie(_) => r.falsifies.push(nom),
             Lecture::Adopte(_) => r.adoptes.push(nom),
@@ -490,8 +493,7 @@ mod tests {
     #[test]
     fn ecritures_en_meme_temps_sans_fausse_alerte() {
         let d = jetable("ensemble");
-        let fils: Vec<_> = PROTEGES
-            .into_iter()
+        let fils: Vec<_> = proteges()
             .map(|nom| {
                 let d = d.clone();
                 std::thread::spawn(move || {
@@ -506,6 +508,29 @@ mod tests {
             f.join().unwrap();
         }
         assert_eq!(falsifies_dans(&d), Releve::default());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Les sceaux d'une version d'avant l'inventaire n'ont pas de versions de format : ils se relisent tels quels, et
+    /// la prochaine écriture note la version de chaque fichier qu'elle scelle.
+    #[test]
+    fn sceaux_sans_versions_relus_puis_completes() {
+        let d = jetable("versions");
+        ecrire_dans(&d, APPRIS, br#"{"acceptees":{}}"#).unwrap();
+        let mut brut: serde_json::Value = serde_json::from_slice(&std::fs::read(d.join(REGISTRE)).unwrap()).unwrap();
+        assert_eq!(brut["versions"][APPRIS], 1);
+        brut.as_object_mut().unwrap().remove("versions");
+        std::fs::write(d.join(REGISTRE), serde_json::to_vec(&brut).unwrap()).unwrap();
+        assert!(matches!(lire_dans(&d, APPRIS), Lecture::Intact(_)));
+        ecrire_dans(&d, MACHINE, b"{}").unwrap();
+        let r = registre(&d).unwrap().unwrap();
+        assert_eq!(r.versions.get(MACHINE), Some(&1));
+        assert_eq!(r.versions.get(APPRIS), None);
+        effacer_dans(&d, MACHINE).unwrap();
+        assert_eq!(registre(&d).unwrap().unwrap().versions.get(MACHINE), None);
+        // Ce que protège le sceau, c'est l'inventaire qui le dit.
+        assert_eq!(proteges().count(), crate::modele::inventaire::scelles().count());
+        assert!(proteges().any(|n| n == WIFI_PUBLIC));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

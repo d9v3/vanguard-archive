@@ -389,6 +389,8 @@ fn constat_de(probleme: Option<Niveau>, message: String, conseil: Option<&str>) 
         }),
         verifie: true,
         regle: "",
+        objet: crate::modele::Objet::NonMigre,
+        precision: crate::modele::Precision::Aucune,
     }
 }
 

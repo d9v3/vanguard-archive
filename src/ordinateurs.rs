@@ -387,6 +387,8 @@ mod tests {
             correctif: None,
             verifie: true,
             regle: "",
+            objet: crate::modele::Objet::NonMigre,
+            precision: crate::modele::Precision::Aucune,
         }
     }
 

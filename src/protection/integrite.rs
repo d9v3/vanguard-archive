@@ -258,6 +258,8 @@ pub fn constat() -> Constat {
                 correctif: None,
                 verifie: true,
                 regle: "",
+                objet: crate::modele::Objet::NonMigre,
+                precision: crate::modele::Precision::Aucune,
             };
         }
     };
@@ -282,6 +284,8 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
             correctif: None,
             verifie: true,
             regle: "",
+            objet: crate::modele::Objet::NonMigre,
+            precision: crate::modele::Precision::Aucune,
         };
     }
     let exemples: Vec<String> = e
@@ -303,6 +307,8 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
         correctif: None,
         verifie: true,
         regle: "",
+        objet: crate::modele::Objet::NonMigre,
+        precision: crate::modele::Precision::Aucune,
     }
 }
 
