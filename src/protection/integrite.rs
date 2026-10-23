@@ -152,6 +152,12 @@ fn etat_actuel() -> Etat {
 enum Reference {
     Absente,
     Valable(Etat),
+    /// Scellée telle quelle au premier passage d'une version qui scelle (montée depuis une version d'avant les sceaux,
+    /// ou `sceaux.json` effacé) : rien ne prouve qu'elle n'a pas été réécrite juste avant. Elle sert quand même à
+    /// comparer, car un écart avec elle est un vrai changement : la refuser coupait la vérification et la
+    /// surveillance de chaque poste mis à jour, jusqu'à un « --accepter » que personne ne lance. Son origine est dite
+    /// (COM-ETA-001, et ici), et elle n'est jamais refaite sans accord.
+    Adoptee(Etat),
     /// Là, mais elle ne peut pas servir : abîmée, ou changée hors de Vanguard (`sceau`). Un programme qui réécrit la
     /// référence rend son propre changement « de référence » : elle n'est alors ni crue, ni refaite sans accord.
     Douteuse(String),
@@ -169,14 +175,9 @@ fn reference_lue(lu: crate::sceau::Lecture) -> Reference {
             |_| Reference::Douteuse(tr!("elle ne se lit plus", "it can no longer be read").into()),
             Reference::Valable,
         ),
-        // Scellée telle quelle au premier usage : rien ne dit qu'elle n'a pas été réécrite juste avant que
-        // `sceaux.json` soit effacé.
-        Lecture::Adopte(_) => Reference::Douteuse(
-            tr!(
-                "elle a été acceptée telle quelle, sans sceau d'avant",
-                "it was accepted as it was, without an earlier seal"
-            )
-            .into(),
+        Lecture::Adopte(o) => serde_json::from_slice(&o).map_or_else(
+            |_| Reference::Douteuse(tr!("elle ne se lit plus", "it can no longer be read").into()),
+            Reference::Adoptee,
         ),
         Lecture::Falsifie(_) => Reference::Douteuse(
             tr!(
@@ -243,8 +244,14 @@ fn comparer(reference: &Etat, actuel: &Etat) -> Ecarts {
 
 /// Constat pour le bilan de la machine.
 pub fn constat() -> Constat {
-    let reference = match reference() {
-        Reference::Valable(r) => r,
+    constat_de(reference(), etat_actuel)
+}
+
+/// Le constat d'après la référence retrouvée ; l'état actuel n'est lu que s'il y a de quoi comparer.
+fn constat_de(reference: Reference, actuel: impl FnOnce() -> Etat) -> Constat {
+    let (reference, adoptee) = match reference {
+        Reference::Valable(r) => (r, false),
+        Reference::Adoptee(r) => (r, true),
         Reference::Douteuse(pourquoi) => return douteuse(&pourquoi),
         Reference::Absente => {
             return Constat {
@@ -261,7 +268,14 @@ pub fn constat() -> Constat {
             };
         }
     };
-    juger(reference.len(), &comparer(&reference, &etat_actuel()))
+    let mut c = juger(reference.len(), &comparer(&reference, &actuel()));
+    if adoptee {
+        c.message += tr!(
+            " Référence acceptée telle quelle, sans sceau d'avant (voir l'état de Vanguard).",
+            " Reference accepted as it was, without an earlier seal (see Vanguard's state)."
+        );
+    }
+    c
 }
 
 /// Catégorie du constat.
@@ -319,7 +333,7 @@ fn deja_signales(lu: crate::sceau::Lecture) -> Vec<String> {
 pub fn changements_a_signaler() -> Option<String> {
     // Une référence douteuse ne sert pas à juger : le bilan la signale (COM-INT-001), et les sceaux qui la disent
     // changée hors de Vanguard, la surveillance (COM-ETA-001).
-    let Reference::Valable(reference) = reference() else {
+    let (Reference::Valable(reference) | Reference::Adoptee(reference)) = reference() else {
         return None;
     };
     let e = comparer(&reference, &etat_actuel());
@@ -358,13 +372,15 @@ fn afficher(e: &Ecarts) {
 pub fn verifier(accepter: bool) {
     titre(tr!("Intégrité des fichiers critiques", "Critical file integrity"));
     let actuel = etat_actuel();
-    match reference() {
+    let reference = reference();
+    let adoptee = matches!(reference, Reference::Adoptee(_));
+    match reference {
         Reference::Douteuse(pourquoi) if !accepter => trp!(
             "  ✖ La référence ne peut pas servir : rien n'est comparé ni remplacé.\n    {GRIS}{}{RESET}\n  {DISCRET}Après examen, « vanguard integrite --accepter » prend l'état\n  actuel comme référence.{RESET}",
             "  ✖ The reference cannot be used: nothing is compared or replaced.\n    {GRIS}{}{RESET}\n  {DISCRET}After a look, “vanguard integrity --accept” takes the current\n  state as the reference.{RESET}",
             affichable(&pourquoi)
         ),
-        Reference::Valable(r) if !accepter => {
+        Reference::Valable(r) | Reference::Adoptee(r) if !accepter => {
             let e = comparer(&r, &actuel);
             if e.vide() {
                 trp!(
@@ -377,6 +393,14 @@ pub fn verifier(accepter: bool) {
                 trp!(
                     "\n  {DISCRET}Après une mise à jour du système, c'est normal : « vanguard integrite --accepter » prend cet état comme nouvelle référence.{RESET}",
                     "\n  {DISCRET}After a system update, this is normal: “vanguard integrity --accept” takes this state as the new reference.{RESET}"
+                );
+            }
+            // Jamais refaite toute seule : identique à l'état actuel, une référence réécrite par un programme serait
+            // ainsi blanchie.
+            if adoptee {
+                trp!(
+                    "  {DISCRET}Référence acceptée telle quelle au passage à cette version, sans sceau\n  d'avant : après examen, « vanguard integrite --accepter » en refait une.{RESET}",
+                    "  {DISCRET}Reference accepted as it was when moving to this version, without an\n  earlier seal: after a look, “vanguard integrity --accept” makes a new one.{RESET}"
                 );
             }
         }
@@ -409,7 +433,7 @@ pub fn temps_reel() {
     use notify::{RecursiveMode, Watcher};
     titre(tr!("Intégrité en temps réel", "Real-time integrity"));
     let reference = match reference() {
-        Reference::Valable(r) => r,
+        Reference::Valable(r) | Reference::Adoptee(r) => r,
         Reference::Absente => {
             trp!(
                 "  Pas encore de référence : lance d'abord « vanguard integrite ».",
@@ -557,9 +581,41 @@ mod tests {
         assert!(matches!(reference(), Reference::Douteuse(_)));
         crate::sceau::effacer(crate::sceau::INTEGRITE).unwrap();
         assert!(matches!(reference(), Reference::Absente));
-        // Acceptée telle quelle, les sceaux effacés : douteuse, jamais valable.
-        let lu = crate::sceau::Lecture::Adopte(b"{}".to_vec());
+        // Acceptée telle quelle mais abîmée : douteuse.
+        let lu = crate::sceau::Lecture::Adopte(b"pas du json".to_vec());
         assert!(matches!(reference_lue(lu), Reference::Douteuse(_)));
+    }
+
+    /// Montée depuis une version d'avant les sceaux (vu dans la VM, de la 0.85.0) : la référence, acceptée telle
+    /// quelle, sert encore à comparer. La refuser coupait la vérification, la surveillance horaire et le temps réel
+    /// jusqu'à un « --accepter » ; son origine reste dite, et un écart avec elle reste un écart.
+    #[test]
+    fn reference_adoptee_au_passage_de_version_compare_encore() {
+        let etat: Etat = [
+            ("/etc/hosts".to_string(), "b3:aa".to_string()),
+            ("/etc/passwd".to_string(), "b3:bb".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let lu = crate::sceau::Lecture::Adopte(serde_json::to_vec(&etat).unwrap());
+        assert!(matches!(reference_lue(lu), Reference::Adoptee(ref r) if *r == etat));
+        let c = constat_de(Reference::Adoptee(etat.clone()), || etat.clone());
+        assert_eq!((c.probleme, c.verifie), (None, true), "{}", c.message);
+        assert!(
+            c.message.contains("identiques") || c.message.contains("identical"),
+            "{}",
+            c.message
+        );
+        assert!(
+            c.message.contains("sceau") || c.message.contains("seal"),
+            "{}",
+            c.message
+        );
+        let mut change = etat.clone();
+        change.insert("/etc/passwd".into(), "b3:cc".into());
+        let c = constat_de(Reference::Adoptee(etat), || change);
+        assert_eq!((c.probleme, c.verifie), (Some(Niveau::Moyen), true), "{}", c.message);
+        assert!(c.message.contains("/etc/passwd"), "{}", c.message);
     }
 
     /// Un programme qui change ~/.bashrc et l'écrit d'avance dans la liste des changements déjà signalés : la liste,

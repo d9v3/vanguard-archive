@@ -83,7 +83,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   (passée par la clé) n'affiche plus « rien de plus récent » mais « non vérifié » : un ancien manifeste a pu être
   remis en place. Une horloge en retard ne fait plus passer un vieux manifeste pour frais : « non vérifié ».
   `sceaux.json` effacé ne fait plus accepter en silence les fichiers d'état tels quels : ils restent « adoptés »,
-  dits au bilan (COM-ETA-001), et la référence d'intégrité comme les versions déjà vues ne sont alors pas crues.
+  dits au bilan (COM-ETA-001), et les versions déjà vues ne sont alors pas crues ; la référence d'intégrité sert
+  encore à comparer (un écart avec elle reste un écart, et le passage de version ne coupe pas la surveillance),
+  jamais refaite sans accord.
   L'état de la machine au dernier passage de la surveillance et la liste des changements déjà signalés par la
   surveillance d'intégrité sont scellés à leur tour. `signer-versions.sh --secours` refuse une clé de secours en
   clair.
