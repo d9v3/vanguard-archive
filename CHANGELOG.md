@@ -7,6 +7,19 @@ une seule publication par jour, qui regroupe le travail de la journée ; le 21 o
 la 0.84 au soir, qui reprend la 0.83 livrée juste avant elle. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## Prochaine version
+
+- **Logiciels espions.** `vanguard logiciels-espions` (alias `spyware` ; menu Antivirus et protection, en dernier)
+  cherche les signes d'un logiciel espion posé par un proche : connexions en cours et noms demandés récemment vers les
+  serveurs et sites des logiciels espions connus (liste de l'association Échap, CC-BY 4.0, téléchargée à l'usage et
+  gardée un jour, jamais intégrée), logiciels de surveillance connus installés ou en marche (FlexiSPY, Spyrix, Refog,
+  Ardamax… ; contrôle parental et surveillance d'employés dits normaux s'ils ont été installés exprès), programmes qui
+  lisent le clavier (Linux : /dev/input ; reconnus : compositeur, remappage, Steam, OBS), autorisations Surveillance de
+  l'entrée, Accessibilité et Enregistrement de l'écran (macOS, lues par un lecteur SQLite écrit pour Vanguard). Tout
+  est lu en Rust, sans commande externe. Lecture seule : rien n'est retiré, car celui qui l'a posé pourrait le voir ;
+  l'écran dit de garder des captures et de demander de l'aide d'abord. Ce qui n'a pas pu être vérifié est compté, et
+  le verdict n'est jamais « aucun logiciel espion ». Au bilan aussi, sans réseau.
+
 ## 22 octobre 2026, au soir : version 0.85
 
 - **Dépôt des versions renommé** `d9v3/vanguard-update` (avant : vanguard-officiel). L'ancienne adresse redirige : les

@@ -46,6 +46,7 @@ mod reseau;
 mod risk;
 mod sauvegarde;
 mod selection;
+mod sqlite;
 mod traces;
 mod ui;
 mod verifier_cle;
@@ -314,6 +315,10 @@ enum Commande {
         /// « Télécharger » d'Outlook sur le web.
         fichier: std::path::PathBuf,
     },
+    /// Logiciels espions : serveurs et sites connus (liste d'Échap), programmes qui lisent le clavier, autorisations
+    /// de surveillance, logiciels de surveillance connus. Lecture seule.
+    #[command(name = "logiciels-espions", visible_alias = "spyware")]
+    LogicielsEspions,
     /// Caméra et micro : qui s'en sert ? Sous Windows, chaque programme et la dernière fois ; sous Linux, ce qui les
     /// tient en ce moment. Lecture seule.
     #[command(name = "camera-micro", visible_alias = "camera-mic")]
@@ -1076,6 +1081,7 @@ enum Action {
     SitesDangereux,
     DernieresFailles,
     CourrielSuspect,
+    LogicielsEspions,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -1327,6 +1333,11 @@ const OUTILS: &[Outil] = &[
         precision: ["examiné sans rien ouvrir", "checked without opening anything"],
         mots: "courriel email mail eml arnaque scam hameçonnage phishing expéditeur sender pièce jointe attachment \
                spf dkim dmarc thunderbird outlook gmail msg usurpation spoofing" },
+    Outil { action: Action::LogicielsEspions, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Logiciels espions : en ai-je un ?", "Spyware: is someone watching me?"],
+        precision: ["clavier épié, indicateurs Échap", "keyboard spying, Échap indicators"],
+        mots: "espion spyware stalkerware logiciel espion keylogger enregistreur de frappe clavier keyboard \
+               surveillance monitoring harcèlement stalking échap mspy flexispy contrôle parental parental control" },
     Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
@@ -1726,6 +1737,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Distance => protection::distance::menu(),
         Action::Lien => protection::lien::verifier(None),
         Action::CourrielSuspect => protection::courriel_suspect::verifier(None),
+        Action::LogicielsEspions => protection::espions::afficher(),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
         Action::Quarantaine => protection::quarantaine::menu(),
         Action::SecretsGit => protection::secrets_git::analyser(),
@@ -1841,6 +1853,10 @@ const AIDES_EN: &[(&str, &str)] = &[
                           and its authentication (SPF, DKIM, DMARC) as written by your provider, the links (shown \
                           text against real address) and the attachments (name, content, YARA, antivirus); after \
                           your consent, the domains' age and public lists"),
+    ("logiciels-espions", "Spyware: known stalkerware servers and sites (Échap list, CC-BY 4.0) in current \
+                           connections and the DNS cache, programs reading the keyboard, apps allowed input \
+                           monitoring, accessibility or screen recording (macOS), known monitoring software. \
+                           Read-only"),
     ("camera-micro", "Camera and microphone: who uses them? On Windows, each program and the last time; on Linux, \
                       what holds them right now. Read-only"),
     ("acces", "Privacy check: the apps that have access to the location, contacts, camera and microphone, and their \
@@ -2125,6 +2141,7 @@ async fn main() {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
         }
         Some(Commande::CourrielSuspect { fichier }) => protection::courriel_suspect::verifier(Some(&fichier)),
+        Some(Commande::LogicielsEspions) => protection::espions::afficher(),
         Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
         Some(Commande::Acces) => protection::acces::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),

@@ -156,6 +156,7 @@ fn categorie_en(nom: &str) -> Option<&'static str> {
         "Pare-feu" => "Firewall",
         "Réseau local" => "Local network",
         "Accès à distance" => "Remote access",
+        "Logiciels espions" => "Spyware",
         "Agents d'IA" => "AI agents",
         "Bureau à distance" => "Remote Desktop",
         "Carte graphique" => "Graphics card",

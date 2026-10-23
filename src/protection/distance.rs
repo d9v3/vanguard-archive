@@ -109,9 +109,15 @@ fn reconnu(texte: &str) -> Option<usize> {
         .position(|l| l.motifs.iter().any(|m| contient_mot(&bas, m)))
 }
 
+/// Un nom (programme, paquet, service, application) d'un logiciel de prise de contrôle à distance : « Logiciels
+/// espions » le renvoie ici au lieu de le compter.
+pub(crate) fn controle_a_distance(nom: &str) -> bool {
+    reconnu(nom).is_some()
+}
+
 /// `motif` dans `texte`, précédé d'autre chose qu'une lettre ou un chiffre : « atera » dans « AteraAgent », pas dans
 /// « lateral » ; « anydesk » dans « com.anydesk.Anydesk » comme dans « AnyDesk.exe ».
-fn contient_mot(texte: &str, motif: &str) -> bool {
+pub(crate) fn contient_mot(texte: &str, motif: &str) -> bool {
     let mut debut = 0;
     while let Some(pos) = texte[debut..].find(motif) {
         let i = debut + pos;

@@ -3,6 +3,9 @@ Vanguard includes the following open source libraries. Their copyright and licen
 
 375 bibliothèques / libraries, et à la fin 1 jeu(x) de données / then 1 data set(s).
 
+Listes téléchargées à l'usage, non intégrées / Lists downloaded when used, not embedded :
+- Indicateurs de logiciels espions d'Échap / Échap stalkerware indicators (ioc.yaml) — CC-BY-4.0 — https://github.com/AssoEchap/stalkerware-indicators
+
 
 ================================================================================
 addr2line 0.26.1 — Apache-2.0 OR MIT

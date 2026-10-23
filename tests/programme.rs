@@ -396,9 +396,15 @@ fn sous_menu_protection() {
         "Ce lien est-il dangereux ?",
         "Vérifier un fichier téléchargé",
         "Ce courriel est-il une arnaque ?",
+        "Logiciels espions : en ai-je un ?",
     ] {
         assert!(t.contains(outil), "{outil} absent : {t}");
     }
+    // Logiciels espions : ajouté à la fin du groupe, sans décaler les autres lignes.
+    let courriel = t.find("Ce courriel est-il une arnaque ?").unwrap();
+    let espions = t.find("Logiciels espions : en ai-je un ?").unwrap();
+    assert!(courriel < espions, "{t}");
+    assert!(!t[espions..].contains("Quelqu'un contrôle mon ordi ?"), "{t}");
     // Chaque ligne du sous-menu tient dans 76 colonnes (sans terminal, l'écran suivant suit la question « Choix » sur
     // la même ligne : celles-là ne comptent pas).
     let longues: Vec<&str> = t
@@ -558,6 +564,48 @@ fn distance_sans_rien_retirer() {
     assert!(!t.contains("retiré."), "{t}");
 }
 
+/// Logiciels espions, sans Internet : vite, en lecture seule, la liste d'Échap dite non vérifiée, et jamais « aucun
+/// signe » sans le nombre de points non vérifiés ; l'alias anglais et l'aide anglaise.
+#[test]
+fn logiciels_espions_hors_ligne() {
+    let maison = maison_jetable();
+    let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
+    for (langue, commande) in [("fr", "logiciels-espions"), ("en", "spyware")] {
+        let debut = Instant::now();
+        let s = vanguard_dans_env(
+            programme,
+            &maison,
+            langue,
+            &[commande],
+            "",
+            60,
+            &[("VANGUARD_HORS_LIGNE", "1")],
+        );
+        assert_eq!(s.code, Some(0), "{}", s.erreurs);
+        assert!(debut.elapsed() < Duration::from_secs(60), "{:?}", debut.elapsed());
+        let t = sans_couleurs(&s.texte);
+        if langue == "fr" {
+            assert!(t.contains("Logiciels espions : en ai-je un ?"), "{t}");
+            assert!(t.contains("liste d'Échap non vérifiée : hors ligne demandé"), "{t}");
+            assert!(t.contains("Indicateurs : Échap (CC-BY 4.0)"), "{t}");
+            assert!(!t.to_lowercase().contains("aucun logiciel espion"), "{t}");
+            if t.contains("Aucun signe") {
+                assert!(t.contains("point(s) non vérifié(s)"), "{t}");
+            }
+        } else {
+            assert!(t.contains("Spyware: is someone watching me?"), "{t}");
+            assert!(t.contains("Échap list not checked: offline mode requested"), "{t}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&maison);
+    let aide = vanguard("en", &["spyware", "--help"], "", 30);
+    assert!(
+        sans_couleurs(&aide.texte).contains("known stalkerware servers"),
+        "{}",
+        aide.texte
+    );
+}
+
 /// Vérifier Vanguard lui-même : version, date et empreinte, sans rien changer.
 #[test]
 fn verifier_moi_en_lecture_seule() {
@@ -604,11 +652,12 @@ fn sans_internet_chaque_outil_le_dit() {
     }
     let dossier = maison_jetable();
     let eml = courriel_piege(&dossier);
-    let cas: [(&[&str], &str, &str); 7] = [
+    let cas: [(&[&str], &str, &str); 8] = [
         (&["listes-noires"], "o\n", "Adresse publique introuvable"),
         (&["nat"], "", "Aucun serveur n'a répondu"),
         (&["dns-rapide"], "", "ne répond pas"),
         (&["sortantes"], "", "Aucune connexion vers Internet"),
+        (&["logiciels-espions"], "", "liste d'Échap non vérifiée"),
         (&["connexion"], "", "Internet ne répond pas : test arrêté"),
         (
             &["lien", "https://exemple.com/a"],

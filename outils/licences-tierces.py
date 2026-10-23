@@ -30,6 +30,16 @@ DONNEES = [
     ),
 ]
 
+# Listes téléchargées par Vanguard au moment de s'en servir, jamais intégrées ni redistribuées : une ligne chacune,
+# pour la mention de leur source, sans texte de licence (nom, licence, source).
+LISTES_TELECHARGEES = [
+    (
+        "Indicateurs de logiciels espions d'Échap / Échap stalkerware indicators (ioc.yaml)",
+        "CC-BY-4.0",
+        "https://github.com/AssoEchap/stalkerware-indicators",
+    ),
+]
+
 
 def paquets_embarques(cible):
     """Paquets atteignables depuis Vanguard par des dépendances normales, pour une cible donnée."""
@@ -78,6 +88,8 @@ def main():
         "Vanguard includes the following open source libraries. Their copyright and license notices follow.\n"
         f"\n{len(embarques)} bibliothèques / libraries, et à la fin {len(DONNEES)} jeu(x) de données / then "
         f"{len(DONNEES)} data set(s)."
+        "\n\nListes téléchargées à l'usage, non intégrées / Lists downloaded when used, not embedded :\n"
+        + "\n".join(f"- {nom} — {licence} — {source}" for nom, licence, source in LISTES_TELECHARGEES)
     ]
     sans_texte = []
     for (nom, version), p in sorted(embarques.items()):

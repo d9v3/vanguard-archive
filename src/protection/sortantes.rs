@@ -470,6 +470,42 @@ fn connexions() -> Option<Vec<Connexion>> {
     Some(liste)
 }
 
+/// Une connexion établie, telle que « Logiciels espions » la compare aux serveurs connus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
+pub(crate) struct ConnexionVue {
+    pub pid: Option<u32>,
+    /// `None` : programme d'un autre compte, invisible sans droits d'administrateur.
+    pub programme: Option<String>,
+    pub chemin: Option<String>,
+    pub distante: IpAddr,
+    pub port: u16,
+}
+
+/// Les connexions en cours, lues par Vanguard lui-même (Linux : /proc ; Windows : les fonctions de Windows).
+#[cfg(any(target_os = "linux", windows))]
+pub(crate) fn connexions_vues() -> Option<Vec<ConnexionVue>> {
+    connexions().map(|liste| {
+        liste
+            .into_iter()
+            .map(|c| ConnexionVue {
+                pid: c.pid,
+                programme: c.programme,
+                chemin: c.chemin,
+                distante: c.distante,
+                port: c.port,
+            })
+            .collect()
+    })
+}
+
+/// Sous macOS, les connexions passent par lsof et netstat : pas ici (`None`, que l'appelant dit). Une lecture par
+/// libproc, en Rust, reste à écrire.
+#[cfg(not(any(target_os = "linux", windows)))]
+pub(crate) fn connexions_vues() -> Option<Vec<ConnexionVue>> {
+    None
+}
+
 // ───────────────────────────── Jugement ─────────────────────────────
 
 /// Un serveur sur Internet, pas un appareil de la maison (réseau privé, adresses partagées des fournisseurs, VPN).
@@ -552,7 +588,7 @@ fn dans_le_temporaire_du_compte(chemin: &str) -> bool {
 }
 
 /// Un dossier d'où un vrai programme ne se lance pas d'habitude.
-fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
+pub(crate) fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
     let c = chemin.to_lowercase().replace('\\', "/");
     // macOS : une app téléchargée lancée sur place tourne depuis un dossier temporaire « AppTranslocation ».
     if c.contains("/apptranslocation/") || appimage(chemin, montages) {

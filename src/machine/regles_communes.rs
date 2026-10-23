@@ -167,6 +167,15 @@ regle!(
 );
 
 regle!(
+    "COM-ESP-001",
+    Os::Tous,
+    675,
+    ("logiciels espions", "spyware"),
+    &[],
+    crate::protection::espions::constats
+);
+
+regle!(
     "COM-CLE-001",
     Os::Tous,
     680,

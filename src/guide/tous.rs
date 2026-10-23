@@ -185,6 +185,13 @@ pub const PROGRAMMES: &[Programme] = &[
                 false,
             ),
             traduite(
+                "vanguard logiciels-espions",
+                "vanguard spyware",
+                "Logiciels espions : serveurs connus, clavier épié, logiciels de surveillance.",
+                "Spyware: known servers, keyboard spying, monitoring software.",
+                false,
+            ),
+            traduite(
                 "vanguard integrite",
                 "vanguard integrity",
                 "Fichiers critiques du système : ce qui a changé depuis la référence.",
