@@ -1625,3 +1625,160 @@ mod menus_dans_un_terminal {
         let _ = std::fs::remove_dir_all(&maison);
     }
 }
+
+/// Le compte est-il root (sous `unshare -rn`, verifier.sh le rend root) ?
+#[cfg(unix)]
+fn en_root() -> bool {
+    std::fs::metadata("/proc/self")
+        .map(|m| std::os::unix::fs::MetadataExt::uid(&m))
+        .ok()
+        == Some(0)
+}
+#[cfg(not(unix))]
+fn en_root() -> bool {
+    false
+}
+
+/// Les fichiers d'un dossier, avec leur contenu (chemin relatif → octets), sauf ceux que l'autotest écrit lui-même
+/// (son résultat scellé, sa date, l'événement d'essai et la tête du journal, les sceaux qui les scellent) et le
+/// journal des erreurs.
+fn contenus(dossier: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    let mut tous = std::collections::BTreeMap::new();
+    let mut a_voir = vec![dossier.to_path_buf()];
+    while let Some(d) = a_voir.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            let relatif = p.strip_prefix(dossier).unwrap().to_string_lossy().replace('\\', "/");
+            let propre = [
+                "autotest",
+                "examens/AUT-VAN-001.json",
+                "evenements",
+                "evenements.tete",
+                "sceaux.json",
+            ]
+            .iter()
+            .any(|x| relatif == *x || relatif.starts_with(&format!("{x}/")))
+                || relatif == "journal-erreurs.txt"
+                || relatif.ends_with(".verrou");
+            if propre {
+                continue;
+            }
+            if p.is_dir() {
+                a_voir.push(p);
+            } else {
+                tous.insert(relatif, std::fs::read(&p).unwrap_or_default());
+            }
+        }
+    }
+    tous
+}
+
+/// L'autotest pour de vrai, dans un dossier personnel jetable : en root (sous `unshare -rn`), refusé sans rien écrire ;
+/// sinon, après un bilan qui pose l'état (administrateurs, logiciels vus), il rend un JSON relisible, son code de
+/// sortie, une preuve « rien changé », et le dossier de Vanguard est le même au fichier près (hors ses propres
+/// fichiers).
+#[test]
+fn autotest_ne_change_rien() {
+    let maison = maison_jetable();
+    let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
+    let dossier = dossier_vanguard(&maison);
+    if en_root() {
+        let s = vanguard_dans(programme, &maison, "fr", &["autotest", "--json"], "", 60);
+        assert_eq!(s.code, Some(2), "{}", s.erreurs);
+        let r: serde_json::Value = serde_json::from_str(&s.texte).expect("JSON illisible");
+        assert_eq!(r["verdict"], "refuse");
+        assert!(contenus(&dossier).is_empty(), "rien ne s'écrit en root");
+        let _ = std::fs::remove_dir_all(&maison);
+        return essais::saute("en root (unshare) : seul le refus est essayé");
+    }
+    let bilan = vanguard_dans(programme, &maison, "fr", &["machine", "--json"], "", 300);
+    assert_eq!(bilan.code, Some(0), "{}", bilan.erreurs);
+    let avant = contenus(&dossier);
+    let s = vanguard_dans(programme, &maison, "fr", &["autotest", "--json"], "", 600);
+    let r: serde_json::Value = serde_json::from_str(&s.texte).unwrap_or_else(|e| panic!("{e} : {}", s.texte));
+    assert_eq!(r["outil"], "AUT-VAN-001");
+    assert_eq!(
+        s.code,
+        r["code"].as_i64().map(|c| i32::try_from(c).unwrap()),
+        "{}",
+        s.erreurs
+    );
+    assert!(r["regles"]["essayees"].as_u64().unwrap() >= 35);
+    assert_eq!(r["hors_ligne"], true, "hors ligne par défaut");
+    assert_eq!(r["preuve"]["verdict"], "rien-change", "{r}");
+    assert_eq!(contenus(&dossier), avant, "l'autotest a changé le dossier de Vanguard");
+    assert!(dossier.join("examens/AUT-VAN-001.json").is_file());
+    assert!(dossier.join("autotest/dernier.json").is_file());
+    // Le JSON ne porte aucune valeur : ni le compte, ni le dossier personnel.
+    assert!(!s.texte.contains(&*maison.to_string_lossy()));
+    // --detail avec --json est refusé : le JSON peut sortir de l'ordinateur.
+    let refus = vanguard_dans(programme, &maison, "fr", &["autotest", "--json", "--detail"], "", 30);
+    assert_ne!(refus.code, Some(0));
+    let _ = std::fs::remove_dir_all(&maison);
+}
+
+/// journal-vers-github.py hors réseau, avec un faux gh qui note ses appels : cinq entrées de même signature font un
+/// seul ticket ; deux lectures croisées différentes, deux tickets ; un corps de plus de 60 000 octets est coupé et le
+/// dit.
+#[cfg(unix)]
+#[test]
+fn tickets_du_journal_regroupes() {
+    if Command::new("python3").arg("-V").output().is_err() {
+        return essais::saute("python3 absent");
+    }
+    let d = maison_jetable();
+    let faux = d.join("bin");
+    std::fs::create_dir_all(&faux).unwrap();
+    let appels = d.join("appels.txt");
+    std::fs::write(
+        faux.join("gh"),
+        format!(
+            "#!/bin/sh\nprintf '%s' \"$*\" | tr '\\n' ' ' >> '{0}'\necho >> '{0}'\ncase \"$1 $2\" in\n  'issue create') echo https://github.invalid/x/y/issues/$$ ;;\nesac\nexit 0\n",
+            appels.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(faux.join("gh"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let entree = |contexte: &str, detail: &str| {
+        format!(
+            "== 2026-10-23 10:00 UTC · vanguard 0.86.0 · Arch Linux 7.2 · fr · autotest\n[{contexte}]\n  {detail}\n\n"
+        )
+    };
+    let mut texte = String::new();
+    for n in 1..=5 {
+        texte += &entree(
+            "autotest AUT-LNX-001",
+            &format!("[absent-natif] {n} en plus, 0 en moins"),
+        );
+    }
+    texte += &entree("autotest AUT-LNX-002", "[absent-natif] 1 en plus, 0 en moins");
+    texte += &entree(
+        "autotest AUT-LNX-003",
+        &format!("[sortie-inattendue] {}", "é".repeat(40_000)),
+    );
+    let fichier = d.join("journal-a-envoyer.txt");
+    std::fs::write(&fichier, &texte).unwrap();
+    let chemin = format!("{}:{}", faux.display(), std::env::var("PATH").unwrap_or_default());
+    let s = Command::new("python3")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("outils/journal-vers-github.py"))
+        .arg(&fichier)
+        .env("PATH", chemin)
+        .env("HOME", &d)
+        .output()
+        .unwrap();
+    assert!(s.status.success(), "{}", String::from_utf8_lossy(&s.stderr));
+    let journal = std::fs::read_to_string(&appels).unwrap();
+    let crees: Vec<&str> = journal.lines().filter(|l| l.starts_with("issue create")).collect();
+    assert_eq!(crees.len(), 3, "{journal}");
+    assert!(!journal.lines().any(|l| l.starts_with("issue comment")), "{journal}");
+    let groupe = crees.iter().find(|l| l.contains("AUT-LNX-001")).unwrap();
+    assert!(
+        groupe.contains("Vu 5 fois") && groupe.contains("--label autotest"),
+        "{groupe}"
+    );
+    let gros = crees.iter().find(|l| l.contains("AUT-LNX-003")).unwrap();
+    assert!(gros.contains("coupé") && gros.len() < 70_000, "{}", gros.len());
+    // Tout est parti : le fichier est vidé.
+    assert_eq!(std::fs::read_to_string(&fichier).unwrap().trim(), "");
+    let _ = std::fs::remove_dir_all(&d);
+}

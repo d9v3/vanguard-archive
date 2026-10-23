@@ -20,15 +20,16 @@ pub(crate) const EXAMENS: &str = "examens";
 
 /// Les outils qui rendent déjà un `Resultat` : les autres (`registre::OUTILS`) suivront, un par livraison. Le test
 /// `outils_sans_resultat` tient le compte de ceux qui restent.
-pub(crate) const AVEC_RESULTAT: &[&str] = &["PRO-ESP-001", "PRO-PER-001", "PRO-COU-001"];
+pub(crate) const AVEC_RESULTAT: &[&str] = &["PRO-ESP-001", "PRO-PER-001", "PRO-COU-001", "AUT-VAN-001"];
 
 /// Le fichier de chaque outil de `AVEC_RESULTAT`, scellé (`sceau`) : un « rien trouvé » réécrit par un programme du
 /// compte s'affichait en vert dans le rapport. Inventoriés (`modele::inventaire`) ; un outil qui s'ajoute à
 /// `AVEC_RESULTAT` s'ajoute ici aussi (`fichiers_scelles`).
-pub(crate) const FICHIERS: [&str; 3] = [
+pub(crate) const FICHIERS: [&str; 4] = [
     "examens/PRO-ESP-001.json",
     "examens/PRO-PER-001.json",
     "examens/PRO-COU-001.json",
+    "examens/AUT-VAN-001.json",
 ];
 
 /// Le fichier scellé d'un outil, s'il en a un.
@@ -178,9 +179,10 @@ impl Resultat {
         }
     }
 
-    /// L'événement de cet examen, pour le journal.
+    /// L'événement de cet examen, pour le journal. Celui de l'autotest est un essai : ni alerte, ni historique (il
+    /// juge Vanguard, pas la machine).
     pub(crate) fn evenement(&self) -> Evenement {
-        let e = Evenement::nouveau(
+        let mut e = Evenement::nouveau(
             Source::Outil,
             Genre::Examen {
                 outil: self.outil.clone(),
@@ -191,6 +193,7 @@ impl Resultat {
             },
         )
         .cle(Some(&self.outil));
+        e.essai = self.outil.starts_with("AUT-");
         match self.pire() {
             Some(n) => e.gravite(n),
             None => e,
@@ -448,7 +451,7 @@ mod tests {
         let outils: Vec<&str> = super::super::registre::OUTILS
             .iter()
             .map(|o| o.id)
-            .filter(|id| id.starts_with("PRO-"))
+            .filter(|id| id.starts_with("PRO-") || id.starts_with("AUT-"))
             .collect();
         for id in AVEC_RESULTAT {
             assert!(outils.contains(id), "{id} : pas un outil du registre");

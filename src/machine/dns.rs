@@ -99,7 +99,7 @@ fn adresse(texte: &str) -> Option<IpAddr> {
 
 /// Serveurs listés par `resolvectl dns` (« Global: 127.0.0.1 », « Link 3 (wlan0): 10.0.0.1 »).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn lire_resolvectl(sortie: &str) -> Vec<IpAddr> {
+pub(crate) fn lire_resolvectl(sortie: &str) -> Vec<IpAddr> {
     sortie
         .lines()
         .filter_map(|l| l.split_once(':').map(|(_, reste)| reste))
@@ -109,7 +109,7 @@ fn lire_resolvectl(sortie: &str) -> Vec<IpAddr> {
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn lire_resolv_conf(texte: &str) -> Vec<IpAddr> {
+pub(crate) fn lire_resolv_conf(texte: &str) -> Vec<IpAddr> {
     texte
         .lines()
         .filter_map(|l| l.trim().strip_prefix("nameserver"))
@@ -131,7 +131,7 @@ struct Serveurs {
 
 /// Les serveurs amont de systemd-resolved, qu'il réécrit à chaque changement (ceux de `resolvectl dns`).
 #[cfg(target_os = "linux")]
-const RESOLV_CONF_AMONT: &str = "/run/systemd/resolve/resolv.conf";
+pub(crate) const RESOLV_CONF_AMONT: &str = "/run/systemd/resolve/resolv.conf";
 
 /// Résolveurs locaux connus : (service systemd ; nom affiché ; chiffre ses requêtes).
 #[cfg(target_os = "linux")]
@@ -667,19 +667,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn serveurs_amont_comme_resolvectl() {
-        let (Some(dns), Ok(conf)) = (
-            super::super::sortie("resolvectl", &["dns"]),
-            std::fs::read_to_string(RESOLV_CONF_AMONT),
-        ) else {
-            return crate::essais::saute("resolvectl ou resolv.conf amont absent");
-        };
-        // Même ensemble : resolved retire les doublons du fichier, et l'ordre des interfaces peut changer.
-        let ensemble = |v: Vec<IpAddr>| v.into_iter().collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(
-            ensemble(lire_resolv_conf(&conf)),
-            ensemble(lire_resolvectl(&dns)),
-            "{conf}\n{dns}"
-        );
+        crate::autotest::croisees::essayer("AUT-LNX-010");
     }
 
     /// Sur cet ordinateur, les résolveurs actifs lus dans /proc sont ceux de `systemctl is-active`, dans les deux

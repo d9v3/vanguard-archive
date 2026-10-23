@@ -9,6 +9,24 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Autodiagnostic (`vanguard autotest`).** Vanguard vérifie ses propres lectures là où il travaille vraiment : chaque
+  règle du bilan sous garde et délai, en lecture seule prouvée (un interrupteur refuse toute écriture d'état, même
+  d'une règle restée bloquée au-delà de son délai, et des empreintes BLAKE3 du dossier avant et après nomment ce qui
+  aurait changé ; une passe de la surveillance pendant l'essai rend la preuve non concluante, jamais « changé »), des
+  invariants sur chaque constat, et dix lectures croisées sous Linux (pacman, dpkg, AUR, unités activées et en échec,
+  groupes, ports en écoute, racine chiffrée, version de sshd, DNS de resolved) et quatre sous Windows (pare-feu,
+  Defender, BitLocker en administrateur, comptes locaux, en JSON) comparées aux outils du système ; les tests
+  « comme l'outil » appellent les mêmes fonctions. Hors ligne par défaut (`--internet`), `--json` sans aucune valeur
+  de l'ordinateur, `--detail` montre les valeurs à l'écran seulement ; code de sortie 0, 1 ou 2. La durée de chaque
+  règle va au journal des mesures (8 semaines en résumé par jour) qui signale une règle trois fois plus lente ou
+  proche de son délai. Une fois par semaine, la surveillance refait les lectures croisées sur le bilan de sa passe
+  (réglage « autotest », reporté pendant un jeu sous GameMode) ; une lecture contredite le dit aux constats sains de
+  ses règles ; le diagnostic montre le dernier autotest. Un écart va au journal des erreurs (identifiants, nombres,
+  genre d'écart), et `journal-vers-github.py` réunit les occurrences d'un même envoi en un commentaire, sans plus
+  mêler deux identifiants dans un même ticket. Jamais un faux « sain » : deux lectures ratées de Defender ou de
+  BitLocker, une ligne de `ss` illisible ou les unités du compte non lues donnent « non vérifié », pas « pareil »
+  ni « sans objet » ; une lecture contredite reste annoncée, à sa date, tant qu'un essai ne l'a pas tranchée ;
+  moins de 5 semaines de mesures, non vérifié aussi.
 - **Mode Wi-Fi public : quatre faiblesses fermées.** Sous Linux, la table du mode ferme aussi le transit venu de la
   carte Wi-Fi : un port de conteneur publié (Docker, podman, k3s), qui passe par DNAT puis `forward` et jamais par
   `input`, n'est plus joignable depuis le réseau public (essayé dans des espaces de noms à soi). Sous Windows, la

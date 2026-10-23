@@ -1,9 +1,25 @@
 # Tous les identifiants que Vanguard a donnés : règles du bilan (regle!), fiches de l'audit du réseau
-# (audit/fiches.rs), outils et surveillances (modele/registre.rs). Une ligne par identifiant, suivie de ses marques :
+# (audit/fiches.rs), outils et surveillances (modele/registre.rs),
+# lectures croisées de l'autotest (autotest/croisees.rs). Une ligne par identifiant, suivie de ses marques :
 #   retire          l'identifiant n'est plus utilisé et ne doit jamais revenir (une autre règle le reprendrait
 #                   sans que l'historique ni les alertes acceptées ne le voient).
 # Lu par les tests de machine/regles.rs.
 
+AUT-LNX-001
+AUT-LNX-002
+AUT-LNX-003
+AUT-LNX-004
+AUT-LNX-005
+AUT-LNX-006
+AUT-LNX-007
+AUT-LNX-008
+AUT-LNX-009
+AUT-LNX-010
+AUT-VAN-001
+AUT-WIN-001
+AUT-WIN-002
+AUT-WIN-003
+AUT-WIN-004
 COM-AGT-001
 COM-AGT-002
 COM-APP-001

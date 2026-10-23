@@ -574,6 +574,7 @@ Each menu entry is also a command.
 | `vanguard fix` | fix the problems found |
 | `vanguard audit [--json]` | audit of this machine |
 | `vanguard rules` | the check rules declared for this system: identifier, subject, references |
+| `vanguard self-test [--json] [--internet] [--detail] [--one-by-one]` | self-test: every check rule under a guard and a time limit, read only and proven so by fingerprints, and Vanguard's readings compared with the system's tools (pacman, systemctl, ss, PowerShell…); nothing is changed, offline by default, a gap goes to the error log without any value from the computer; exit code 0 sound, 1 gap, 2 not checked. Done again every week with the monitoring (`vanguard settings autotest no` to turn it off) |
 | `vanguard network [target] [-p common\|all\|22,80,8000-8100] [--json]` | scan the network or one device |
 | `vanguard network-audit [--json] [--html] [--guest]` | network audit by domain: six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers), attacking nothing; `--guest`: on the guest network, checks that it is really separated from the main one |
 | `vanguard connection` | connection test for gaming |
@@ -659,7 +660,7 @@ Each menu entry is also a command.
 `camera-micro`, `acces`, `quarantaine`, `conteneurs`, `parametres`, `blocage`, `sauvegarder`, `restaurer`, `nommer`,
 `lenteur`, `demarrage`, `fiche`, `copier-fichiers`, `verifier-copie`, `verifier-sauvegarde`, `verifier-cle`,
 `a-laisser`, `changements`, `evenements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`,
-`desinstaller`, `regles`, `traces`, `depanner`, `proche`, `verifier-moi`, `labo`, `extensions`, `veilleur`,
+`desinstaller`, `regles`, `autotest`, `traces`, `depanner`, `proche`, `verifier-moi`, `labo`, `extensions`, `veilleur`,
 `sites-dangereux`, `dernieres-failles`, `wifi-public`, `optimiser`, `courriel-suspect`, `logiciels-espions`,
 `logiciels-perimes`).
 

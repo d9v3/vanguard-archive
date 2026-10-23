@@ -993,7 +993,16 @@ pub fn diagnostic() {
         "  {DISCRET}Lecture du matériel et des journaux…{RESET}",
         "  {DISCRET}Reading hardware and logs…{RESET}"
     );
-    let sections = systeme::sections();
+    let mut sections = systeme::sections();
+    // Le dernier autodiagnostic de Vanguard (« vanguard autotest ») : quand, et s'il a trouvé un écart.
+    if let Some((_, lignes)) = sections.first_mut() {
+        let (valeur, niveau) = crate::autotest::ligne_diagnostic();
+        let libelle = tr!("Dernier autotest", "Last self-test");
+        lignes.push(match niveau {
+            Some(n) => alerte(libelle, valeur, n),
+            None => ligne(libelle, valeur),
+        });
+    }
     for (nom, lignes) in &sections {
         section(nom);
         for t in lignes.iter().flat_map(a_l_ecran) {

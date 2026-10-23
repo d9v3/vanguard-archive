@@ -21,6 +21,13 @@ pub(crate) const PREFIXES: &[(&str, (&str, &str))] = &[
     ),
     ("SUR", ("surveillance horaire", "hourly monitoring")),
     ("VEI", ("veilleur (Linux)", "watcher (Linux)")),
+    (
+        "AUT",
+        (
+            "autodiagnostic de Vanguard et ses lectures croisées",
+            "Vanguard self-test and its cross-checks",
+        ),
+    ),
 ];
 
 /// Un identifiant hors des règles : un outil de protection lancé seul, ou ce que la surveillance et le veilleur
@@ -59,4 +66,5 @@ pub(crate) const OUTILS: &[Outil] = &[
     Outil { id: "SUR-BLO-001", module: "protection::blocage", sujet: ("menace bloquée ou non bloquée", "threat blocked or not blocked") },
     Outil { id: "VEI-PRG-001", module: "machine::linux::veilleur", sujet: ("programme bref vu par le veilleur", "short-lived program seen by the watcher") },
     Outil { id: "VEI-CNX-001", module: "machine::linux::veilleur", sujet: ("connexion brève vue par le veilleur", "short connection seen by the watcher") },
+    Outil { id: "AUT-VAN-001", module: "autotest", sujet: ("autodiagnostic de Vanguard", "Vanguard self-test") },
 ];

@@ -765,6 +765,23 @@ try {
     if (@($f.disques).Count) { Ok "$(@($f.disques).Count) disque(s) lu(s)" } else { Bug 'Disques non lus' }
 } catch { Bug "fiche --json illisible : $($_.Exception.Message)" }
 
+Etape 'Autodiagnostic : lectures croisées, rien changé'
+# En administrateur (ce script l'est) : BitLocker se compare aussi, ce qu'un compte sans droits ne peut pas.
+Lancer 'autotest-json' @('autotest', '--json')
+try {
+    $a = Sortie 'autotest-json' | ConvertFrom-Json
+    if ($a.outil -eq 'AUT-VAN-001') { Ok "Autotest : $($a.verdict), $($a.regles.ont_repondu)/$($a.regles.essayees) règles ont répondu" } else { Bug 'Autotest : rapport inattendu' }
+    foreach ($c in @($a.croisees)) {
+        if ($c.verdict -eq 'different') { Bug "Lecture croisée $($c.id) ($($c.outil)) : $($c.genre)" }
+        elseif ($c.verdict -eq 'saute') { Info "Lecture croisée $($c.id) sautée : $($c.raison)" }
+        else { Ok "Lecture croisée $($c.id) : $($c.verdict)" }
+    }
+    if ($a.preuve.verdict -eq 'change') { Bug "Autotest : le dossier de Vanguard a changé pendant l'essai ($($a.preuve.fichiers -join ', '))" }
+    elseif ($a.preuve.verdict -eq 'rien-change') { Ok 'Autotest : rien changé (empreintes)' }
+    else { Info "Autotest : preuve $($a.preuve.verdict)" }
+    if (@($a.regles.plantees).Count) { Bug "Autotest : règle(s) plantée(s) : $(@($a.regles.plantees) -join ', ')" }
+} catch { Bug "autotest --json illisible : $($_.Exception.Message)" }
+
 Etape 'Programmes au démarrage : liste, rien retiré sans accord'
 $runAvant = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue | Out-String
 LancerAvec 'demarrage' @('demarrage') "q`n"

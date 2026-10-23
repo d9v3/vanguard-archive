@@ -612,6 +612,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard corriger` | corriger les problèmes trouvés |
 | `vanguard machine [--json]` | audit de cette machine |
 | `vanguard regles` | les règles du bilan déclarées pour ce système : identifiant, sujet, références |
+| `vanguard autotest [--json] [--internet] [--detail] [--une-par-une]` | autodiagnostic : chaque règle du bilan sous garde et délai, en lecture seule prouvée par empreintes, et les lectures de Vanguard comparées aux outils du système (pacman, systemctl, ss, PowerShell…) ; rien n'est changé, hors ligne par défaut, un écart va au journal des erreurs sans aucune valeur de l'ordinateur ; code de sortie 0 sain, 1 écart, 2 non vérifié. Refait chaque semaine avec la surveillance (`vanguard parametres autotest non` pour le couper) |
 | `vanguard reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
 | `vanguard audit-reseau [--json] [--html] [--invite]` | audit du réseau par domaine : six notes (exposition, Wi-Fi, séparation des appareils, DNS et certificats, objets connectés, ordinateurs), sans rien attaquer ; `--invite` : sur le réseau invité, vérifie qu'il est bien séparé du réseau principal |
 | `vanguard connexion` | test de connexion pour le jeu |
@@ -696,7 +697,7 @@ Chaque entrée du menu existe aussi en commande.
 `email`, `password`, `browser-passwords`, `outbound`, `remote-access`, `link`, `check-file`, `camera-mic`,
 `permissions`, `quarantine`, `containers`, `settings`, `blocking`, `backup`, `restore`, `name`, `slow`, `startup`,
 `specs`, `copy-files`, `check-copy`, `check-backup`, `check-drive`, `handout`, `changes`, `events`, `auto-backup`,
-`shortcut`, `computers`, `self-update`, `uninstall`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`,
+`shortcut`, `computers`, `self-update`, `uninstall`, `rules`, `self-test`, `evidence`, `troubleshoot`, `relative`, `self-check`,
 `lab`, `ext`, `watcher`, `dangerous-sites`, `latest-flaws`, `public-wifi`, `optimize`, `suspicious-email`, `spyware`,
 `outdated-software`).
 

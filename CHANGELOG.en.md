@@ -9,6 +9,22 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Self-test (`vanguard autotest`).** Vanguard checks its own readings where it really works: every check rule under
+  a guard and a time limit, read only and proven so (a switch refuses any state write, even from a rule stuck beyond
+  its time limit, and BLAKE3 fingerprints of the folder before and after name what would have changed; a monitoring
+  pass during the test makes the proof inconclusive, never “changed”), invariants on every finding, and ten
+  cross-checks on Linux (pacman, dpkg, AUR, enabled and failed units, groups, listening ports, encrypted root, sshd
+  version, resolved's DNS) and four on Windows (firewall, Defender, BitLocker as administrator, local accounts, as
+  JSON) compared with the system's tools; the “like the tool” tests call the same functions. Offline by default
+  (`--internet`), `--json` without any value from the computer, `--detail` shows the values on screen only; exit code
+  0, 1 or 2. Each rule's duration goes to the timings log (8 weeks summarized per day), which reports a rule three
+  times slower or close to its time limit. Once a week, the monitoring redoes the cross-checks on its pass's check
+  (“autotest” setting, postponed during a game under GameMode); a contradicted reading says so on its rules' sound
+  findings; the diagnostic shows the last self-test. A gap goes to the error log (identifiers, numbers, kind of gap),
+  and `journal-vers-github.py` gathers the occurrences of one upload into a single comment, no longer mixing two
+  identifiers in one issue. Never a false “sound”: two failed Defender or BitLocker reads, an unreadable `ss`
+  line or unread account units give “not checked”, not “same” nor “not applicable”; a contradicted reading stays
+  announced, with its date, until a run settles it; under 5 weeks of timings, not checked either.
 - **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
   adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
   can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category

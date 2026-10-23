@@ -144,6 +144,15 @@ pub fn afficher() {
     for o in outils {
         ligne(o.id, o.sujet, &[]);
     }
+    let croisees = crate::autotest::croisees::croisees();
+    titre(&crate::trf!(
+        "Lectures croisées de l'autotest : {}",
+        "Self-test cross-checks: {}",
+        croisees.len()
+    ));
+    for c in croisees {
+        ligne(c.id, c.sujet, &[c.outil]);
+    }
 }
 
 /// Tous les identifiants de ce programme : règles du bilan de ce système, fiches de l'audit du réseau, outils et
@@ -155,6 +164,11 @@ pub(crate) fn tous_les_identifiants() -> Vec<(&'static str, (&'static str, &'sta
         .map(|r| (r.id, r.sujet))
         .chain(crate::audit::fiches::FICHES.iter().map(|f| (f.id, f.sujet)))
         .chain(crate::modele::registre::OUTILS.iter().map(|o| (o.id, o.sujet)))
+        .chain(
+            crate::autotest::croisees::croisees()
+                .into_iter()
+                .map(|c| (c.id, c.sujet)),
+        )
         .collect()
 }
 
@@ -302,11 +316,14 @@ pub(super) fn verification<'a>(r: &'static Regle) -> Verification<'a> {
 fn sous_delai<'a>(r: &'static Regle, delai: std::time::Duration) -> Verification<'a> {
     use crate::modele::Raison;
     use std::sync::mpsc::RecvTimeoutError;
+    // L'interrupteur de lecture seule de l'autotest suit la règle dans son fil (il vaut par fil sous `cargo test`).
+    let lecture_seule = crate::autotest::lecture_seule::heritage();
     Box::new(move || {
         let (envoi, reception) = std::sync::mpsc::channel();
         let lance = std::thread::Builder::new()
             .name(format!("regle {}", r.id))
             .spawn(move || {
+                lecture_seule.poser_ici();
                 // Le bilan peut être déjà reparti : un envoi qui ne trouve personne ne dit rien.
                 let _ = envoi.send(crate::journal::rattraper(r.verifier));
             });
@@ -411,7 +428,15 @@ mod tests {
 
     /// Un identifiant de ce système (ou commun) : ceux que ce programme compile tous.
     fn d_ici(id: &str) -> bool {
-        id.starts_with(Os::actuel().prefixe()) || ["COM", "PRO", "SUR", "VEI"].iter().any(|p| id.starts_with(p))
+        // Les lectures croisées de l'autotest portent le système après « AUT- » : celles des autres ne sont pas
+        // compilées ici.
+        id.starts_with(Os::actuel().prefixe())
+            || ["COM", "PRO", "SUR", "VEI", "AUT-VAN"]
+                .iter()
+                .any(|p| id.starts_with(p))
+            || id
+                .strip_prefix("AUT-")
+                .is_some_and(|r| r.starts_with(Os::actuel().prefixe()))
     }
 
     /// T1 : règles du bilan, fiches de l'audit du réseau et outils forment un seul registre : chaque identifiant une
@@ -430,7 +455,7 @@ mod tests {
             assert!(!o.module.is_empty(), "{} sans module", o.id);
             let prefixe = &o.id[..3];
             assert!(
-                ["PRO", "SUR", "VEI"].contains(&prefixe),
+                ["PRO", "SUR", "VEI", "AUT"].contains(&prefixe),
                 "{} : préfixe d'outil attendu",
                 o.id
             );
