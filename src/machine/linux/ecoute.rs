@@ -52,8 +52,7 @@ pub(crate) fn prises() -> Option<Vec<Ecoute>> {
         for p in &mut prises {
             p.programme = proprietaires
                 .get(&p.inode)
-                .and_then(|pid| std::fs::read_to_string(format!("/proc/{pid}/comm")).ok())
-                .map(|n| n.trim_end_matches('\n').to_string());
+                .and_then(|pid| crate::socle::processus::nom_court(*pid));
         }
     }
     Some(prises)

@@ -77,7 +77,7 @@ pub(crate) enum Annulation {
 pub(crate) const RELEVE: &str = "changements.jsonl";
 
 fn fichier() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join(RELEVE)
+    crate::socle::dossier_local().join(RELEVE)
 }
 
 /// Note des corrections lancées (une liste de commandes chacune) et leur résultat.
@@ -132,7 +132,7 @@ fn ecrire(chemin: &std::path::Path, tous: Vec<Changement>) {
     if let Some(parent) = chemin.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = crate::reseau::ecrire_atomique(chemin, texte);
+    let _ = crate::socle::ecrire_atomique(chemin, texte);
 }
 
 /// Note un blocage : ses commandes (telles que lancées), sa réussite, et de quoi l'annuler.

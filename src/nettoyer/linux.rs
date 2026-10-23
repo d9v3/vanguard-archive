@@ -14,11 +14,7 @@ use crate::machine::linux::natif::{self, Snap};
 use crate::machine::linux::{Atomique, Paquets, atomique};
 use crate::ui::*;
 
-fn present(cmd: &str) -> bool {
-    ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-        .iter()
-        .any(|d| Path::new(d).join(cmd).exists())
-}
+use crate::machine::linux::natif::present_systeme as present;
 
 /// Sortie d'un outil lancé en anglais (ses messages se lisent alors à coup sûr).
 fn sortie(cmd: &str, args: &[&str]) -> Option<String> {

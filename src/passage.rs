@@ -66,7 +66,7 @@ pub(crate) fn au_lancement() {
     if cfg!(test) {
         return;
     }
-    let nouveau = crate::reseau::dossier_local();
+    let nouveau = crate::socle::dossier_local();
     let vieux = nouveau.with_file_name(ancien("vanguard"));
     // Un dossier du même nom sans rien de la version d'avant est à une autre application : jamais repris.
     if !donnees_d_avant(&vieux) {
@@ -178,8 +178,7 @@ fn retirer_minuterie(nom: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
         let agent = format!("com.{}", nom.replacen('-', ".", 1));
-        let plist = PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-            .join(format!("Library/LaunchAgents/{agent}.plist"));
+        let plist = crate::socle::maison().join(format!("Library/LaunchAgents/{agent}.plist"));
         if !plist.exists() {
             return false;
         }
@@ -221,7 +220,7 @@ fn tache_windows(nom: &str) -> String {
 
 #[cfg(target_os = "linux")]
 fn dossier_systemd() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user")
+    crate::socle::maison().join(".config/systemd/user")
 }
 
 /// Sauvegarde automatique de Linux (minuterie rsync) : ses deux unités prennent le nouveau nom, avec le même contenu
@@ -616,7 +615,7 @@ mod tests {
     /// pour un raccourci, à l'empreinte pour une icône ; le reste n'y est jamais.
     #[test]
     fn restes_d_une_version_d_avant() {
-        let racine = crate::reseau::dossier_local().join("passage-restes");
+        let racine = crate::socle::dossier_local().join("passage-restes");
         let _ = std::fs::remove_dir_all(&racine);
         let l = crate::desinstaller::Lieux::jetable(&racine);
         let ecrire = |p: &Path, t: &[u8]| {

@@ -1,0 +1,21 @@
+//! Le socle : ce dont tout Vanguard se sert sans rien savoir du réseau, de la protection ni du bilan. Une règle
+//! commune (une adresse est-elle sur Internet ? où est le dossier personnel ? comment lire /proc ?) vit ici une
+//! fois, testée une fois, au lieu d'être recopiée dans chaque module avec ses petites différences.
+
+pub(crate) mod adresses;
+pub(crate) mod cache;
+mod fichiers;
+pub(crate) mod hachage;
+pub(crate) mod jsonc;
+pub(crate) mod personnel;
+#[cfg(unix)]
+pub(crate) mod processus;
+pub(crate) mod systeme;
+
+pub use fichiers::dossier_local;
+#[cfg(unix)]
+pub use fichiers::proteger_dossier_local;
+pub(crate) use fichiers::{Verrou, ecrire_atomique};
+#[cfg(unix)]
+pub use personnel::volume;
+pub use personnel::{maison, taille_lisible};

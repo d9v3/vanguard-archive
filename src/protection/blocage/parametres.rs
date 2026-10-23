@@ -214,7 +214,7 @@ pub(crate) fn decider(p: &Parametres, c: Categorie, certaine: bool) -> Decision 
 }
 
 fn fichier() -> PathBuf {
-    crate::reseau::dossier_local().join("blocage.json")
+    crate::socle::dossier_local().join("blocage.json")
 }
 
 /// Les réglages ; `Err` (la raison) si le fichier existe mais ne se lit pas : les défauts servent, sans automatique,
@@ -240,7 +240,7 @@ fn enregistrer_dans(p: &Parametres, chemin: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(d)?;
     }
     let texte = serde_json::to_string_pretty(p).map_err(std::io::Error::other)?;
-    crate::reseau::ecrire_atomique(chemin, texte)
+    crate::socle::ecrire_atomique(chemin, texte)
 }
 
 #[cfg(test)]

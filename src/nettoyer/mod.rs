@@ -21,6 +21,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::selection::{Case, cocher};
+#[cfg(target_os = "linux")]
+use crate::socle::personnel::statvfs;
+use crate::socle::taille_lisible;
+#[cfg(unix)]
+use crate::socle::{maison, volume};
 use crate::ui::*;
 
 /// En dessous, il n'y a rien à gagner : l'élément s'affiche « déjà propre ».
@@ -49,25 +54,6 @@ impl Element {
     fn propre(&self) -> bool {
         self.taille.is_some_and(|t| t < PRESQUE_RIEN)
     }
-}
-
-/// « 1.2 Go », « 340 Mo ».
-pub fn taille_lisible(octets: u64) -> String {
-    #[allow(clippy::cast_precision_loss)] // une taille affichée à un chiffre après la virgule
-    let f = octets as f64;
-    if octets >= 1 << 30 {
-        trf!("{} Go", "{} GB", crate::langue::decimal(f / f64::from(1u32 << 30), 1))
-    } else if octets >= PRESQUE_RIEN {
-        trf!("{:.0} Mo", "{:.0} MB", f / f64::from(1u32 << 20))
-    } else {
-        tr!("moins de 1 Mo", "less than 1 MB").into()
-    }
-}
-
-/// Le dossier personnel.
-#[cfg_attr(windows, allow(dead_code))]
-pub fn maison() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
 }
 
 /// Somme de tailles, plafonnée à `u64::MAX`. Un fichier creux (btrfs, XFS, tmpfs, APFS) annonce jusqu'à 8 Eio sans
@@ -196,36 +182,6 @@ fn effacer_caches(dossier: &str, caches: &[(String, u64)]) -> String {
         }
     }
     commande
-}
-
-/// Le volume qui contient `chemin`, vu par statvfs.
-#[cfg(unix)]
-fn statvfs(chemin: &Path) -> Option<libc::statvfs> {
-    use std::os::unix::ffi::OsStrExt;
-    let c = std::ffi::CString::new(chemin.as_os_str().as_bytes()).ok()?;
-    let mut s = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    // SAFETY : `c` est une chaîne C valide pendant tout l'appel ; statvfs remplit `s` en entier quand elle réussit
-    // (retour 0), et `s` n'est lue qu'après.
-    unsafe {
-        if libc::statvfs(c.as_ptr(), s.as_mut_ptr()) != 0 {
-            return None;
-        }
-        Some(s.assume_init())
-    }
-}
-
-/// Place libre et taille du volume qui contient `chemin`, en octets.
-#[cfg(unix)]
-pub fn volume(chemin: &Path) -> Option<(u64, u64)> {
-    let s = statvfs(chemin)?;
-    #[allow(clippy::useless_conversion)] // les types de statvfs changent d'un système à l'autre
-    let bloc = u64::from(s.f_frsize);
-    // Plafonnés comme les tailles de fichiers : un volume réseau ou FUSE (sshfs) dit ce que son serveur veut.
-    #[allow(clippy::useless_conversion)]
-    Some((
-        u64::from(s.f_bavail).saturating_mul(bloc),
-        u64::from(s.f_blocks).saturating_mul(bloc),
-    ))
 }
 
 /// La date de dernière lecture est-elle tenue à jour sur le volume de `chemin` ? Monté en `noatime` (conseil courant
@@ -588,7 +544,7 @@ mod tests {
     /// système ne font que décrire les éléments).
     #[test]
     fn messages_dans_la_largeur() {
-        let larges = crate::gaming::tests::textes_trop_larges(include_str!("mod.rs"));
+        let larges = crate::ui::textes_trop_larges(include_str!("mod.rs"));
         assert_eq!(larges, Vec::<String>::new());
     }
 

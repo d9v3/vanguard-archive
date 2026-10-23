@@ -327,7 +327,7 @@ pub(crate) fn comptes_non_lus(maison: &Path, utilisateurs: &Path) -> usize {
 pub(crate) fn inventaire() -> Inventaire {
     // SAFETY : geteuid ne prend aucun argument et ne peut pas échouer.
     let root = unsafe { libc::geteuid() } == 0;
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     let utilisateurs = Path::new("/Users");
     let racines = racines(&maison, root.then_some(utilisateurs));
     let homebrew = HOMEBREW.map(Path::new);

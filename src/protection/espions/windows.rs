@@ -24,7 +24,7 @@ fn fichier_de(commande: &str) -> &str {
 pub(super) fn relever(r: &mut Releve, ind: Option<&Indicateurs>) {
     use crate::machine::windows::{installes, processus};
     use winreg::RegKey;
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::enums::HKEY_LOCAL_MACHINE;
 
     match installes::noms() {
         Some(noms) => {
@@ -48,7 +48,7 @@ pub(super) fn relever(r: &mut Releve, ind: Option<&Indicateurs>) {
         r.programme(&p.nom, ou, true, ind);
     }
     // Les services : nom, nom affiché et fichier ; démarrage automatique (Start ≤ 2) compté comme en marche.
-    if let Ok(services) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(r"SYSTEM\CurrentControlSet\Services") {
+    if let Ok(services) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(crate::machine::windows::CLE_SERVICES) {
         r.verifies += 1;
         for nom in services.enum_keys().flatten() {
             let Ok(s) = services.open_subkey(&nom) else {
@@ -67,26 +67,17 @@ pub(super) fn relever(r: &mut Releve, ind: Option<&Indicateurs>) {
     } else {
         r.non_verifie(tr!("services illisibles", "services unreadable"));
     }
-    for (racine, chemin) in [
-        (HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
-        (HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run"),
-        (
-            HKEY_LOCAL_MACHINE,
-            r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
-        ),
-        (HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\RunOnce"),
-        (HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\RunOnce"),
-    ] {
-        let Ok(cle) = RegKey::predef(racine).open_subkey(chemin) else {
-            continue;
-        };
-        for (nom, _) in cle.enum_values().flatten() {
-            let commande = cle.get_value::<String, _>(&nom).unwrap_or_default();
-            let ou = crate::trf!("au démarrage : {}", "at startup: {}", crate::ui::affichable(&nom));
-            for texte in [nom.as_str(), fichier_de(&commande)] {
-                if !texte.is_empty() {
-                    r.programme(texte, ou.clone(), true, ind);
-                }
+    // La lecture commune des clés Run et RunOnce : une valeur que winreg ne rend pas n'est plus jetée sans rien dire,
+    // et une clé illisible est dite non vérifiée.
+    let (valeurs, illisibles) = crate::machine::windows::persistance::lignes_run();
+    for cle in illisibles {
+        r.non_verifie(crate::trf!("clé {cle} illisible", "key {cle} unreadable"));
+    }
+    for v in valeurs {
+        let ou = crate::trf!("au démarrage : {}", "at startup: {}", crate::ui::affichable(&v.nom));
+        for texte in [v.nom.as_str(), fichier_de(&v.valeur)] {
+            if !texte.is_empty() {
+                r.programme(texte, ou.clone(), true, ind);
             }
         }
     }

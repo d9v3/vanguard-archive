@@ -43,7 +43,7 @@ enum Etat {
 pub(crate) const LISTE: &str = "pieges.json";
 
 fn fichier() -> PathBuf {
-    crate::reseau::dossier_local().join(LISTE)
+    crate::socle::dossier_local().join(LISTE)
 }
 
 /// Les fichiers-pièges posés ; `Err` si la liste existe mais ne se lit plus.
@@ -95,7 +95,7 @@ fn dossiers() -> Vec<PathBuf> {
 
 #[cfg(target_os = "linux")]
 fn dossiers_du_systeme() -> Vec<PathBuf> {
-    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let maison = crate::socle::maison();
     // Noms des dossiers dans la langue du bureau : ~/.config/user-dirs.dirs (« XDG_DOCUMENTS_DIR="$HOME/Documents" »).
     let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
     let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
@@ -189,7 +189,7 @@ pub(crate) fn developper(chemin: &str) -> String {
 
 #[cfg(target_os = "macos")]
 fn dossiers_du_systeme() -> Vec<PathBuf> {
-    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let maison = crate::socle::maison();
     ["Documents", "Pictures", "Desktop"]
         .iter()
         .map(|d| maison.join(d))
@@ -330,7 +330,7 @@ fn enregistrer(pieges: &[Piege], liste: &Path) -> std::io::Result<()> {
     if let Some(dossier) = liste.parent() {
         std::fs::create_dir_all(dossier)?;
     }
-    crate::reseau::ecrire_atomique(liste, serde_json::to_string_pretty(pieges).unwrap_or_default())
+    crate::socle::ecrire_atomique(liste, serde_json::to_string_pretty(pieges).unwrap_or_default())
 }
 
 /// Retire exactement les fichiers posés et intacts, puis la liste. Un piège modifié ou renommé reste : c'est la preuve

@@ -312,18 +312,12 @@ mod plateforme {
 
     /// Les processus de /proc, nom d'après `comm` (choisi par le programme : rendu inoffensif).
     pub(super) fn processus() -> Vec<Processus> {
-        let Ok(entrees) = std::fs::read_dir("/proc") else {
-            return Vec::new();
-        };
-        entrees
-            .flatten()
-            .filter_map(|e| {
-                let pid: u32 = e.file_name().to_str()?.parse().ok()?;
-                let nom = std::fs::read_to_string(e.path().join("comm")).unwrap_or_default();
-                Some(Processus {
-                    pid,
-                    nom: crate::ui::affichable(nom.trim()),
-                })
+        crate::socle::processus::pids()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|pid| Processus {
+                pid,
+                nom: crate::ui::affichable(crate::socle::processus::nom_court(pid).unwrap_or_default().trim()),
             })
             .collect()
     }

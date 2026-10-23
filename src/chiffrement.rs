@@ -187,7 +187,7 @@ pub(crate) const CARNET_CHIFFRE: &str = "appareils.json.vanguard";
 
 /// La clé de données gardée chez le propriétaire.
 fn chemin_local() -> PathBuf {
-    crate::reseau::dossier_local().join("cle-donnees")
+    crate::socle::dossier_local().join("cle-donnees")
 }
 
 pub(crate) fn lire_cle_locale(chemin: &Path) -> Option<Cle> {
@@ -311,7 +311,7 @@ pub(crate) fn ecrire_carnet(donnees: &Path, json: &str) -> std::io::Result<()> {
 }
 
 fn ecrire_carnet_avec(donnees: &Path, cle: &Cle, json: &str) -> std::io::Result<()> {
-    crate::reseau::ecrire_atomique(
+    crate::socle::ecrire_atomique(
         &donnees.join(CARNET_CHIFFRE),
         chiffrer(cle, "appareils.json", json.as_bytes())?,
     )?;
@@ -347,9 +347,9 @@ pub(crate) fn proteger_dans(
     let cle = Cle::nouvelle()?;
     let clair = std::fs::read_to_string(donnees.join("appareils.json")).unwrap_or_else(|_| "{}".into());
     ecrire_cle_locale(&cle, cle_locale)?;
-    crate::reseau::ecrire_atomique(&donnees.join(ENVELOPPE), envelopper(&cle, phrase, parametres)?)?;
+    crate::socle::ecrire_atomique(&donnees.join(ENVELOPPE), envelopper(&cle, phrase, parametres)?)?;
     let chiffre = chiffrer(&cle, "appareils.json", clair.as_bytes())?;
-    crate::reseau::ecrire_atomique(&donnees.join(CARNET_CHIFFRE), &chiffre)?;
+    crate::socle::ecrire_atomique(&donnees.join(CARNET_CHIFFRE), &chiffre)?;
     // Relu avant d'effacer quoi que ce soit : le carnet en clair ne part que si le chiffré redonne le même texte.
     if lire_carnet_avec(donnees, &cle).as_deref() != Some(clair.as_str()) {
         return Err(std::io::Error::other("le carnet chiffré ne se relit pas"));
@@ -384,7 +384,7 @@ fn deplacer_rapports(donnees: &Path, local: &Path) {
 fn retirer_dans(donnees: &Path, cle: &Cle, cle_locale: &Path) -> std::io::Result<()> {
     let clair =
         lire_carnet_avec(donnees, cle).ok_or_else(|| std::io::Error::other("le carnet chiffré ne s'ouvre pas"))?;
-    crate::reseau::ecrire_atomique(&donnees.join("appareils.json"), &clair)?;
+    crate::socle::ecrire_atomique(&donnees.join("appareils.json"), &clair)?;
     for f in [
         donnees.join(CARNET_CHIFFRE),
         donnees.join(ENVELOPPE),
@@ -400,7 +400,7 @@ fn retirer_dans(donnees: &Path, cle: &Cle, cle_locale: &Path) -> std::io::Result
 
 /// Une nouvelle phrase : la même clé de données, dans une nouvelle enveloppe.
 fn nouvelle_phrase_dans(donnees: &Path, cle: &Cle, phrase: &str, parametres: (u32, u32, u32)) -> std::io::Result<()> {
-    crate::reseau::ecrire_atomique(&donnees.join(ENVELOPPE), envelopper(cle, phrase, parametres)?)
+    crate::socle::ecrire_atomique(&donnees.join(ENVELOPPE), envelopper(cle, phrase, parametres)?)
 }
 
 /// Demande une phrase deux fois. 10 caractères au moins : c'est la seule défense d'une clé perdue.
@@ -442,7 +442,7 @@ pub fn menu() {
         );
         return;
     };
-    let local = crate::reseau::dossier_local();
+    let local = crate::socle::dossier_local();
     if protegee(&donnees) {
         afficher_aligne(
             &format!("  {VERT}✔{RESET} "),
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn messages_dans_la_largeur() {
         assert_eq!(
-            crate::gaming::tests::textes_trop_larges(include_str!("chiffrement.rs")),
+            crate::ui::textes_trop_larges(include_str!("chiffrement.rs")),
             Vec::<String>::new()
         );
     }

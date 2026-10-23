@@ -11,6 +11,9 @@
 //! mais illisible rend l'outil « non vérifié », jamais « aucun agent ». Aucune valeur secrète n'est affichée ni
 //! gardée : seulement le nom du serveur et celui de la clé. Rien ne se corrige tout seul.
 
+#[cfg(test)]
+use crate::socle::jsonc::json_sans_jsonc;
+use crate::socle::jsonc::lire_json;
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -653,80 +656,6 @@ pub(crate) fn fichiers_de_reglages() -> Vec<(&'static str, PathBuf)> {
 /// Au-delà, ce n'est pas un fichier de réglages (~/.claude.json grossit avec l'historique des projets) : il n'est
 /// pas lu, et l'outil est dit non vérifié.
 const REGLAGES_MAX: u64 = 64 << 20;
-
-/// Le JSONC des réglages de VS Code (que Cursor et Windsurf reprennent) ramené au JSON : commentaires « // » et
-/// « /* */ », et virgules finales, retirés hors des chaînes. Un commentaire devient une espace, ses fins de ligne
-/// restent : deux mots qu'il séparait le restent.
-fn json_sans_jsonc(texte: &str) -> String {
-    let mut json = String::with_capacity(texte.len());
-    let mut car = texte.chars().peekable();
-    // Une virgule pas encore suivie d'autre chose que des blancs ou des commentaires : finale si « } » ou « ] » vient.
-    let mut virgule: Option<usize> = None;
-    while let Some(c) = car.next() {
-        match c {
-            '"' => {
-                virgule = None;
-                json.push(c);
-                while let Some(c) = car.next() {
-                    json.push(c);
-                    match c {
-                        '\\' => json.extend(car.next()),
-                        '"' => break,
-                        _ => {}
-                    }
-                }
-            }
-            '/' if car.peek() == Some(&'/') => {
-                for c in car.by_ref() {
-                    if c == '\n' {
-                        json.push(c);
-                        break;
-                    }
-                }
-            }
-            '/' if car.peek() == Some(&'*') => {
-                car.next();
-                let mut etoile = false;
-                for c in car.by_ref() {
-                    if c == '\n' {
-                        json.push(c);
-                    }
-                    if etoile && c == '/' {
-                        break;
-                    }
-                    etoile = c == '*';
-                }
-                json.push(' ');
-            }
-            '}' | ']' => {
-                if let Some(i) = virgule.take() {
-                    json.replace_range(i..=i, " ");
-                }
-                json.push(c);
-            }
-            ',' => {
-                virgule = Some(json.len());
-                json.push(c);
-            }
-            _ => {
-                if !c.is_whitespace() {
-                    virgule = None;
-                }
-                json.push(c);
-            }
-        }
-    }
-    json
-}
-
-/// Un fichier de réglages lu en JSON, ou à défaut en JSONC ; `None` s'il n'est ni l'un ni l'autre.
-pub(crate) fn lire_json(octets: &[u8]) -> Option<Value> {
-    if let Ok(json) = serde_json::from_slice(octets) {
-        return Some(json);
-    }
-    let texte = std::str::from_utf8(octets).ok()?;
-    serde_json::from_str(&json_sans_jsonc(texte.trim_start_matches('\u{feff}'))).ok()
-}
 
 /// Les réglages d'un fichier : `Ok(None)` s'il n'existe pas (l'outil n'est pas installé), `Err` avec la raison s'il
 /// est là mais ne se lit pas (droits, trop gros, ni JSON ni JSONC).

@@ -60,32 +60,11 @@ impl Reparation {
 }
 
 /// Une adresse vers laquelle le fichier hosts ne devrait jamais envoyer un nom : ni bouclage ni « 0.0.0.0 »
-/// (listes de blocage), ni réseau local (NAS, imprimante nommés à la main). Il reste les adresses d'Internet.
+/// (listes de blocage), ni réseau local (NAS, imprimante nommés à la main), ni « fe00::0 ip6-localnet ». Il reste
+/// les adresses d'Internet, selon la règle commune (`socle::adresses`) : une adresse d'exemple (203.0.113.x) y
+/// compte, comme pour le blocage, au lieu d'être tue ici seulement.
 fn publique(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v) => {
-            let [a, b, ..] = v.octets();
-            !(v.is_loopback()
-                || v.is_unspecified()
-                || v.is_private()
-                || v.is_link_local()
-                || v.is_broadcast()
-                || v.is_multicast()
-                || v.is_documentation()
-                // 100.64.0.0/10 : réseau partagé des opérateurs (CGNAT), Tailscale.
-                || (a == 100 && b & 0xc0 == 64))
-        }
-        IpAddr::V6(v) => match v.to_ipv4_mapped() {
-            Some(v4) => publique(IpAddr::V4(v4)),
-            // fc00::/7 = réseau local ; fe00:: et au-delà = lien local, réservées, multicast (« fe00::0 ip6-localnet »).
-            None => {
-                !(v.is_loopback()
-                    || v.is_unspecified()
-                    || v.segments()[0] & 0xfe00 == 0xfc00
-                    || v.segments()[0] >= 0xfe00)
-            }
-        },
-    }
+    crate::socle::adresses::sur_internet(ip)
 }
 
 /// Lignes du fichier hosts qui envoient un nom vers une adresse d'Internet (adresse telle qu'écrite, noms).
@@ -252,11 +231,7 @@ fn finir_navigation(pourquoi: String, commandes: Vec<String>, hosts: bool) -> Re
 }
 
 #[cfg(target_os = "linux")]
-fn present(cmd: &str) -> bool {
-    ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-        .iter()
-        .any(|d| std::path::Path::new(d).join(cmd).exists())
-}
+use crate::machine::linux::natif::present_systeme as present;
 
 /// Montre où sont définies les variables de proxy. -i : HTTP_PROXY et HTTPS_PROXY, en majuscules, comptent aussi
 /// (lues plus bas dans les deux casses).

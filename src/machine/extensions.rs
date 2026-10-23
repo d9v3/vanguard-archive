@@ -253,7 +253,7 @@ pub(crate) fn racines() -> Vec<(&'static str, PathBuf, bool)> {
     let mut r = Vec::new();
     #[cfg(target_os = "linux")]
     {
-        let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let maison = crate::socle::maison();
         let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
         for (nom, d) in [
             ("Firefox", maison.join(".mozilla/firefox")),
@@ -289,7 +289,7 @@ pub(crate) fn racines() -> Vec<(&'static str, PathBuf, bool)> {
     }
     #[cfg(target_os = "macos")]
     {
-        let support = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library/Application Support");
+        let support = crate::socle::maison().join("Library/Application Support");
         for (nom, d) in [
             ("Firefox", support.join("Firefox/Profiles")),
             ("Zen", support.join("zen/Profiles")),

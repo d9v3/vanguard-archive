@@ -251,7 +251,7 @@ pub fn etat_chaine() -> Option<String> {
 }
 
 fn fichier() -> PathBuf {
-    crate::reseau::dossier_local().join("historique.json")
+    crate::socle::dossier_local().join("historique.json")
 }
 
 pub fn charger() -> Vec<Bilan> {
@@ -345,7 +345,7 @@ fn enregistrer_dans(chemin: &std::path::Path, mut nouveau: Bilan) -> (Option<Bil
     tous.drain(..surplus);
     // D'un bloc : une coupure pendant l'écriture laisse l'ancien historique ou le nouveau, jamais un fichier tronqué.
     if let Ok(texte) = serde_json::to_string(&tous)
-        && let Err(e) = crate::reseau::ecrire_atomique(chemin, &texte)
+        && let Err(e) = crate::socle::ecrire_atomique(chemin, &texte)
     {
         tre!(
             "Attention : bilan non enregistré dans l'historique ({e}).",

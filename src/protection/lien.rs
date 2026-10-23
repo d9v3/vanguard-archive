@@ -526,10 +526,10 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
 
     // Adresse IP au lieu d'un nom, parfois déguisée en un seul nombre (« http://3232235777/ »).
     if let Ok(ip) = hote.parse::<IpAddr>() {
-        let locale = match ip {
-            IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
-            IpAddr::V6(v6) => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00,
-        };
+        // Cette machine ou le réseau de la maison seulement : le réseau partagé du fournisseur (100.64/10) n'en est
+        // pas, ce sont les box d'autres abonnés, comme dans `reseau::nmap`.
+        use crate::socle::adresses::{Portee, portee};
+        let locale = matches!(portee(ip), Portee::Machine | Portee::Locale);
         signes.push(if locale {
             signe(
                 Niveau::Info,
@@ -1704,6 +1704,9 @@ mod tests {
         assert!(pire("https://xn--bcher-kva.example/").is_none_or(|n| n == Niveau::Info));
         // Un appareil du réseau : information seulement.
         assert_eq!(pire("http://192.168.1.1/"), Some(Niveau::Info));
+        assert_eq!(pire("http://127.0.0.1:8080/"), Some(Niveau::Info));
+        // Le réseau partagé du fournisseur (CGNAT) : la box d'un autre abonné, une adresse IP brute.
+        assert_eq!(pire("http://100.88.1.2/connexion"), Some(Niveau::Eleve));
         // Site gratuit qui parle d'une marque : très suspect.
         assert_eq!(pire("https://netflix-compte.github.io/"), Some(Niveau::Eleve));
     }

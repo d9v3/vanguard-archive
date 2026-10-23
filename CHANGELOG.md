@@ -174,6 +174,25 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   final, et la 0.85 n'est plus dite absente de l'historique. Isolement sous macOS : ni `open`, ni Apple Events, ni
   presse-papiers, ni disques branchés (/Volumes), par où une extension sortait du bac à sable (profil non vérifié sur
   un Mac).
+- **Socle commun, sans doublons.** Ce que tout Vanguard partage vit dans `src/socle/`, une fois, testé une fois :
+  dossier de Vanguard, écriture atomique et verrou (sortis du module réseau), cache des listes téléchargées (sorti
+  d'abuse.ch), portée d'une adresse IP selon les RFC, dossier personnel, processus de Linux et macOS, JSON avec
+  commentaires, os-release, empreintes ; l'inventaire des paquets quitte Gaming pour `machine/linux/paquets.rs`, et
+  `sha1_smol` et le MD5 écrit à la main laissent la place à sha1 et md-5 de RustCrypto, déjà liés par YARA-X (aucune
+  crate de plus). Des copies étaient fausses : une tentative SSH notée « ::ffff:192.168.1.5 » passait pour venue
+  d'Internet ; une stratégie de Chrome avec « 1, // commentaire » devant « } » était dite illisible ; un paquet
+  retenu (« hold ») n'avait pas de version ; un dossier ou un fichier non exécutable du même nom passait pour un
+  programme installé avant une commande sudo ; un HOME vide faisait lire et écrire depuis le dossier courant. /proc
+  illisible n'est plus compté comme vérifié (logiciels espions, lecteurs du clavier, caméra, prise de contrôle à
+  distance), et un /proc monté avec hidepid est dit. Les listes de menaces et tldr s'écrivent par l'écriture
+  atomique (sous Windows, Defender qui tenait l'ancienne copie la laissait en place). Les clés Run se lisent d'une
+  seule façon, la plus sûre : « Quelqu'un contrôle mon ordi ? » et « Logiciels espions » voient aussi RunOnce et
+  les noms mal formés, et « Logiciels espions » dit une clé illisible. Le bilan lit le Wi-Fi par nl80211 et
+  wlanapi, comme l'audit du réseau (nmcli et netsh en secours), et juge les réseaux ouverts enregistrés de la même
+  façon que lui : la protection retenue est celle que Windows a négociée (une borne WPA2/WPA3 jointe en WPA2 reste
+  en WPA2), deux bornes du même nom aux protections différentes sans émetteur connu renvoient à nmcli, et les
+  profils de NetworkManager se lisent aussi dans /run (netplan) et /usr/lib, avec nmcli en secours quand un
+  fichier est refusé.
 
 ## 22 octobre 2026, au soir : version 0.85
 

@@ -34,7 +34,7 @@ struct Etat {
 }
 
 fn fichier_etat() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("entretien.json")
+    crate::socle::dossier_local().join("entretien.json")
 }
 
 struct Examen {
@@ -95,7 +95,7 @@ fn rediger(e: &Examen, nouvelles: Option<&[String]>) -> (&'static str, Vec<Strin
         ),
         (m, _) => trf!("Mises à jour en attente : {}.", "Updates waiting: {}.", categories(m)),
     });
-    let place = (e.place >= 1 << 30).then(|| crate::nettoyer::taille_lisible(e.place));
+    let place = (e.place >= 1 << 30).then(|| crate::socle::taille_lisible(e.place));
     if let Some(p) = &place {
         lignes.push(trf!("Le nettoyage libérerait {}.", "Cleaning up would free {}.", p));
     }
@@ -159,7 +159,7 @@ pub fn entretenir() {
         alertes: examen.alertes,
     };
     if let Ok(t) = serde_json::to_string(&etat) {
-        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
         let _ = std::fs::write(fichier_etat(), t);
     }
     // Sans surveillance, l'entretien du mois garde les exemples du guide à jour.
@@ -344,8 +344,7 @@ fn plist_entretien(exe: &str, nom: &str) -> String {
 
 #[cfg(target_os = "macos")]
 fn plist_agent() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join(format!("Library/LaunchAgents/{AGENT_MACOS}.plist"))
+    crate::socle::maison().join(format!("Library/LaunchAgents/{AGENT_MACOS}.plist"))
 }
 
 #[cfg(target_os = "macos")]

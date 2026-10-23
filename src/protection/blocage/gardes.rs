@@ -203,7 +203,7 @@ pub(crate) struct Sessions {
 /// fait sans clic, et ne touche alors jamais une adresse où un autre compte a une connexion établie.
 pub(crate) fn adresse_intouchable(ip: IpAddr, sessions: Option<&Sessions>, automatique: bool) -> Option<&'static str> {
     let ip = ip.to_canonical();
-    if !crate::protection::sortantes::sur_internet(ip) {
+    if !crate::socle::adresses::sur_internet(ip) {
         return Some(tr!(
             "adresse du réseau local ou de cet ordinateur : jamais bloquée",
             "address of the local network or of this computer: never blocked"
@@ -447,7 +447,7 @@ fn lire_etablies() -> Option<Vec<Etablie>> {
     let noms: std::collections::HashMap<u64, String> = crate::protection::sortantes::proprietaires()
         .into_iter()
         .filter_map(|(inode, pid)| {
-            let nom = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+            let nom = crate::socle::processus::nom_court(pid)?;
             Some((inode, nom.trim_end().to_string()))
         })
         .collect();

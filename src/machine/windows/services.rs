@@ -58,7 +58,7 @@ fn lire_natif() -> Option<String> {
     // Service dans son propre processus (0x10) ou partagé (0x20) : les pilotes (1, 2) n'en sont pas.
     const SERVICE_WIN32: u32 = 0x30;
     let services = winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
-        .open_subkey(r"SYSTEM\CurrentControlSet\Services")
+        .open_subkey(crate::machine::windows::CLE_SERVICES)
         .ok()?;
     let mut lignes = Vec::new();
     for nom in services.enum_keys().flatten() {

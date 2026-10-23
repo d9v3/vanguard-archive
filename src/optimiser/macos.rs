@@ -298,7 +298,7 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
 /// partent à la connexion, avec leur état. Ceux de toute la machine (/Library), les éléments de connexion des
 /// Réglages et les agents à la demande ou à heure fixe ne sont pas touchés.
 pub fn au_demarrage() -> Vec<Programme> {
-    let dossier = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library/LaunchAgents");
+    let dossier = crate::socle::maison().join("Library/LaunchAgents");
     let etats = agents_etats().unwrap_or_default();
     // Une clé du plist en XML (un booléen, ou les conditions de KeepAlive) ; `None` : absente.
     let xml = |fichier: &Path, cle: &str| -> Option<String> {

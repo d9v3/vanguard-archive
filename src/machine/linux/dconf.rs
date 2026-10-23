@@ -39,7 +39,7 @@ fn variable(nom: &str) -> Option<String> {
 
 impl Lieux {
     pub(crate) fn du_systeme() -> Lieux {
-        let maison = crate::nettoyer::maison();
+        let maison = crate::socle::maison();
         let donnees = variable("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
         let donnees_systeme: Vec<PathBuf> = variable("XDG_DATA_DIRS")
             .unwrap_or_else(|| "/usr/local/share/:/usr/share/".into())

@@ -103,8 +103,7 @@ fn marque(mut c: Constat, regle: &'static str) -> Constat {
 /// Une adresse partagée par le fournisseur entre plusieurs abonnés (CGNAT, 100.64.0.0/10) : personne ne la joint
 /// d'Internet.
 fn partagee(ip: Ipv4Addr) -> bool {
-    let o = ip.octets();
-    o[0] == 100 && (64..128).contains(&o[1])
+    crate::socle::adresses::portee(ip.into()) == crate::socle::adresses::Portee::Partagee
 }
 
 /// « (Box du salon) », ce que la box dit être, pour une phrase.

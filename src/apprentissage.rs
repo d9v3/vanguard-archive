@@ -39,7 +39,7 @@ struct Acceptee {
 }
 
 fn fichier() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join(crate::sceau::APPRIS)
+    crate::socle::dossier_local().join(crate::sceau::APPRIS)
 }
 
 /// Pourquoi la liste des choix ne compte pas.

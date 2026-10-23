@@ -54,6 +54,7 @@ mod risk;
 mod sauvegarde;
 mod sceau;
 mod selection;
+mod socle;
 mod sqlite;
 mod traces;
 mod ui;
@@ -2143,7 +2144,7 @@ async fn main() {
     passage::au_lancement();
     // Après le passage, qui a pu déplacer l'ancien dossier avec ses droits d'avant.
     #[cfg(unix)]
-    reseau::proteger_dossier_local();
+    crate::socle::proteger_dossier_local();
     protection::cles_connues::reconnaitre_la_cle_du_programme();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {

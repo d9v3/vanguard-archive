@@ -241,7 +241,7 @@ pub(super) fn etapes(
         detail: trf!(
             "La base des appareils, les surnoms et l'historique de tes réseaux sont dans {} : exporte-les si tu veux les retrouver sur le prochain ordinateur (ils partent avec l'effacement). La clé VANGUARD, elle, te suit.",
             "The device database, the nicknames and the history of your networks are in {}: export them if you want them back on the next computer (the wipe erases them). The VANGUARD key itself goes with you.",
-            chemin_affichable(&crate::reseau::dossier_local())
+            chemin_affichable(&crate::socle::dossier_local())
         ),
         outil: Some((
             tr!(

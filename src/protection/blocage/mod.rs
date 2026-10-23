@@ -45,7 +45,7 @@ fn parametres() -> Parametres {
 /// Enregistre les réglages. Un fichier illisible n'est pas écrasé en silence : il est d'abord mis de côté, intact.
 fn enregistrer(p: &Parametres) -> bool {
     if parametres::charger().is_err() {
-        let f = crate::reseau::dossier_local().join("blocage.json");
+        let f = crate::socle::dossier_local().join("blocage.json");
         let copie = f.with_extension(format!(
             "illisible-{}.json",
             chrono::Local::now().format("%Y%m%d-%H%M%S")
@@ -603,7 +603,7 @@ fn alerter_blocage(m: &Menace, titre: &str, texte: &str) {
 }
 
 fn fichier_signalees() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("blocage-non-bloquees.txt")
+    crate::socle::dossier_local().join("blocage-non-bloquees.txt")
 }
 
 /// Dans la surveillance horaire : le certain des catégories automatiques seulement, sans jamais rien demander ; chaque
@@ -640,7 +640,7 @@ pub(crate) fn en_surveillance() {
     {
         bloquer_tout_seul(m, &ctx, Some((&avant, &mut maintenant)));
     }
-    let _ = crate::reseau::ecrire_atomique(
+    let _ = crate::socle::ecrire_atomique(
         &fichier_signalees(),
         maintenant.into_iter().collect::<Vec<_>>().join("\n"),
     );

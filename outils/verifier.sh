@@ -260,7 +260,7 @@ if [[ $MODE != --rapide ]]; then
 fi
 wait
 
-# Les tests laissent chacun un dossier jetable (reseau::dossier_local sous cfg(test)) : ceux dont le processus est fini
+# Les tests laissent chacun un dossier jetable (socle::dossier_local sous cfg(test)) : ceux dont le processus est fini
 # partent.
 for d in /tmp/vanguard-tests-*; do
   [[ -d $d ]] && ! kill -0 "${d##*-}" 2>/dev/null && rm -rf "$d"

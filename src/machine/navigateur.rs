@@ -79,51 +79,11 @@ struct Strategies {
     illisibles: Vec<String>,
 }
 
-/// Le JSON des stratégies tel que Chrome le lit : commentaires `//` et `/* */`, virgule avant `}` ou `]` permis.
+/// Le JSON des stratégies tel que Chrome le lit : commentaires `//` et `/* */`, virgule avant `}` ou `]` permis, par
+/// le lecteur commun (`socle::jsonc`).
 #[cfg(any(target_os = "linux", test))]
 fn json_souple(texte: &str) -> Option<Value> {
-    if let Ok(v) = serde_json::from_str(texte) {
-        return Some(v);
-    }
-    let mut sortie = String::with_capacity(texte.len());
-    let mut c = texte.chars().peekable();
-    let mut chaine = false;
-    while let Some(x) = c.next() {
-        if chaine {
-            sortie.push(x);
-            if x == '\\' {
-                sortie.extend(c.next());
-            } else if x == '"' {
-                chaine = false;
-            }
-            continue;
-        }
-        match x {
-            '"' => {
-                chaine = true;
-                sortie.push(x);
-            }
-            '/' if c.peek() == Some(&'/') => while c.next_if(|&y| y != '\n').is_some() {},
-            '/' if c.peek() == Some(&'*') => {
-                c.next();
-                let mut avant = ' ';
-                for y in c.by_ref() {
-                    if avant == '*' && y == '/' {
-                        break;
-                    }
-                    avant = y;
-                }
-            }
-            ',' => {
-                let reste = c.clone().find(|y| !y.is_whitespace());
-                if !matches!(reste, Some('}' | ']')) {
-                    sortie.push(x);
-                }
-            }
-            _ => sortie.push(x),
-        }
-    }
-    serde_json::from_str(&sortie).ok()
+    crate::socle::jsonc::lire_json(texte.as_bytes())
 }
 
 /// Une valeur de stratégie lue comme un nombre : booléen, nombre, ou chiffres d'une chaîne (registre REG_SZ).

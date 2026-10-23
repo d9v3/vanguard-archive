@@ -133,7 +133,7 @@ fn empreinte_a_cote(fichier: &Path) -> Option<(Algo, String, PathBuf)> {
     })
 }
 
-/// L'empreinte du fichier : calculée ici sous Linux et macOS (sha2, sha1_smol, MD5 écrit plus bas), par Windows
+/// L'empreinte du fichier : calculée ici sous Linux et macOS (sha2, sha1, md-5), par Windows
 /// lui-même sous Windows (BCrypt, Get-FileHash en secours).
 pub(crate) fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
     #[cfg(windows)]
@@ -570,7 +570,7 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
 pub(crate) fn dossier_telechargements() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
-        let maison = crate::nettoyer::maison();
+        let maison = crate::socle::maison();
         let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
         let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
         crate::protection::pieges::dossier_declare(&declares, "XDG_DOWNLOAD_DIR", &maison).or_else(|| {
@@ -592,7 +592,7 @@ pub(crate) fn dossier_telechargements() -> Option<PathBuf> {
     }
     #[cfg(target_os = "macos")]
     {
-        Some(crate::nettoyer::maison().join("Downloads"))
+        Some(crate::socle::maison().join("Downloads"))
     }
 }
 
@@ -695,7 +695,7 @@ fn a_signaler(fichiers: &[(String, u64, Vec<u8>)], depuis: u64) -> Vec<(String, 
 }
 
 fn fichier_surveillance() -> PathBuf {
-    crate::reseau::dossier_local().join("surveillance-telechargements.json")
+    crate::socle::dossier_local().join("surveillance-telechargements.json")
 }
 
 /// Pour la surveillance horaire : les programmes et fichiers déguisés arrivés dans Téléchargements depuis le passage
@@ -741,7 +741,7 @@ pub fn nouveaux_a_signaler() -> Vec<(String, String)> {
         a_signaler(&fichiers, avant.depuis)
     });
     if let Ok(texte) = serde_json::to_string(&Etat { depuis: maintenant }) {
-        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
         let _ = std::fs::write(fichier_surveillance(), texte);
     }
     notes
@@ -751,270 +751,70 @@ pub fn nouveaux_a_signaler() -> Vec<(String, String)> {
 /// tient pas en mémoire.
 #[cfg(any(unix, test))]
 fn empreinte_lue(fichier: &Path, algo: Algo) -> std::io::Result<String> {
-    use sha2::Digest;
-    use std::io::Read;
-    enum Calcul {
-        Md5(Md5),
-        Sha1(Box<sha1_smol::Sha1>),
-        Sha256(Box<sha2::Sha256>),
-        Sha512(Box<sha2::Sha512>),
+    match algo {
+        Algo::Md5 => empreinte_par::<md5::Md5>(fichier),
+        Algo::Sha1 => empreinte_par::<sha1::Sha1>(fichier),
+        Algo::Sha256 => empreinte_par::<sha2::Sha256>(fichier),
+        Algo::Sha512 => empreinte_par::<sha2::Sha512>(fichier),
     }
-    let mut calcul = match algo {
-        Algo::Md5 => Calcul::Md5(Md5::new()),
-        Algo::Sha1 => Calcul::Sha1(Box::default()),
-        Algo::Sha256 => Calcul::Sha256(Box::default()),
-        Algo::Sha512 => Calcul::Sha512(Box::default()),
-    };
+}
+
+/// Le calcul d'un algorithme de RustCrypto ; MD5 compris, qui était écrit ici à la main : il ne protège plus d'une
+/// falsification, mais une empreinte MD5 publiée à côté d'un vieux téléchargement dit encore s'il est arrivé entier.
+#[cfg(any(unix, test))]
+fn empreinte_par<D: sha2::Digest>(fichier: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut calcul = D::new();
     let mut f = std::fs::File::open(fichier)?;
     let mut tampon = vec![0u8; 1 << 16];
     loop {
-        let n = match f.read(&mut tampon) {
+        match f.read(&mut tampon) {
             Ok(0) => break,
-            Ok(n) => n,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Ok(n) => calcul.update(&tampon[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
-        };
-        let morceau = &tampon[..n];
-        match &mut calcul {
-            Calcul::Md5(h) => h.ajouter(morceau),
-            Calcul::Sha1(h) => h.update(morceau),
-            Calcul::Sha256(h) => h.update(morceau),
-            Calcul::Sha512(h) => h.update(morceau),
         }
     }
-    let octets: Vec<u8> = match calcul {
-        Calcul::Md5(h) => h.finir().to_vec(),
-        Calcul::Sha1(h) => h.digest().bytes().to_vec(),
-        Calcul::Sha256(h) => h.finalize().to_vec(),
-        Calcul::Sha512(h) => h.finalize().to_vec(),
-    };
-    Ok(hex(&octets))
-}
-
-#[cfg(any(unix, test))]
-fn hex(octets: &[u8]) -> String {
-    use std::fmt::Write;
-    octets.iter().fold(String::with_capacity(octets.len() * 2), |mut t, o| {
-        let _ = write!(t, "{o:02x}");
-        t
-    })
-}
-
-/// MD5 (RFC 1321), écrit ici : ni sha2 ni sha1_smol ne l'ont. Il ne protège plus d'une falsification, mais une
-/// empreinte MD5 publiée à côté d'un vieux téléchargement dit encore s'il est arrivé entier.
-#[cfg(any(unix, test))]
-struct Md5 {
-    etat: [u32; 4],
-    bloc: [u8; 64],
-    dans_bloc: usize,
-    longueur: u64,
-}
-
-/// Les constantes de la RFC : la partie entière de 2³² × |sin(i + 1)|.
-#[cfg(any(unix, test))]
-const MD5_K: [u32; 64] = [
-    0xd76a_a478,
-    0xe8c7_b756,
-    0x2420_70db,
-    0xc1bd_ceee,
-    0xf57c_0faf,
-    0x4787_c62a,
-    0xa830_4613,
-    0xfd46_9501,
-    0x6980_98d8,
-    0x8b44_f7af,
-    0xffff_5bb1,
-    0x895c_d7be,
-    0x6b90_1122,
-    0xfd98_7193,
-    0xa679_438e,
-    0x49b4_0821,
-    0xf61e_2562,
-    0xc040_b340,
-    0x265e_5a51,
-    0xe9b6_c7aa,
-    0xd62f_105d,
-    0x0244_1453,
-    0xd8a1_e681,
-    0xe7d3_fbc8,
-    0x21e1_cde6,
-    0xc337_07d6,
-    0xf4d5_0d87,
-    0x455a_14ed,
-    0xa9e3_e905,
-    0xfcef_a3f8,
-    0x676f_02d9,
-    0x8d2a_4c8a,
-    0xfffa_3942,
-    0x8771_f681,
-    0x6d9d_6122,
-    0xfde5_380c,
-    0xa4be_ea44,
-    0x4bde_cfa9,
-    0xf6bb_4b60,
-    0xbebf_bc70,
-    0x289b_7ec6,
-    0xeaa1_27fa,
-    0xd4ef_3085,
-    0x0488_1d05,
-    0xd9d4_d039,
-    0xe6db_99e5,
-    0x1fa2_7cf8,
-    0xc4ac_5665,
-    0xf429_2244,
-    0x432a_ff97,
-    0xab94_23a7,
-    0xfc93_a039,
-    0x655b_59c3,
-    0x8f0c_cc92,
-    0xffef_f47d,
-    0x8584_5dd1,
-    0x6fa8_7e4f,
-    0xfe2c_e6e0,
-    0xa301_4314,
-    0x4e08_11a1,
-    0xf753_7e82,
-    0xbd3a_f235,
-    0x2ad7_d2bb,
-    0xeb86_d391,
-];
-
-/// Les rotations de chaque étape, quatre par tour.
-#[cfg(any(unix, test))]
-const MD5_R: [[u32; 4]; 4] = [[7, 12, 17, 22], [5, 9, 14, 20], [4, 11, 16, 23], [6, 10, 15, 21]];
-
-#[cfg(any(unix, test))]
-impl Md5 {
-    fn new() -> Md5 {
-        Md5 {
-            etat: [0x6745_2301, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476],
-            bloc: [0; 64],
-            dans_bloc: 0,
-            longueur: 0,
-        }
-    }
-
-    fn ajouter(&mut self, mut octets: &[u8]) {
-        self.longueur = self.longueur.wrapping_add(octets.len() as u64);
-        while !octets.is_empty() {
-            let n = (64 - self.dans_bloc).min(octets.len());
-            self.bloc[self.dans_bloc..self.dans_bloc + n].copy_from_slice(&octets[..n]);
-            self.dans_bloc += n;
-            octets = &octets[n..];
-            if self.dans_bloc == 64 {
-                let bloc = self.bloc;
-                self.compresser(&bloc);
-                self.dans_bloc = 0;
-            }
-        }
-    }
-
-    /// Un bloc de 64 octets : seize mots de 32 bits, poids faible d'abord, mêlés en quatre tours de seize étapes.
-    // a, b, c, d, f, g, i : les noms de la RFC, pour la relire à côté.
-    #[allow(clippy::many_single_char_names)]
-    fn compresser(&mut self, bloc: &[u8; 64]) {
-        let mots: [u32; 16] = std::array::from_fn(|i| {
-            u32::from_le_bytes([bloc[4 * i], bloc[4 * i + 1], bloc[4 * i + 2], bloc[4 * i + 3]])
-        });
-        let [mut a, mut b, mut c, mut d] = self.etat;
-        for i in 0..64 {
-            let (f, g) = match i / 16 {
-                0 => ((b & c) | (!b & d), i),
-                1 => ((d & b) | (!d & c), (5 * i + 1) % 16),
-                2 => (b ^ c ^ d, (3 * i + 5) % 16),
-                _ => (c ^ (b | !d), (7 * i) % 16),
-            };
-            let somme = a.wrapping_add(f).wrapping_add(MD5_K[i]).wrapping_add(mots[g]);
-            a = d;
-            d = c;
-            c = b;
-            b = b.wrapping_add(somme.rotate_left(MD5_R[i / 16][i % 4]));
-        }
-        for (e, v) in self.etat.iter_mut().zip([a, b, c, d]) {
-            *e = e.wrapping_add(v);
-        }
-    }
-
-    /// Le bourrage de la RFC : un bit à 1, des zéros, puis la longueur du message en bits sur 64 bits.
-    fn finir(mut self) -> [u8; 16] {
-        let bits = self.longueur.wrapping_mul(8);
-        self.ajouter(&[0x80]);
-        while self.dans_bloc != 56 {
-            self.ajouter(&[0]);
-        }
-        self.ajouter(&bits.to_le_bytes());
-        let mut sortie = [0u8; 16];
-        for (i, mot) in self.etat.iter().enumerate() {
-            sortie[4 * i..4 * i + 4].copy_from_slice(&mot.to_le_bytes());
-        }
-        sortie
-    }
+    Ok(crate::socle::hachage::hexa(&calcul.finalize()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Les vecteurs de la RFC 1321 (annexe A.5), et un message qui traverse plusieurs blocs en morceaux inégaux.
+    /// Les vecteurs de la RFC 1321 (annexe A.5), lus dans un fichier comme une empreinte publiée.
     #[test]
     fn md5_de_la_rfc() {
-        let md5 = |m: &[u8]| {
-            let mut h = Md5::new();
-            h.ajouter(m);
-            hex(&h.finir())
-        };
+        let f = std::env::temp_dir().join(format!("vanguard-md5-rfc-{}", std::process::id()));
         for (message, attendue) in [
             ("", "d41d8cd98f00b204e9800998ecf8427e"),
-            ("a", "0cc175b9c0f1b6a831c399e269772661"),
             ("abc", "900150983cd24fb0d6963f7d28e17f72"),
             ("message digest", "f96b697d7cb7938d525a2f31aaf161d0"),
-            ("abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b"),
-            (
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-                "d174ab98d277d9f5a5611c2c9f419d9f",
-            ),
             (
                 "12345678901234567890123456789012345678901234567890123456789012345678901234567890",
                 "57edf4a22be3c955ac49da2e2107b67a",
             ),
         ] {
-            assert_eq!(md5(message.as_bytes()), attendue, "{message}");
+            std::fs::write(&f, message).unwrap();
+            assert_eq!(empreinte_lue(&f, Algo::Md5).unwrap(), attendue, "{message}");
         }
-        let long = "12345678901234567890".repeat(4).repeat(3);
-        let mut h = Md5::new();
-        for morceau in long.as_bytes().chunks(7) {
-            h.ajouter(morceau);
-        }
-        assert_eq!(h.finir(), {
-            let mut d = Md5::new();
-            d.ajouter(long.as_bytes());
-            d.finir()
-        });
-        // La table recopiée est bien celle des sinus.
-        for (i, k) in MD5_K.iter().enumerate() {
-            #[allow(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                clippy::cast_precision_loss
-            )]
-            let calcule = ((i as f64 + 1.0).sin().abs() * 4_294_967_296.0) as u32;
-            assert_eq!(*k, calcule, "{i}");
-        }
+        let _ = std::fs::remove_file(&f);
     }
 
     #[test]
     fn empreintes_d_un_fichier() {
+        use sha2::Digest;
         let f = std::env::temp_dir().join(format!("vanguard-empreinte-{}", std::process::id()));
         // Plus grand que le tampon de lecture : le calcul traverse plusieurs morceaux.
         let contenu: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
         std::fs::write(&f, &contenu).unwrap();
-        let mut h = Md5::new();
-        h.ajouter(&contenu);
-        let md5 = hex(&h.finir());
-        assert_eq!(empreinte_lue(&f, Algo::Md5).unwrap(), md5);
+        assert_eq!(
+            empreinte_lue(&f, Algo::Md5).unwrap(),
+            crate::socle::hachage::hexa(&md5::Md5::digest(&contenu))
+        );
         assert_eq!(
             empreinte_lue(&f, Algo::Sha1).unwrap(),
-            sha1_smol::Sha1::from(&contenu).digest().to_string()
+            crate::socle::hachage::sha1_hexa(&contenu)
         );
         std::fs::write(&f, "abc").unwrap();
         assert_eq!(

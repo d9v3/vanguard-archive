@@ -86,7 +86,15 @@ pub fn afficher_tout() {
     {
         let camera = linux::camera();
         let micro = linux::micro();
-        afficher(tr!("CAMÉRA, EN CE MOMENT", "CAMERA, RIGHT NOW"), &camera);
+        if let Some(c) = &camera {
+            afficher(tr!("CAMÉRA, EN CE MOMENT", "CAMERA, RIGHT NOW"), c);
+        } else {
+            section(tr!("CAMÉRA, EN CE MOMENT", "CAMERA, RIGHT NOW"));
+            trp!(
+                "  {GRIS}Impossible de lire les processus (/proc) : rien n'est conclu.{RESET}",
+                "  {GRIS}Could not read the processes (/proc): nothing is concluded.{RESET}"
+            );
+        }
         if let Some(m) = &micro {
             afficher(tr!("MICRO, EN CE MOMENT", "MICROPHONE, RIGHT NOW"), m);
         } else {
@@ -106,7 +114,16 @@ pub fn afficher_tout() {
         ) {
             println!("  {GRIS}{l}{RESET}");
         }
-        conclure(camera.iter().chain(micro.iter().flatten()));
+        // Rien vu, alors qu'une des deux lectures a manqué : non vérifié, jamais « aucun programme ».
+        if camera.iter().chain(&micro).all(Vec::is_empty) && (camera.is_none() || micro.is_none()) {
+            println!();
+            trp!(
+                "  {GRIS}Rien vu, mais tout n'a pas pu être lu : non vérifié. Rien n'a été changé.{RESET}",
+                "  {GRIS}Nothing seen, but not everything could be read: not verified. Nothing was changed.{RESET}"
+            );
+        } else {
+            conclure(camera.iter().flatten().chain(micro.iter().flatten()));
+        }
     }
     #[cfg(target_os = "macos")]
     {
@@ -284,33 +301,33 @@ pub(crate) mod windows {
 mod linux {
     use super::Usage;
 
-    /// Les programmes de ce compte qui tiennent un /dev/video* ouvert.
-    pub(super) fn camera() -> Vec<Usage> {
+    /// Les programmes de ce compte qui tiennent un /dev/video* ouvert ; `None` : /proc illisible (la liste vide
+    /// d'avant passait pour « personne »).
+    pub(super) fn camera() -> Option<Vec<Usage>> {
         let mut noms: Vec<String> = Vec::new();
-        for p in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-            let Some(pid) = p.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
-                continue;
-            };
-            let tient = std::fs::read_dir(p.path().join("fd"))
+        for pid in crate::socle::processus::pids()? {
+            let tient = std::fs::read_dir(format!("/proc/{pid}/fd"))
                 .into_iter()
                 .flatten()
                 .flatten()
                 .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|l| l.to_string_lossy().starts_with("/dev/video")));
             if tient {
-                let nom = std::fs::read_to_string(p.path().join("comm")).unwrap_or_default();
+                let nom = crate::socle::processus::nom_court(pid).unwrap_or_default();
                 let nom = format!("{} ({pid})", nom.trim());
                 if !noms.contains(&nom) {
                     noms.push(nom);
                 }
             }
         }
-        noms.into_iter()
-            .map(|programme| Usage {
-                programme,
-                dernier: None,
-                en_cours: true,
-            })
-            .collect()
+        Some(
+            noms.into_iter()
+                .map(|programme| Usage {
+                    programme,
+                    dernier: None,
+                    en_cours: true,
+                })
+                .collect(),
+        )
     }
 
     /// Les flux d'enregistrement en cours (pactl, que PipeWire comprend aussi) ; `None` : illisible.

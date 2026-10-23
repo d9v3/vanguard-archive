@@ -193,7 +193,7 @@ pub fn habitudes_ici() -> Option<Habitudes> {
 const GARDES: usize = 50;
 
 fn fichier() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("connexion.json")
+    crate::socle::dossier_local().join("connexion.json")
 }
 
 /// Tests précédents, du plus ancien au plus récent.
@@ -210,7 +210,7 @@ fn enregistrer(r: Resultat) {
     let surplus = tous.len().saturating_sub(GARDES);
     tous.drain(..surplus);
     if let Ok(texte) = serde_json::to_string(&tous) {
-        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
         let _ = std::fs::write(fichier(), texte);
     }
 }

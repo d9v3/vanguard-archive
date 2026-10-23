@@ -8,7 +8,7 @@ const SERVICE: &str = "https://api.pwnedpasswords.com/range/";
 
 /// Empreinte SHA-1 en hexadécimal majuscule, coupée en (5 premiers caractères envoyés, reste gardé ici).
 fn empreinte(mot_de_passe: &str) -> (String, String) {
-    let hex = sha1_smol::Sha1::from(mot_de_passe).digest().to_string().to_uppercase();
+    let hex = crate::socle::hachage::sha1_hexa(mot_de_passe.as_bytes()).to_uppercase();
     let (debut, fin) = hex.split_at(5);
     (debut.to_string(), fin.to_string())
 }

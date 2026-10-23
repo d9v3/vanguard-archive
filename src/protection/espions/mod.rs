@@ -232,7 +232,7 @@ fn navigateur(c: &ConnexionVue) -> bool {
 fn connexions_espions(r: &mut Releve, ind: &Indicateurs, connexions: &[ConnexionVue]) {
     for c in connexions
         .iter()
-        .filter(|c| crate::protection::sortantes::sur_internet(c.distante))
+        .filter(|c| crate::socle::adresses::sur_internet(c.distante))
     {
         let Some((entree, genre)) = ind.ip(c.distante) else {
             continue;
@@ -305,24 +305,33 @@ fn memoire_espions(r: &mut Releve, ind: &Indicateurs, noms: &[String]) {
 /// les lecteurs du clavier ; un module du noyau enregistreur ; le groupe « input » et X11.
 #[cfg(target_os = "linux")]
 fn relever_linux(r: &mut Releve, ind: Option<&Indicateurs>) {
-    for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-        let Some(pid) = e.file_name().to_str().and_then(|p| p.parse::<u32>().ok()) else {
-            continue;
-        };
-        let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) else {
-            continue;
-        };
-        let comm = affichable(comm.trim_end_matches('\n'));
-        let ou = trf!("en cours : {comm} (pid {pid})", "running: {comm} (pid {pid})");
-        r.programme(&comm, ou.clone(), true, ind);
-        if let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe"))
-            && let Some(nom) = exe.file_name().map(|n| n.to_string_lossy().into_owned())
-            && nom != comm
-        {
-            r.programme(&nom, ou, true, ind);
+    use crate::socle::processus;
+    // /proc illisible : non vérifié. La boucle d'avant, vide, comptait la vérification comme faite.
+    if let Some(pids) = processus::pids() {
+        for pid in pids {
+            let Some(comm) = processus::nom_court(pid) else {
+                continue;
+            };
+            let comm = affichable(&comm);
+            let ou = trf!("en cours : {comm} (pid {pid})", "running: {comm} (pid {pid})");
+            r.programme(&comm, ou.clone(), true, ind);
+            if let Some(exe) = processus::programme(pid)
+                && let Some(nom) = exe.file_name().map(|n| n.to_string_lossy().into_owned())
+                && nom != comm
+            {
+                r.programme(&nom, ou, true, ind);
+            }
         }
+        r.verifies += 1;
+        if processus::autres_comptes_caches() {
+            r.non_verifie(tr!(
+                "processus des autres comptes cachés (/proc monté avec hidepid)",
+                "other accounts' processes hidden (/proc mounted with hidepid)"
+            ));
+        }
+    } else {
+        r.non_verifie(tr!("processus illisibles (/proc)", "processes unreadable (/proc)"));
     }
-    r.verifies += 1;
     let montages = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
     let (lecteurs, illisibles) = clavier::lecteurs();
     r.verifies += 1;

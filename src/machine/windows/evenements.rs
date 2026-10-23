@@ -454,14 +454,13 @@ fn plus_frequents<'a>(valeurs: impl Iterator<Item = &'a str>, n: usize) -> Vec<S
 
 /// Tous les échecs par le réseau viennent-ils d'une seule adresse du réseau local, pour un seul compte ? C'est le
 /// portrait d'un appareil de la maison qui répète un mot de passe périmé, pas celui d'une attaque (plusieurs origines,
-/// plusieurs comptes, souvent depuis Internet). L'adresse et le compte, sinon rien.
+/// plusieurs comptes, souvent depuis Internet). L'adresse et le compte, sinon rien. Le réseau de la maison seul
+/// (portée `Locale`, comme `reseau::nmap`) : 100.64/10 (CGNAT) est celui d'autres abonnés, pas la maison.
 fn appareil_qui_insiste(echecs: &[Echec]) -> Option<(String, String)> {
+    use crate::socle::adresses::{Portee, portee};
     let mut reseau = echecs.iter().filter(|e| e.reseau);
     let premier = reseau.next()?;
-    let locale = match premier.adresse.parse::<std::net::IpAddr>().ok()? {
-        std::net::IpAddr::V4(a) => a.is_private() || a.is_link_local(),
-        std::net::IpAddr::V6(a) => (a.segments()[0] & 0xfe00) == 0xfc00 || (a.segments()[0] & 0xffc0) == 0xfe80,
-    };
+    let locale = portee(premier.adresse.parse::<std::net::IpAddr>().ok()?) == Portee::Locale;
     let meme = |e: &&Echec| e.adresse == premier.adresse && e.compte.eq_ignore_ascii_case(&premier.compte);
     (locale && !premier.compte.is_empty() && reseau.all(|e| meme(&e)))
         .then(|| (premier.adresse.clone(), premier.compte.clone()))
@@ -1101,6 +1100,12 @@ mod tests {
             "{}",
             c.message
         );
+        // Une seule adresse du réseau partagé du fournisseur (CGNAT, 100.64/10), un seul compte : un autre abonné,
+        // pas un appareil de la maison. Toujours élevé.
+        let cgnat = lignes(&rafale(25, "10", "100.72.3.4"));
+        assert_eq!(appareil_qui_insiste(&cgnat), None);
+        assert_eq!(juger_echecs(&cgnat).probleme, Some(Niveau::Eleve));
+        assert!(appareil_qui_insiste(&lignes(&rafale(25, "10", "192.168.1.20"))).is_some());
         // Deux adresses locales, ou une adresse d'Internet : toujours élevé.
         let mut deux = rafale(25, "3", "192.168.1.20");
         deux.extend(rafale(5, "3", "192.168.1.21"));

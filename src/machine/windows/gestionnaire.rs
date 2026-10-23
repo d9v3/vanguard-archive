@@ -215,7 +215,7 @@ pub(crate) fn inscrits() -> Option<Vec<Inscrit>> {
     use winreg::enums::HKEY_LOCAL_MACHINE;
     const SERVICE_WIN32: u32 = 0x30;
     let services = winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
-        .open_subkey(r"SYSTEM\CurrentControlSet\Services")
+        .open_subkey(crate::machine::windows::CLE_SERVICES)
         .ok()?;
     Some(
         services

@@ -222,7 +222,7 @@ pub fn garder(racine: &Path, m: &Manifeste, constats: &[ConstatPlugin]) -> Resul
     let d = racine.join(super::CONSTATS);
     super::creer_prive(&d).map_err(|e| e.to_string())?;
     let texte = serde_json::to_string_pretty(&g).map_err(|e| e.to_string())?;
-    crate::reseau::ecrire_atomique(&d.join(format!("{}.json", m.nom)), texte).map_err(|e| {
+    crate::socle::ecrire_atomique(&d.join(format!("{}.json", m.nom)), texte).map_err(|e| {
         trf!(
             "Constats impossibles à garder : {e}",
             "Could not keep the findings: {e}"
@@ -233,7 +233,7 @@ pub fn garder(racine: &Path, m: &Manifeste, constats: &[ConstatPlugin]) -> Resul
 /// Les constats gardés de chaque plugin (50 plugins au plus), pour le rapport. Relus et refiltrés : le fichier a pu
 /// changer depuis.
 pub fn gardes() -> Vec<Gardes> {
-    let d = crate::reseau::dossier_local().join("plugins").join(super::CONSTATS);
+    let d = crate::socle::dossier_local().join("plugins").join(super::CONSTATS);
     gardes_de(&d)
 }
 

@@ -388,7 +388,7 @@ struct EtatAudit {
 }
 
 fn fichier_audit() -> std::path::PathBuf {
-    reseau::dossier_local().join("surveillance-audit.json")
+    crate::socle::dossier_local().join("surveillance-audit.json")
 }
 
 /// La clé d'une redirection, stable d'une passe à l'autre.
@@ -526,7 +526,7 @@ async fn veiller_audit(r: &reseau::Rapport, machine: Vec<Constat>) {
         }
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
-        let _ = std::fs::create_dir_all(reseau::dossier_local());
+        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
         let _ = std::fs::write(fichier_audit(), texte);
     }
 }
@@ -541,7 +541,7 @@ struct Passerelle {
 }
 
 fn fichier_passerelle() -> std::path::PathBuf {
-    reseau::dossier_local().join("surveillance-passerelle.json")
+    crate::socle::dossier_local().join("surveillance-passerelle.json")
 }
 
 fn passerelle_de(r: &reseau::Rapport) -> Option<Passerelle> {
@@ -590,7 +590,7 @@ fn veiller_passerelle(r: &reseau::Rapport) {
         );
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
-        let _ = std::fs::create_dir_all(reseau::dossier_local());
+        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
         let _ = std::fs::write(fichier_passerelle(), texte);
     }
 }
@@ -759,7 +759,7 @@ async fn passe() {
 pub(crate) const VOULUE: &str = "surveillance-voulue";
 
 fn fichier_voulue() -> std::path::PathBuf {
-    reseau::dossier_local().join(VOULUE)
+    crate::socle::dossier_local().join(VOULUE)
 }
 
 fn noter_voulue(oui: bool) {
@@ -1386,7 +1386,7 @@ pub(crate) fn encore_la(fichiers: &[PathBuf]) -> Vec<String> {
 /// Le dossier des unités systemd de l'utilisateur où Vanguard pose la surveillance et l'entretien.
 #[cfg(target_os = "linux")]
 pub(crate) fn dossier_unites_maison() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user")
+    crate::socle::maison().join(".config/systemd/user")
 }
 
 /// Le dossier où le gestionnaire systemd de l'utilisateur tient les fichiers d'horodatage des minuteries
@@ -1403,7 +1403,7 @@ fn dossier_horodatages(donnees: Option<std::ffi::OsString>, maison: &Path) -> Op
 
 #[cfg(target_os = "linux")]
 pub(crate) fn dossier_horodatages_maison() -> Option<PathBuf> {
-    dossier_horodatages(std::env::var_os("XDG_DATA_HOME"), &crate::nettoyer::maison())
+    dossier_horodatages(std::env::var_os("XDG_DATA_HOME"), &crate::socle::maison())
 }
 
 /// Retire le fichier d'horodatage de la minuterie `nom` (« stamp-nom.timer ») : systemd le pose au démarrage d'une
@@ -1537,8 +1537,7 @@ fn installer(exe: &str, r: Reglages) -> bool {
 
 #[cfg(target_os = "macos")]
 fn plist_agent_nomme(nom: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join(format!("Library/LaunchAgents/{nom}.plist"))
+    crate::socle::maison().join(format!("Library/LaunchAgents/{nom}.plist"))
 }
 
 #[cfg(target_os = "macos")]
@@ -1906,7 +1905,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn unites_relues_d_aujourdhui_ou_d_avant() {
-        let d = crate::reseau::dossier_local().join("unites-relues");
+        let d = crate::socle::dossier_local().join("unites-relues");
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let exe = "/home/alice/.local/share/vanguard/bin/vanguard";
@@ -2114,7 +2113,7 @@ mod tests {
     #[test]
     fn retrait_de_fichiers_constate() {
         use std::os::unix::fs::PermissionsExt;
-        let d = crate::reseau::dossier_local().join("retrait-constate");
+        let d = crate::socle::dossier_local().join("retrait-constate");
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let (parti, bloque, absent) = (d.join("a.timer"), d.join("b.service"), d.join("c.timer"));
@@ -2195,7 +2194,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn horodatage_de_la_minuterie_retire() {
-        let maison = crate::reseau::dossier_local().join("horodatage");
+        let maison = crate::socle::dossier_local().join("horodatage");
         let _ = std::fs::remove_dir_all(&maison);
         let dossier = dossier_horodatages(None, &maison).unwrap();
         assert_eq!(dossier, maison.join(".local/share/systemd/timers"));

@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 DOSSIER=${1:?"usage : outils/tldr-cle.sh <dossier>"}
 ADRESSE=https://github.com/tldr-pages/tldr/releases/latest/download/
-# La copie que le guide télécharge sur cet ordinateur (reseau::dossier_local).
+# La copie que le guide télécharge sur cet ordinateur (socle::dossier_local).
 LOCAL="${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/tldr"
 mkdir -p "$DOSSIER"
 TEMP=$(mktemp -d)

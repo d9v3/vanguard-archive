@@ -467,11 +467,10 @@ fn processus_et_parents(racine: u32) -> Vec<(u32, u32)> {
     #[cfg(target_os = "linux")]
     {
         let _ = racine;
-        std::fs::read_dir("/proc")
+        crate::socle::processus::pids()
+            .unwrap_or_default()
             .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|d| parent_linux(&std::fs::read_to_string(d.path().join("stat")).ok()?))
+            .filter_map(|pid| parent_linux(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?))
             .collect()
     }
     #[cfg(windows)]
@@ -1246,7 +1245,7 @@ mod tests_lancer_vers {
     /// Nommé par processus : verifier.sh lance deux suites Linux en même temps (avec et sans Internet) sur le même
     /// dossier jetable, et le `sh` de l'une écrivait « apres » dans le fichier que l'autre relisait.
     fn fichier_jetable(nom: &str) -> (std::path::PathBuf, std::fs::File) {
-        let dossier = crate::reseau::dossier_local();
+        let dossier = crate::socle::dossier_local();
         std::fs::create_dir_all(&dossier).unwrap();
         let chemin = dossier.join(format!("{}-{nom}", std::process::id()));
         (chemin.clone(), std::fs::File::create(&chemin).unwrap())

@@ -524,6 +524,65 @@ pub fn demander(question: &str) -> String {
 }
 
 #[cfg(test)]
+/// Les textes des `trp!` d'un fichier source (code seul, sans ses tests), dans les deux langues, qui dépassent
+/// `LARGEUR` colonnes : couleurs retirées, « {…} » compté pour une colonne. Affichés tels quels, le terminal les
+/// couperait au milieu d'un mot. Partagé par les tests des écrans (gaming, logiciels, nettoyer, optimiser, Wi-Fi
+/// public…), d'où sa place ici plutôt que dans Gaming.
+pub(crate) fn textes_trop_larges(source: &str) -> Vec<String> {
+    const COULEURS: [&str; 7] = ["RESET", "GRAS", "GRIS", "VERT", "ACCENT", "TOUCHE", "DISCRET"];
+    let fin = source
+        .find("mod tests {")
+        .and_then(|i| source[..i].rfind("#[cfg(test)]"));
+    let code = &source[..fin.unwrap_or(source.len())];
+    let mut trop_larges = Vec::new();
+    // Le nom de la macro en deux morceaux : écrit d'un bloc, il passerait pour un texte à traduire auprès des
+    // outils qui relèvent les textes (outils-dp40/textes.py).
+    for appel in code.split(concat!("trp", "!(")).skip(1) {
+        let mut car = appel.chars().peekable();
+        // Les deux premiers littéraux de l'appel : le texte français, puis l'anglais.
+        for _ in 0..2 {
+            if !car.by_ref().any(|c| c == '"') {
+                break;
+            }
+            let mut texte = String::new();
+            while let Some(c) = car.next() {
+                match (c, car.peek().copied()) {
+                    ('"', _) => break,
+                    ('\\', Some('n')) => {
+                        car.next();
+                        texte.push('\n');
+                    }
+                    // Ligne continuée (« \ » en fin de ligne) : les espaces qui suivent ne s'affichent pas.
+                    ('\\', Some('\n')) => while car.next_if(|c| c.is_whitespace()).is_some() {},
+                    ('\\', Some(echappe)) => {
+                        car.next();
+                        texte.push(echappe);
+                    }
+                    ('{', Some('{')) => {
+                        car.next();
+                        texte.push('{');
+                    }
+                    ('{', _) => {
+                        let nom: String = car.by_ref().take_while(|&c| c != '}').collect();
+                        if !COULEURS.contains(&nom.as_str()) {
+                            texte.push('X');
+                        }
+                    }
+                    (c, _) => texte.push(c),
+                }
+            }
+            trop_larges.extend(
+                texte
+                    .lines()
+                    .filter(|l| largeur_affichee(l) > LARGEUR)
+                    .map(str::to_string),
+            );
+        }
+    }
+    trop_larges
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

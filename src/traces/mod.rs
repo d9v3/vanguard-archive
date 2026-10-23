@@ -1294,7 +1294,7 @@ fn reserve_au_compte(d: &Path) -> bool {
 fn place_libre(d: &Path) -> Option<u64> {
     #[cfg(unix)]
     {
-        crate::nettoyer::volume(d).map(|(libre, _)| libre)
+        crate::socle::volume(d).map(|(libre, _)| libre)
     }
     #[cfg(windows)]
     {
@@ -1533,7 +1533,7 @@ pub fn collecter(argument: Option<&Path>) -> Option<PathBuf> {
     );
     let cle_du_programme = crate::reseau::cle_du_programme();
     let cle = cle_du_programme.as_deref().filter(|c| crate::reseau::modifiable(c));
-    let local = crate::reseau::dossier_local();
+    let local = crate::socle::dossier_local();
     let (parent, lieu) = choisir_parent(argument, cle, &local);
     let dossier = match creer_dossier(&parent) {
         // Un chemin complet : le parcours des fichiers récents doit reconnaître ce dossier pour ne pas s'y décrire.
@@ -1604,7 +1604,7 @@ pub fn collecter(argument: Option<&Path>) -> Option<PathBuf> {
     let besoin_journaux = os::place_des_journaux();
     let besoin = besoin_journaux + PLACE_HORS_JOURNAUX;
     let libre = place_libre(&dossier);
-    let place = |o: u64| crate::nettoyer::taille_lisible(o);
+    let place = |o: u64| crate::socle::taille_lisible(o);
     match libre {
         Some(l) => trp!(
             "  {GRIS}Place nécessaire : {} au plus ; libre : {}.{RESET}",
@@ -1844,7 +1844,7 @@ mod tests {
             sha256_de(&b""[..]).unwrap(),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
-        let dossier = crate::reseau::dossier_local().join("empreintes");
+        let dossier = crate::socle::dossier_local().join("empreintes");
         std::fs::create_dir_all(&dossier).unwrap();
         let f = dossier.join("abc");
         std::fs::write(&f, b"abc").unwrap();
@@ -1877,7 +1877,7 @@ mod tests {
 
     #[test]
     fn dossier_neuf_reserve_au_compte() {
-        let parent = crate::reseau::dossier_local().join("essai-traces");
+        let parent = crate::socle::dossier_local().join("essai-traces");
         let a = creer_dossier(&parent).unwrap();
         let b = creer_dossier(&parent).unwrap();
         assert_ne!(a, b, "un dossier existant n'est jamais réutilisé");
@@ -2002,7 +2002,7 @@ mod tests {
         );
         assert!(f.texte.contains("== $ vanguard-autre-absente ==\n") && f.texte.contains("absente"));
         // Un fichier absent n'écrit rien ; un fichier lu est recopié sous son chemin.
-        let dossier = crate::reseau::dossier_local().join("feuille");
+        let dossier = crate::socle::dossier_local().join("feuille");
         std::fs::create_dir_all(&dossier).unwrap();
         f.fichier(&dossier.join("absent"), true);
         assert_eq!(f.lues, 0);
@@ -2043,7 +2043,7 @@ mod tests {
     /// Chaque fichier listé ou recopié garde sa date pour la chronologie, sans être relu.
     #[test]
     fn feuille_garde_les_dates() {
-        let dossier = crate::reseau::dossier_local().join("feuille-dates");
+        let dossier = crate::socle::dossier_local().join("feuille-dates");
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(dossier.join("sous")).unwrap();
         std::fs::write(dossier.join("a.service"), "[Unit]\n").unwrap();
@@ -2075,7 +2075,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn lien_date_par_lui_meme() {
-        let d = crate::reseau::dossier_local().join("essai-lien-date");
+        let d = crate::socle::dossier_local().join("essai-lien-date");
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let cible = d.join("service-du-paquet.service");

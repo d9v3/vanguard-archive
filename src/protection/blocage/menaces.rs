@@ -493,7 +493,10 @@ fn agents(t: &mut Trouvees) {
         ),
     }
     for (outil, fichier) in agents_ia::fichiers_de_reglages() {
-        let Some(json) = std::fs::read(&fichier).ok().and_then(|o| agents_ia::lire_json(&o)) else {
+        let Some(json) = std::fs::read(&fichier)
+            .ok()
+            .and_then(|o| crate::socle::jsonc::lire_json(&o))
+        else {
             continue;
         };
         if agents_ia::tout_permis(&json) {

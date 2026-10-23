@@ -38,7 +38,7 @@ struct Registre {
 }
 
 pub fn dossier() -> PathBuf {
-    crate::reseau::dossier_local().join("quarantaine")
+    crate::socle::dossier_local().join("quarantaine")
 }
 
 fn registre_dans(dossier: &Path) -> PathBuf {
@@ -54,7 +54,7 @@ fn charger(dossier: &Path) -> Registre {
 
 fn enregistrer(dossier: &Path, r: &Registre) -> std::io::Result<()> {
     let texte = serde_json::to_string_pretty(r).map_err(std::io::Error::other)?;
-    crate::reseau::ecrire_atomique(&registre_dans(dossier), texte)
+    crate::socle::ecrire_atomique(&registre_dans(dossier), texte)
 }
 
 /// Qui demande la quarantaine, pour la noter dans « Ce que Vanguard a changé » (`changements`), avec de quoi

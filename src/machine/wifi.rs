@@ -128,6 +128,70 @@ pub(crate) fn ouverts_automatiques(noms: &[String], commandes: &[String]) -> Opt
     )
 }
 
+/// Les réseaux ouverts qui se reconnectent seuls, d'après les profils enregistrés lus nativement : le même jugement
+/// pour le bilan et l'audit du réseau, qui le faisaient chacun à sa façon. Une commande qui reprend une valeur sans
+/// forme sûre (un nom choisi par n'importe qui) est montrée, jamais lancée d'office.
+pub(crate) fn ouverts_des_profils(profils: &[profils::ProfilEnregistre]) -> Option<Constat> {
+    let ouverts: Vec<&profils::ProfilEnregistre> = profils.iter().filter(|p| p.ouvert && p.automatique).collect();
+    let noms: Vec<String> = ouverts.iter().map(|p| p.nom.clone()).collect();
+    let commandes: Vec<String> = ouverts.iter().map(|p| p.commande.clone()).collect();
+    let mut c = ouverts_automatiques(&noms, &commandes)?;
+    if let Some(k) = &mut c.correctif
+        && !ouverts.iter().all(|p| p.commande_sure)
+    {
+        k.automatique = false;
+    }
+    Some(c)
+}
+
+/// Les réseaux visibles d'une lecture native (nl80211, wlanapi), pour le bilan : leur protection lue dans les
+/// balises, nommée comme les systèmes la nomment (`Protection::libelle`), sauf pour le réseau connecté quand le
+/// système dit la protection négociée. Le réseau connecté est la borne que le système dit active, ou celle de la
+/// connexion. Vide : la lecture n'a vu aucune borne (Windows 11 sans
+/// l'autorisation de localisation), et l'appelant demande alors au système.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn visibles_de(lecture: &Lecture) -> Vec<Visible> {
+    // Sans BSSID (le balayage ne montre plus la borne associée), le nom seul ne dit pas laquelle des bornes de ce nom
+    // est la vraie. Si leurs protections diffèrent, l'une peut être un jumeau ouvert : la marquer « connectée »
+    // dirait « ton Wi-Fi est ouvert », ou cacherait le jumeau. Rien n'est alors marqué, et l'appelant demande au
+    // système (nmcli), qui sait laquelle est active. Même protection partout (un réseau maillé) : peu importe.
+    let ambigu = lecture.connexion.as_ref().is_some_and(|c| {
+        c.bssid.is_empty() && {
+            let mut protections = lecture
+                .balises
+                .iter()
+                .filter(|b| b.borne.ssid == c.ssid)
+                .map(|b| b.protection.libelle());
+            protections.next().is_some_and(|p| protections.any(|x| x != p))
+        }
+    });
+    lecture
+        .balises
+        .iter()
+        .filter(|b| !b.borne.ssid.is_empty())
+        .map(|b| {
+            let connectee = lecture.connexion.as_ref().is_some_and(|c| {
+                c.ssid == b.borne.ssid
+                    && if c.bssid.is_empty() {
+                        !ambigu
+                    } else {
+                        c.bssid.eq_ignore_ascii_case(&b.borne.bssid)
+                    }
+            });
+            let actif = b.borne.actif || connectee;
+            let securite = match &lecture.connexion {
+                Some(c) if actif && c.ssid == b.borne.ssid && !c.securite.is_empty() => c.securite.clone(),
+                _ => b.protection.libelle().to_string(),
+            };
+            Visible {
+                ssid: b.borne.ssid.clone(),
+                securite,
+                actif,
+            }
+        })
+        .collect()
+}
+
 /// Un réseau qui porte le nom de celui où l'on est connecté, ouvert ou à la protection cassable, alors que le vrai
 /// est en WPA2 ou mieux : la signature d'un jumeau maléfique.
 pub(super) fn jumeau(visibles: &[Visible]) -> Option<Constat> {
@@ -391,6 +455,9 @@ pub(crate) struct Connexion {
     pub ssid: String,
     /// L'émetteur de la connexion ; vide si le système ne le dit pas.
     pub bssid: String,
+    /// La protection négociée, nommée comme `Protection::libelle` ; vide si le système ne la dit pas (nl80211). Une
+    /// borne WPA2/WPA3 annonce les deux, mais une carte sans WPA3 s'y connecte en WPA2 : c'est le lien qui compte.
+    pub securite: String,
 }
 
 /// Ce qu'une lecture native a vu : les bornes du dernier balayage, et la connexion en cours.
@@ -623,6 +690,107 @@ pub(crate) fn bornes_system_profiler(sortie: &str) -> Vec<Borne> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une lecture native donne au bilan les mêmes réseaux que nmcli : la protection lue dans les balises, et le
+    /// réseau connecté reconnu par la borne active ou par la connexion.
+    #[test]
+    fn visibles_d_une_lecture_native() {
+        let balise = |ssid: &str, bssid: &str, actif, protection| Balise {
+            borne: Borne {
+                ssid: ssid.into(),
+                bssid: bssid.into(),
+                bande: Bande::G5,
+                canal: 36,
+                signal: Some(70),
+                actif,
+            },
+            protection,
+            wps: None,
+        };
+        let wpa2 = elements::Protection {
+            chiffree: true,
+            rsn: true,
+            aes: true,
+            psk: true,
+            ..elements::Protection::default()
+        };
+        let mut l = Lecture {
+            balises: vec![
+                balise("Salon", "00:11:22:aa:bb:01", false, wpa2),
+                balise("Salon", "00:11:22:aa:bb:02", false, elements::Protection::default()),
+                balise("", "00:11:22:aa:bb:03", false, wpa2),
+            ],
+            connexion: Some(Connexion {
+                ssid: "Salon".into(),
+                bssid: "00:11:22:AA:BB:01".into(),
+                securite: String::new(),
+            }),
+            note: None,
+        };
+        let v = visibles_de(&l);
+        assert_eq!(v.len(), 2, "le réseau caché est écarté");
+        assert!(v[0].actif && !v[1].actif);
+        assert_eq!(force(&v[0].securite), 2);
+        assert_eq!(force(&v[1].securite), 0);
+        // Le jumeau ouvert du réseau connecté se voit comme avec nmcli.
+        assert!(jumeau(&v).is_some());
+        // La protection négociée l'emporte sur celle de la balise : une borne WPA2/WPA3 où la carte s'est connectée
+        // en WPA2.
+        let mut mixte = wpa2;
+        mixte.sae = true;
+        let negociee = |securite: &str| Lecture {
+            balises: vec![balise("Salon", "00:11:22:aa:bb:01", false, mixte)],
+            connexion: Some(Connexion {
+                ssid: "Salon".into(),
+                bssid: "00:11:22:aa:bb:01".into(),
+                securite: securite.into(),
+            }),
+            note: None,
+        };
+        assert_eq!(force(&visibles_de(&negociee("")).swap_remove(0).securite), 3);
+        let v = visibles_de(&negociee("WPA2"));
+        assert!(v[0].actif);
+        assert_eq!(force(&v[0].securite), 2);
+        assert_eq!(securite("Salon", &v[0].securite, &[]).probleme, Some(Niveau::Info));
+        // Sans BSSID, deux bornes du même nom aux protections différentes : on ne sait pas laquelle est la vraie,
+        // aucune n'est connectée (l'appelant demande au système), et le jumeau ouvert ne passe pas pour elle.
+        l.connexion = Some(Connexion {
+            ssid: "Salon".into(),
+            bssid: String::new(),
+            securite: String::new(),
+        });
+        assert!(visibles_de(&l).iter().all(|v| !v.actif));
+        // Une seule borne de ce nom, ou deux à la même protection (réseau maillé) : celle de la connexion.
+        let ouverte = l.balises.remove(1);
+        let v = visibles_de(&l);
+        assert!(v[0].actif && v[0].ssid == "Salon");
+        l.balises.push(balise("Salon", "00:11:22:aa:bb:04", false, wpa2));
+        assert!(visibles_de(&l).iter().filter(|v| v.ssid == "Salon").all(|v| v.actif));
+        l.balises.push(ouverte);
+        assert!(visibles_de(&l).iter().all(|v| !v.actif));
+        // Sans connexion ni borne active : rien de connecté, l'appelant demande au système.
+        l.connexion = None;
+        assert!(visibles_de(&l).iter().all(|v| !v.actif));
+    }
+
+    #[test]
+    fn ouverts_des_profils_lus() {
+        let profil = |nom: &str, ouvert, automatique, sure| profils::ProfilEnregistre {
+            nom: nom.into(),
+            automatique,
+            ouvert,
+            commande: format!("couper {nom}"),
+            commande_sure: sure,
+        };
+        assert!(
+            ouverts_des_profils(&[profil("Salon", false, true, true), profil("Café", true, false, true)]).is_none()
+        );
+        let c = ouverts_des_profils(&[profil("Café", true, true, true)]).unwrap();
+        assert!(c.correctif.as_ref().is_some_and(|k| k.automatique));
+        // Une commande sans forme sûre : montrée, pas lancée d'office.
+        let c = ouverts_des_profils(&[profil("Café", true, true, true), profil("Gare", true, true, false)]).unwrap();
+        assert!(c.correctif.as_ref().is_some_and(|k| !k.automatique));
+    }
 
     #[test]
     fn ouverts_qui_se_reconnectent() {

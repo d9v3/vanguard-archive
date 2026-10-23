@@ -142,12 +142,12 @@ fn ecrire_dans(base: &Path, cles: &BTreeMap<String, CleConnue>) -> std::io::Resu
         cles: cles.clone(),
     };
     let texte = serde_json::to_string_pretty(&f).map_err(std::io::Error::other)?;
-    crate::reseau::ecrire_atomique(&chemin(base), texte)
+    crate::socle::ecrire_atomique(&chemin(base), texte)
 }
 
 /// Les jetons que cet ordinateur reconnaît.
 pub(crate) fn jetons() -> BTreeSet<String> {
-    lire_verrouille(&crate::reseau::dossier_local()).into_keys().collect()
+    lire_verrouille(&crate::socle::dossier_local()).into_keys().collect()
 }
 
 /// Un volume au jeton connu de cet ordinateur ?
@@ -186,7 +186,7 @@ fn noter_dans(base: &Path, racine: &Path) -> bool {
 
 /// La clé que Vanguard vient d'écrire ou que la personne vient de brancher et de lancer : son état est la référence.
 pub(crate) fn noter(racine: &Path) -> bool {
-    noter_dans(&crate::reseau::dossier_local(), racine)
+    noter_dans(&crate::socle::dossier_local(), racine)
 }
 
 /// Une clé déjà connue garde sa référence ; une nouvelle entre avec son état du moment (la confiance d'aujourd'hui :
@@ -206,7 +206,7 @@ pub fn reconnaitre_la_cle_du_programme() {
         return;
     }
     if let Some(cle) = crate::reseau::cle_du_programme() {
-        reconnaitre_dans(&crate::reseau::dossier_local(), &cle);
+        reconnaitre_dans(&crate::socle::dossier_local(), &cle);
     }
 }
 
@@ -227,7 +227,7 @@ fn verdict_dans(base: &Path, racine: &Path, modifiable: bool) -> Result<(), Refu
 }
 
 pub(crate) fn verdict(racine: &Path, modifiable: bool) -> Result<(), Refus> {
-    verdict_dans(&crate::reseau::dossier_local(), racine, modifiable)
+    verdict_dans(&crate::socle::dossier_local(), racine, modifiable)
 }
 
 /// « vanguard manifeste --accepter » : l'état actuel du carnet de la clé branchée devient la référence.
@@ -376,7 +376,7 @@ mod tests {
     /// démesuré ou (sous Unix) une file nommée ne bloquent ni ne remplissent rien.
     #[test]
     fn jeton_lu_seulement_dans_un_petit_fichier() {
-        let racine = crate::reseau::dossier_local().join("essai-jeton-borne");
+        let racine = crate::socle::dossier_local().join("essai-jeton-borne");
         let _ = std::fs::remove_dir_all(&racine);
         std::fs::create_dir_all(&racine).unwrap();
         std::fs::write(racine.join(JETON), format!("{JETON_A}\n")).unwrap();

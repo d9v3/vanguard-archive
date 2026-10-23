@@ -289,7 +289,7 @@ fn dossiers() -> Vec<(Dossier, PathBuf)> {
     }
     // Le Bureau non configuré est le dossier personnel lui-même : il contient Documents et Téléchargements, on ne
     // le parcourt pas deux fois.
-    let maison = crate::nettoyer::maison();
+    let maison = crate::socle::maison();
     d.retain(|(s, c)| *s != Dossier::Bureau || c != &maison);
     d
 }

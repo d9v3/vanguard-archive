@@ -79,8 +79,9 @@ fn dans_le_path(commande: &str) -> bool {
 /// (AUR, paquet de l'éditeur, Snap) compte aussi : son programme est là.
 #[cfg(target_os = "linux")]
 fn lire() -> Result<Etat, String> {
-    use crate::gaming::linux::{applications_flatpak, installer_flatpak, installes_parmi, noms_installes, present};
     use crate::machine::linux::Paquets;
+    use crate::machine::linux::natif::present;
+    use crate::machine::linux::paquets::{applications_flatpak, installer_flatpak, installes_parmi, noms_installes};
     let gestion = Paquets::detecter();
     let flatpak = present("flatpak");
     if gestion.is_none() && !flatpak {
@@ -202,7 +203,7 @@ fn lire_par_powershell() -> Result<Lu, String> {
 /// Noms des applications de /Applications et ~/Applications, sans « .app ».
 #[cfg(target_os = "macos")]
 fn applications_mac() -> Vec<String> {
-    let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let maison = crate::socle::maison();
     [std::path::PathBuf::from("/Applications"), maison.join("Applications")]
         .iter()
         .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
@@ -650,7 +651,7 @@ mod tests {
     /// Les messages de Logiciels tiennent dans `LARGEUR` colonnes, dans les deux langues.
     #[test]
     fn messages_dans_la_largeur() {
-        let larges = crate::gaming::tests::textes_trop_larges(include_str!("mod.rs"));
+        let larges = crate::ui::textes_trop_larges(include_str!("mod.rs"));
         assert_eq!(larges, Vec::<String>::new());
     }
 

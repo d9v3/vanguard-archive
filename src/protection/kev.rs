@@ -43,14 +43,14 @@ pub(crate) fn catalogue() -> Result<Vec<Exploitee>, String> {
 /// `catalogue`, ou, quand `coupure` dit pourquoi rien ne doit partir (réglage, travail sans Internet, tests), la
 /// copie gardée seule, sans rien demander.
 pub(crate) fn catalogue_selon(coupure: Option<&str>) -> Result<Vec<Exploitee>, String> {
-    use crate::protection::abuse_ch::{self, Echec};
+    use crate::protection::abuse_ch::Echec;
     let (octets, age) = match coupure {
         None => {
             let demande = crate::http::Demande {
                 taille_max: 64 << 20,
                 ..crate::http::Demande::get(ADRESSE, Duration::from_secs(60))
             };
-            abuse_ch::liste(demande, LIEU, FRAICHE, |_| true)
+            crate::socle::cache::liste(demande, LIEU, FRAICHE, |_| true)
                 .resultat(false)
                 .map_err(|e| match e {
                     Echec::Reponse(code) => trf!("la CISA a répondu {code}", "CISA answered {code}"),
@@ -59,7 +59,7 @@ pub(crate) fn catalogue_selon(coupure: Option<&str>) -> Result<Vec<Exploitee>, S
                 })?
         }
         Some(pourquoi) => {
-            let fichier = crate::reseau::dossier_local().join(LIEU.0).join(LIEU.1);
+            let fichier = crate::socle::dossier_local().join(LIEU.0).join(LIEU.1);
             let age = std::fs::metadata(&fichier)
                 .and_then(|m| m.modified())
                 .map(|t| t.elapsed().unwrap_or_default());

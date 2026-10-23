@@ -642,7 +642,7 @@ mod linux {
     }
 
     fn flatpak(b: &mut Bilan) {
-        match dossier_magasin_flatpak(std::env::var_os("XDG_DATA_HOME"), &crate::nettoyer::maison())
+        match dossier_magasin_flatpak(std::env::var_os("XDG_DATA_HOME"), &crate::socle::maison())
             .and_then(|d| lire_magasin_flatpak(&d))
             .or_else(|| sortie("flatpak", &["permissions"]).map(|t| lire_flatpak_portails(&t)))
         {
@@ -657,7 +657,7 @@ mod linux {
             ),
         }
         // Lues dans les dossiers de Flatpak ; sa commande en secours, quand d'autres installations sont réglées.
-        let Some(liste) = crate::gaming::linux::applications_flatpak() else {
+        let Some(liste) = crate::machine::linux::paquets::applications_flatpak() else {
             non_verifie(
                 b,
                 &PERMISSIONS,
@@ -715,11 +715,11 @@ mod linux {
     /// pour elle ; celles du système, puis celles du compte). La commande ne sert qu'en secours : installations
     /// réglées ailleurs, ou application dont le metadata manque.
     pub(super) fn permissions(id: &str) -> Option<String> {
-        if crate::gaming::linux::flatpak_par_defaut()
+        if crate::machine::linux::paquets::flatpak_par_defaut()
             && let Some(metadata) = natif::flatpak_metadata(id)
         {
             let donnees = std::env::var_os("XDG_DATA_HOME")
-                .map_or_else(|| crate::nettoyer::maison().join(".local/share"), PathBuf::from);
+                .map_or_else(|| crate::socle::maison().join(".local/share"), PathBuf::from);
             let surcharges: Vec<String> = [PathBuf::from("/var/lib/flatpak"), donnees.join("flatpak")]
                 .iter()
                 .flat_map(|i| [i.join("overrides/global"), i.join("overrides").join(id)])
@@ -875,7 +875,7 @@ mod macos {
     use crate::tr;
 
     pub(super) fn lire(b: &mut Bilan) {
-        let base = crate::nettoyer::maison().join("Library/Application Support/com.apple.TCC/TCC.db");
+        let base = crate::socle::maison().join("Library/Application Support/com.apple.TCC/TCC.db");
         match crate::protection::espions::tcc::lire_base_avec(&base, lire_tcc) {
             Some((acces, wal)) => {
                 b.ajouter(acces);
@@ -1189,7 +1189,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn permissions_comme_flatpak_info() {
-        let Some(apps) = crate::gaming::linux::applications_flatpak() else {
+        let Some(apps) = crate::machine::linux::paquets::applications_flatpak() else {
             return crate::essais::saute("flatpak absent");
         };
         for a in apps.iter().take(20) {

@@ -78,11 +78,8 @@ impl Systeme {
             Systeme::MacOs
         } else {
             *DISTRIBUTION.get_or_init(|| {
-                let os_release = std::fs::read_to_string("/etc/os-release")
-                    .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
-                    .unwrap_or_default();
                 // Une Omarchy qui se dit Arch se reconnaît à son outil.
-                match distribution(&os_release) {
+                match distribution(crate::socle::systeme::os_release()) {
                     Systeme::Arch if installe_ici("omarchy") => Systeme::Omarchy,
                     d => d,
                 }

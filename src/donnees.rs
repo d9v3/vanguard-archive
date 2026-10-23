@@ -34,7 +34,7 @@ pub(crate) fn dossier_par_defaut() -> PathBuf {
         if documents.is_dir() { documents } else { profil }
     }
     #[cfg(not(windows))]
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+    crate::socle::maison()
 }
 
 fn chemin_par_defaut() -> PathBuf {
@@ -51,7 +51,7 @@ fn chemin_saisi(texte: &str) -> Option<PathBuf> {
         return None;
     }
     Some(match t.strip_prefix("~/") {
-        Some(reste) => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(reste),
+        Some(reste) => crate::socle::maison().join(reste),
         None => PathBuf::from(t),
     })
 }
@@ -107,7 +107,7 @@ pub fn sauvegarder(fichier: Option<PathBuf>) {
         base,
     };
     let json = serde_json::to_string_pretty(&sauvegarde).unwrap_or_default();
-    match reseau::ecrire_atomique(&fichier, &json) {
+    match crate::socle::ecrire_atomique(&fichier, &json) {
         Ok(()) => trp!(
             "  {VERT}✔{RESET} Sauvegarde écrite : {}\n  {}.",
             "  {VERT}✔{RESET} Backup written: {}\n  {}.",

@@ -83,15 +83,11 @@ fn heure_locale(secondes: u64) -> String {
 /// VirusTotal. Ceux des autres comptes ne se lisent qu'en root.
 pub(super) fn processus(dossier: &Path) -> Partie {
     let mut manques = Vec::new();
-    let Ok(entrees) = std::fs::read_dir("/proc") else {
+    let Some(pids) = crate::socle::processus::pids() else {
         let mut p = Partie::new(Bi::new("Processus", "Processes"));
         p.manque(Bi::meme("/proc"), Raison::Erreur("illisible / unreadable".into()));
         return p;
     };
-    let pids: Vec<u32> = entrees
-        .flatten()
-        .filter_map(|e| e.file_name().to_str()?.parse().ok())
-        .collect();
     let comptes = comptes_de(&std::fs::read_to_string("/etc/passwd").unwrap_or_default());
     let demarrage = btime().unwrap_or(0);
     // SAFETY : sysconf lit une constante du système, sans toucher à la mémoire du programme.
@@ -627,7 +623,7 @@ mod tests {
     /// chaque limite dite ; sans journalctl, le journal écrit est repris et l'absence dite.
     #[test]
     fn journal_cible_de_cette_machine() {
-        let dossier = crate::reseau::dossier_local().join("journal-cible");
+        let dossier = crate::socle::dossier_local().join("journal-cible");
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(&dossier).unwrap();
         std::fs::write(
@@ -733,7 +729,7 @@ mod tests {
     /// empreinte.
     #[test]
     fn processus_de_cette_machine() {
-        let dossier = crate::reseau::dossier_local().join("processus");
+        let dossier = crate::socle::dossier_local().join("processus");
         std::fs::create_dir_all(&dossier).unwrap();
         let p = processus(&dossier);
         assert!(p.compte.is_some(), "{p:?}");

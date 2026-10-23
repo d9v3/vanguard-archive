@@ -31,7 +31,7 @@ mod maj;
 pub(crate) mod memoire;
 pub(crate) mod partages;
 pub(crate) mod peripheriques;
-mod persistance;
+pub(crate) mod persistance;
 mod pilotes;
 pub(crate) mod planificateur;
 mod portes;
@@ -46,6 +46,10 @@ use comptes::{comptes, politique};
 use maj::signatures;
 pub use maj::{mises_a_jour_completes, pilote_fabricant};
 use persistance::persistance;
+
+/// La clé des services et des pilotes : une seule écriture pour tous les lecteurs (bilan, gestionnaire, pilotes,
+/// accès à distance, logiciels espions).
+pub(crate) const CLE_SERVICES: &str = r"SYSTEM\CurrentControlSet\Services";
 
 pub const NOM: &str = "Windows";
 
@@ -301,7 +305,7 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     let echec = vec![false; correctifs.len()];
     // Une correction native (« vanguard:… ») mêlée à du PowerShell passe par le script, sous sa forme PowerShell.
     let correctifs = &corrections::en_powershell(correctifs);
-    let dossier = crate::reseau::dossier_local().join("corrections");
+    let dossier = crate::socle::dossier_local().join("corrections");
     let nom = format!("correction-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"));
     let chemin = dossier.join(format!("{nom}.ps1"));
     // La fenêtre administrateur est un autre processus : elle répond par ce fichier, une ligne par correctif.
@@ -593,7 +597,7 @@ fn juger_cloud(valeur: Option<&str>) -> Option<Constat> {
 /// de Windows 11), il ne peut pas l'être ; sinon, la valeur SMB1 des paramètres du serveur (absente : actif).
 fn smb1_actif() -> Option<bool> {
     let services = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
-        .open_subkey(r"SYSTEM\CurrentControlSet\Services")
+        .open_subkey(CLE_SERVICES)
         .ok()?;
     if services.open_subkey("srv").is_err() {
         return Some(false);
@@ -1084,8 +1088,17 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
     constats
 }
 
-/// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
+/// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles. Lus d'abord
+/// par wlanapi, comme l'audit du réseau ; netsh en secours, quand la lecture native ne voit pas le réseau connecté.
 fn wifi() -> Vec<Constat> {
+    let natifs = super::wifi::wlanapi::lire()
+        .map(|l| super::wifi::visibles_de(&l))
+        .unwrap_or_default();
+    if let Some(actif) = natifs.iter().find(|v| v.actif) {
+        let mut constats = vec![super::wifi::securite(&actif.ssid, &actif.securite, &[])];
+        constats.extend(super::wifi::jumeau(&natifs));
+        return constats;
+    }
     let Some(texte) = crate::commande::lancer(
         crate::commande::systeme("netsh").args(["wlan", "show", "interfaces"]),
         15,

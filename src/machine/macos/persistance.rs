@@ -147,7 +147,7 @@ fn arret_et_retrait(chemin: &Path, dossier: &Path, systeme: bool) -> (String, St
 }
 
 pub fn persistance() -> Vec<Constat> {
-    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let maison = crate::socle::maison();
     persistance_dans([
         (maison.join("Library/LaunchAgents"), false),
         (PathBuf::from("/Library/LaunchAgents"), true),

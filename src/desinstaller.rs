@@ -21,7 +21,7 @@ use crate::ui::*;
 
 /// Où chercher : les chemins de cet ordinateur, ou ceux d'un dossier jetable (tests).
 pub(crate) struct Lieux {
-    /// Le dossier de données de Vanguard (`reseau::dossier_local`).
+    /// Le dossier de données de Vanguard (`crate::socle::dossier_local`).
     pub donnees: PathBuf,
     /// Les dossiers des unités systemd de l'utilisateur (Linux ; vide ailleurs) : celui de la surveillance et de
     /// l'entretien, puis celui de la sauvegarde s'il diffère (XDG_CONFIG_HOME).
@@ -52,7 +52,7 @@ pub(crate) struct TacheLue {
 
 impl Lieux {
     pub(crate) fn de_cet_ordinateur() -> Result<Lieux, String> {
-        let donnees = crate::reseau::dossier_local();
+        let donnees = crate::socle::dossier_local();
         // Sans HOME ni XDG_DATA_HOME (LOCALAPPDATA sous Windows), le dossier serait relatif : le dossier courant, qui
         // n'est pas celui de Vanguard. Rien n'est cherché, encore moins effacé.
         if !donnees.is_absolute() {
@@ -80,7 +80,7 @@ impl Lieux {
         #[cfg(not(target_os = "linux"))]
         let veilleur = None;
         #[cfg(target_os = "macos")]
-        let agents = Some(crate::nettoyer::maison().join("Library/LaunchAgents")).filter(|d| d.is_absolute());
+        let agents = Some(crate::socle::maison().join("Library/LaunchAgents")).filter(|d| d.is_absolute());
         #[cfg(not(target_os = "macos"))]
         let agents = None;
         #[cfg(windows)]
@@ -755,7 +755,7 @@ fn dossier_de_donnees(d: &Path, genre: Genre, detail: &str, pas_a_lui: &mut Vec<
             ));
             tr!("lien", "link").to_string()
         }
-        None => crate::nettoyer::taille_lisible(taille(d)),
+        None => crate::socle::taille_lisible(taille(d)),
     };
     Element {
         genre,
@@ -1484,7 +1484,7 @@ fn accord_donnees(e: &Element, a: &Annulables, gardes: &[(PathBuf, String)]) -> 
         );
         return demander(tr!("  Retirer ce lien ? [o/N] : ", "  Remove this link? [y/N]: ")).oui();
     }
-    let place = crate::nettoyer::taille_lisible(taille(d));
+    let place = crate::socle::taille_lisible(taille(d));
     let dire = |texte: &str| afficher_aligne("  ", texte, 2, "");
     if avant {
         dire(&trf!(
@@ -1929,7 +1929,7 @@ mod tests {
     use super::*;
 
     fn racine(nom: &str) -> PathBuf {
-        let d = crate::reseau::dossier_local().join(format!("desinstaller-{nom}"));
+        let d = crate::socle::dossier_local().join(format!("desinstaller-{nom}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -2536,7 +2536,7 @@ mod tests {
 
     #[test]
     fn messages_dans_la_largeur() {
-        let larges = crate::gaming::tests::textes_trop_larges(include_str!("desinstaller.rs"));
+        let larges = crate::ui::textes_trop_larges(include_str!("desinstaller.rs"));
         assert_eq!(larges, Vec::<String>::new());
         let (r, l) = ordinateur("largeur");
         for e in recenser(&l).elements {

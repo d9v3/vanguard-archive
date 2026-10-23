@@ -141,7 +141,7 @@ fn registre(dossier: &Path) -> Result<Option<Registre>, ()> {
 }
 
 fn enregistrer_registre(dossier: &Path, r: &Registre) -> std::io::Result<()> {
-    crate::reseau::ecrire_atomique(
+    crate::socle::ecrire_atomique(
         &dossier.join(REGISTRE),
         serde_json::to_vec_pretty(r).map_err(std::io::Error::other)?,
     )
@@ -244,7 +244,7 @@ pub(crate) fn ecrire_dans(dossier: &Path, nom: &str, octets: &[u8]) -> std::io::
             ..Registre::default()
         },
     };
-    crate::reseau::ecrire_atomique(&dossier.join(nom), octets)?;
+    crate::socle::ecrire_atomique(&dossier.join(nom), octets)?;
     sceaux.fichiers.insert(nom.to_string(), empreinte(nom, octets));
     sceaux.adoptes.remove(nom);
     sceaux
@@ -269,7 +269,7 @@ fn effacer_dans(dossier: &Path, nom: &str) -> std::io::Result<()> {
 }
 
 fn dossier() -> PathBuf {
-    crate::reseau::dossier_local()
+    crate::socle::dossier_local()
 }
 
 pub(crate) fn lire(nom: &str) -> Lecture {

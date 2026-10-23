@@ -40,7 +40,7 @@ struct Vus {
 }
 
 fn fichier() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("bluetooth.json")
+    crate::socle::dossier_local().join("bluetooth.json")
 }
 
 /// « aa-bb-cc-dd-ee-ff », « aabbccddeeff » → « AA:BB:CC:DD:EE:FF » ; `None` si ce n'est pas une adresse.
@@ -70,8 +70,8 @@ pub fn constats() -> Vec<Constat> {
     if avant.as_ref() != Some(&apres)
         && let Ok(texte) = serde_json::to_string_pretty(&apres)
     {
-        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
-        let _ = crate::reseau::ecrire_atomique(&fichier(), texte);
+        let _ = std::fs::create_dir_all(crate::socle::dossier_local());
+        let _ = crate::socle::ecrire_atomique(&fichier(), texte);
     }
     constats
 }

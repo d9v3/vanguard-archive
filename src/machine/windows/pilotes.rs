@@ -19,7 +19,7 @@ use crate::machine::regles::{Os, regle};
 use crate::ui::{affichable, couper};
 
 const CAT: &str = "Persistance";
-const SERVICES: &str = r"SYSTEM\CurrentControlSet\Services";
+use super::CLE_SERVICES as SERVICES;
 const LOLDRIVERS: &str = "https://www.loldrivers.io/api/drivers.csv";
 /// La liste fait environ 1,2 Mo en octobre 2026 : au-delà de 32 Mo, ce n'est pas elle.
 const LISTE_MAX: u64 = 32 << 20;
@@ -255,13 +255,13 @@ fn lire_pilotes() -> Option<Vec<Pilote>> {
 fn liste_loldrivers() -> Option<HashSet<[u8; 32]>> {
     let lieu = ("loldrivers", "drivers.csv");
     let octets = if cfg!(test) || crate::parametres::hors_ligne() {
-        std::fs::read(crate::reseau::dossier_local().join(lieu.0).join(lieu.1)).ok()
+        std::fs::read(crate::socle::dossier_local().join(lieu.0).join(lieu.1)).ok()
     } else {
         let demande = crate::http::Demande {
             taille_max: LISTE_MAX,
             ..crate::http::Demande::get(LOLDRIVERS, Duration::from_secs(120))
         };
-        crate::protection::abuse_ch::liste(demande, lieu, SEMAINE, liste_valide)
+        crate::socle::cache::liste(demande, lieu, SEMAINE, liste_valide)
             .copie
             .map(|(o, _)| o)
     };

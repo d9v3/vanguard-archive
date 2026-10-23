@@ -224,8 +224,8 @@ fn juger(m: &Mesure, upnp: Option<bool>) -> Option<(TypeNat, &'static str)> {
 /// adresse Internet (0.0.0.0, 169.254.x : lien coupé) ne dit rien du partage.
 pub(crate) fn adresse_partagee(box_internet: Option<Ipv4Addr>, publique: IpAddr) -> Option<&'static str> {
     let b = box_internet.filter(|b| !b.is_unspecified() && !b.is_link_local())?;
-    match b.octets() {
-        [100, 64..128, ..] => Some(tr!(
+    match crate::socle::adresses::portee(b.into()) {
+        crate::socle::adresses::Portee::Partagee => Some(tr!(
             "Ton fournisseur partage ton adresse Internet avec d'autres abonnés (CGNAT) : aucune redirection de ports ne peut marcher. Demande-lui une adresse IPv4 publique, ou sers-toi de l'IPv6.",
             "Your provider shares your Internet address with other customers (CGNAT): no port forwarding can work. Ask them for a public IPv4 address, or use IPv6."
         )),

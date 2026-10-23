@@ -12,7 +12,7 @@ use crate::commande::{Garder, lancer_vers};
 
 /// Le dossier personnel.
 pub(super) fn maison() -> PathBuf {
-    crate::nettoyer::maison()
+    crate::socle::maison()
 }
 
 /// Ce qui se lance à l'ouverture d'un shell, et les clés SSH qui ouvrent ce compte sans mot de passe : deux façons
@@ -452,7 +452,7 @@ mod tests {
     /// Un journal inventé, écrit comme la collecte l'écrit : ses événements repris ; sans journal, c'est dit.
     #[test]
     fn journal_repris_dans_la_chronologie() {
-        let dossier = crate::reseau::dossier_local().join("chronologie-journal");
+        let dossier = crate::socle::dossier_local().join("chronologie-journal");
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(&dossier).unwrap();
         let vide = journaux_ecrits(&dossier, None, true, None);
@@ -502,7 +502,7 @@ mod tests {
     /// sont inventés, datés d'hier, et écrits par les vraies fonctions de la collecte.
     #[test]
     fn raison_d_un_journal_court() {
-        let dossier = crate::reseau::dossier_local().join("chronologie-raisons");
+        let dossier = crate::socle::dossier_local().join("chronologie-raisons");
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(&dossier).unwrap();
         let hier = (chrono::Local::now() - chrono::Duration::hours(30)).format("%Y-%m-%dT%H:%M:%S%:z");
@@ -558,7 +558,7 @@ mod tests {
     /// Les journaux sont inventés.
     #[test]
     fn journal_tourne_repris() {
-        let dossier = crate::reseau::dossier_local().join("journal-tourne");
+        let dossier = crate::socle::dossier_local().join("journal-tourne");
         let _ = std::fs::remove_dir_all(&dossier);
         let sources = dossier.join("log");
         std::fs::create_dir_all(&sources).unwrap();
@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn fin_d_un_journal_a_partir_d_une_ligne() {
-        let dossier = crate::reseau::dossier_local().join("fin-journal");
+        let dossier = crate::socle::dossier_local().join("fin-journal");
         std::fs::create_dir_all(&dossier).unwrap();
         let source = dossier.join("auth.log");
         std::fs::write(&source, "un\ndeux\ntrois\n").unwrap();

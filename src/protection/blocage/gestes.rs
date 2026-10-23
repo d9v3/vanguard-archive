@@ -419,7 +419,7 @@ fn chemin_du_processus_tel(pid: Option<u32>) -> Option<String> {
 pub(crate) fn chemin_du_processus(pid: u32) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
-        let lien = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+        let lien = crate::socle::processus::programme(pid)?;
         let lien = lien.to_string_lossy();
         Some(lien.strip_suffix(" (deleted)").unwrap_or(&lien).to_string())
     }
@@ -429,12 +429,7 @@ pub(crate) fn chemin_du_processus(pid: u32) -> Option<String> {
     }
     #[cfg(target_os = "macos")]
     {
-        let mut tampon = vec![0u8; 4096];
-        let taille = u32::try_from(tampon.len()).ok()?;
-        // SAFETY : proc_pidpath écrit au plus `taille` octets dans `tampon` et rend leur nombre (0 : refus).
-        let lus = unsafe { libc::proc_pidpath(libc::c_int::try_from(pid).ok()?, tampon.as_mut_ptr().cast(), taille) };
-        let chemin = String::from_utf8_lossy(tampon.get(..usize::try_from(lus).ok()?)?).into_owned();
-        chemin.starts_with('/').then_some(chemin)
+        Some(crate::socle::processus::programme(pid)?.to_string_lossy().into_owned())
     }
 }
 
@@ -606,7 +601,7 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
             .to_string()),
         },
         Faire::Permissions { fichier, nouveau } => {
-            let copie = crate::reseau::dossier_local()
+            let copie = crate::socle::dossier_local()
                 .join("blocage")
                 .join("copies")
                 .join(format!(
@@ -831,9 +826,9 @@ pub(crate) fn sans_contournement(texte: &str) -> Option<String> {
     for (d, f) in remplacer.into_iter().rev() {
         nouveau.replace_range(d..f, "\"default\"");
     }
-    let mut attendu = crate::machine::agents_ia::lire_json(texte.as_bytes())?;
+    let mut attendu = crate::socle::jsonc::lire_json(texte.as_bytes())?;
     remettre_par_defaut(&mut attendu);
-    let relu = crate::machine::agents_ia::lire_json(nouveau.as_bytes())?;
+    let relu = crate::socle::jsonc::lire_json(nouveau.as_bytes())?;
     (relu == attendu && !crate::machine::agents_ia::tout_permis(&relu)).then_some(nouveau)
 }
 

@@ -13,6 +13,8 @@ mod http;
 mod parametres;
 #[path = "../cale/reseau.rs"]
 mod reseau;
+#[path = "../cale/socle.rs"]
+mod socle;
 #[path = "../cale/ui.rs"]
 mod ui;
 

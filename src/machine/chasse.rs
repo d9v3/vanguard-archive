@@ -208,7 +208,7 @@ pub(crate) fn juger_intrusions(intrusions: &[Intrusion], systeme: Os, partiel: O
     );
     if !intrusions
         .iter()
-        .any(|i| crate::protection::sortantes::sur_internet(i.adresse))
+        .any(|i| crate::socle::adresses::sur_internet(i.adresse))
     {
         texte.push_str(tr!(
             " L'adresse est sur le réseau local : un appareil de la maison qui gardait un vieux mot de passe l'explique aussi.",

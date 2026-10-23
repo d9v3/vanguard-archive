@@ -83,9 +83,7 @@ pub fn app_installee(nom: &str) -> bool {
         .any(|d| d.join(format!("{nom}.app")).is_dir())
 }
 
-fn maison() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-}
+use crate::socle::maison;
 
 /// Les réglages d'un domaine de préférences, lus dans leur fichier.
 enum Reglages {

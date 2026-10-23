@@ -729,7 +729,7 @@ mod tests {
     fn messages_dans_la_largeur() {
         let larges: Vec<String> = [include_str!("mod.rs"), include_str!("demarrage.rs")]
             .into_iter()
-            .flat_map(crate::gaming::tests::textes_trop_larges)
+            .flat_map(crate::ui::textes_trop_larges)
             .collect();
         assert_eq!(larges, Vec::<String>::new());
     }
