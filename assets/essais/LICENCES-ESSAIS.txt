@@ -10,7 +10,7 @@ l'accord de l'auteur (MPL-2.0) : leurs fixtures sont inventées, écrites dans l
 
 kev-extrait.json
   Source  : https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
-            (catalogue 2026.10.21 ; 15 entrées sur 1 754)
+            (catalogue 2026.10.21 ; 16 entrées sur 1 754)
   Licence : Creative Commons 0 1.0 (CC0-1.0), https://www.cisa.gov/sites/default/files/licenses/kev/license.txt
             « You may use this data in any legal manner ». L'usage de ces données ne vaut ni logo de la CISA ou du DHS,
             ni appui de leur part.

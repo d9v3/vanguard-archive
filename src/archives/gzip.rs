@@ -2,6 +2,9 @@
 //! flux deflate. Deux lectures : `degzip`, celle des fichiers de cet ordinateur (bases de pacman, mtree), qui ne
 //! regarde pas la fin du membre ; `degzip_controle`, celle des fichiers téléchargés, qui vérifie en plus le CRC-32 et
 //! la taille écrits à la fin de chaque membre : un téléchargement coupé ou abîmé ne passe pas pour un fichier entier.
+//!
+//! Lecteur pur (miniz_oxide seul, sans `crate::`) : le banc de fuzzing l'inclut par son chemin. Les deux lectures
+//! sont donc compilées partout, sans servir partout.
 
 /// Les trois premiers octets d'un gzip (deflate, la seule méthode définie).
 pub(crate) fn est_gzip(octets: &[u8]) -> bool {
@@ -36,7 +39,7 @@ fn debut_du_flux(octets: &[u8], debut: usize) -> Option<usize> {
     (pos <= membre.len()).then_some(debut + pos)
 }
 
-#[cfg(any(target_os = "linux", test))] // bases de pacman, mtree
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))] // bases de pacman, mtree
 /// Le contenu d'un gzip : le premier membre, au plus `limite` octets. `None` si ce n'est pas du gzip, s'il est abîmé
 /// ou s'il dépasse la limite. La fin du membre (CRC, taille) n'est pas lue : un fichier de cet ordinateur, que le
 /// système de fichiers garde entier.
@@ -45,7 +48,7 @@ pub(crate) fn degzip(octets: &[u8], limite: usize) -> Option<Vec<u8>> {
     miniz_oxide::inflate::decompress_to_vec_with_limit(octets.get(pos..)?, limite).ok()
 }
 
-#[cfg(any(windows, target_os = "macos", test))] // les fichiers téléchargés des logiciels pas à jour
+#[cfg_attr(not(any(windows, target_os = "macos", test)), allow(dead_code))] // logiciels pas à jour
 /// Le contenu d'un gzip téléchargé, au plus `limite` octets en tout : chaque membre (un serveur peut en mettre
 /// plusieurs bout à bout) est décompressé, puis son CRC-32 et sa taille, écrits à sa fin, sont vérifiés. `None` : pas
 /// du gzip, coupé, abîmé, plus grand que la limite (une « bombe » de quelques Kio qui en donnerait des Go s'arrête à
@@ -72,7 +75,7 @@ pub(crate) fn degzip_controle(octets: &[u8], limite: usize) -> Option<Vec<u8>> {
     }
 }
 
-#[cfg(any(windows, target_os = "macos", test))] // les fichiers téléchargés des logiciels pas à jour
+#[cfg_attr(not(any(windows, target_os = "macos", test)), allow(dead_code))] // logiciels pas à jour
 /// Le flux deflate de `flux`, au plus `limite` octets, et le nombre d'octets qu'il occupe (pour trouver la fin du
 /// membre, qui le suit). Le même travail que `decompress_to_vec_with_limit`, qui ne dit pas où le flux finit.
 fn inflater(flux: &[u8], limite: usize) -> Option<(Vec<u8>, usize)> {
@@ -100,7 +103,7 @@ fn inflater(flux: &[u8], limite: usize) -> Option<(Vec<u8>, usize)> {
     }
 }
 
-#[cfg(any(windows, target_os = "macos", test))] // les fichiers téléchargés des logiciels pas à jour
+#[cfg_attr(not(any(windows, target_os = "macos", test)), allow(dead_code))] // logiciels pas à jour
 /// La table du CRC-32 de gzip (polynôme 0xEDB88320, réfléchi), calculée à la compilation.
 const TABLE: [u32; 256] = {
     let mut table = [0u32; 256];
@@ -118,7 +121,7 @@ const TABLE: [u32; 256] = {
     table
 };
 
-#[cfg(any(windows, target_os = "macos", test))] // les fichiers téléchargés des logiciels pas à jour
+#[cfg_attr(not(any(windows, target_os = "macos", test)), allow(dead_code))] // logiciels pas à jour
 fn crc32(octets: &[u8]) -> u32 {
     !octets
         .iter()

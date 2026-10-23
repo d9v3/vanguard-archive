@@ -4,8 +4,9 @@
 
 use super::Bornes;
 
-/// Les fichiers (nom, contenu). Une entrée illisible ou hors des bornes est sautée ; une archive illisible donne une
-/// liste vide. Au plus `entrees` entrées parcourues, `fichier` octets par fichier, `total` en tout.
+/// Les fichiers (nom, contenu). Une entrée illisible, hors des bornes ou dont le contenu n'a pas la taille annoncée
+/// est sautée ; une archive illisible donne une liste vide. Au plus `entrees` entrées parcourues, `fichier` octets
+/// par fichier, `total` en tout.
 pub(crate) fn lire(octets: &[u8], bornes: &Bornes) -> Vec<(String, Vec<u8>)> {
     // La fin du répertoire central, cherchée depuis la fin (un commentaire peut la suivre).
     let Some(fin) = (0..octets.len().saturating_sub(21))
@@ -37,9 +38,13 @@ pub(crate) fn lire(octets: &[u8], bornes: &Bornes) -> Vec<(String, Vec<u8>)> {
             continue;
         }
         let donnees = donnees_locales(octets, local, compresse);
+        // La taille rendue doit être celle annoncée, qui a passé les bornes : une entrée qui ment (annoncée minuscule,
+        // décompressée bien plus grande) ferait sinon dépasser la borne du total.
         let contenu = match (methode, donnees) {
             (0, Some(d)) if d.len() == taille => Some(d.to_vec()),
-            (8, Some(d)) => miniz_oxide::inflate::decompress_to_vec_with_limit(d, bornes.fichier).ok(),
+            (8, Some(d)) => miniz_oxide::inflate::decompress_to_vec_with_limit(d, taille)
+                .ok()
+                .filter(|c| c.len() == taille),
             _ => None,
         };
         if let Some(contenu) = contenu {
@@ -83,6 +88,92 @@ fn donnees_locales(octets: &[u8], local: usize, compresse: usize) -> Option<&[u8
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une archive zip faite à la main : (nom, données telles qu'écrites, méthode, taille annoncée) par entrée.
+    fn archive(entrees: &[(&str, Vec<u8>, u16, u32)]) -> Vec<u8> {
+        let (mut zip, mut central) = (Vec::new(), Vec::new());
+        for (nom, donnees, methode, taille) in entrees {
+            let local = u32::try_from(zip.len()).unwrap();
+            let compresse = u32::try_from(donnees.len()).unwrap();
+            let longueur = u16::try_from(nom.len()).unwrap();
+            zip.extend(0x0403_4b50u32.to_le_bytes());
+            zip.extend([20, 0, 0, 0]);
+            zip.extend(methode.to_le_bytes());
+            zip.extend([0u8; 8]);
+            zip.extend(compresse.to_le_bytes());
+            zip.extend(taille.to_le_bytes());
+            zip.extend(longueur.to_le_bytes());
+            zip.extend([0, 0]);
+            zip.extend(nom.as_bytes());
+            zip.extend(donnees);
+            central.extend(0x0201_4b50u32.to_le_bytes());
+            central.extend([20, 0, 20, 0, 0, 0]);
+            central.extend(methode.to_le_bytes());
+            central.extend([0u8; 8]);
+            central.extend(compresse.to_le_bytes());
+            central.extend(taille.to_le_bytes());
+            central.extend(longueur.to_le_bytes());
+            central.extend([0u8; 12]);
+            central.extend(local.to_le_bytes());
+            central.extend(nom.as_bytes());
+        }
+        let debut = u32::try_from(zip.len()).unwrap();
+        let n = u16::try_from(entrees.len()).unwrap();
+        let taille_centrale = u32::try_from(central.len()).unwrap();
+        zip.extend(central);
+        zip.extend(0x0605_4b50u32.to_le_bytes());
+        zip.extend([0, 0, 0, 0]);
+        zip.extend(n.to_le_bytes());
+        zip.extend(n.to_le_bytes());
+        zip.extend(taille_centrale.to_le_bytes());
+        zip.extend(debut.to_le_bytes());
+        zip.extend([0, 0]);
+        zip
+    }
+
+    #[test]
+    fn stockees_et_compressees() {
+        let texte = b"# exemple\n\n> Une page inventee.\n".repeat(20);
+        let deflate = miniz_oxide::deflate::compress_to_vec(&texte, 6);
+        let taille = u32::try_from(texte.len()).unwrap();
+        let zip = archive(&[
+            ("pages/common/a.md", b"stockee".to_vec(), 0, 7),
+            ("pages/common/b.md", deflate, 8, taille),
+            ("pages/common/c.md", b"xx".to_vec(), 0, 3),
+        ]);
+        let bornes = Bornes {
+            entrees: 10,
+            fichier: 1 << 16,
+            total: 1 << 16,
+        };
+        let lus = lire(&zip, &bornes);
+        assert_eq!(lus.len(), 2, "la taille fausse de c.md l'écarte");
+        assert_eq!(lus[0], ("pages/common/a.md".to_string(), b"stockee".to_vec()));
+        assert_eq!(lus[1].1, texte);
+    }
+
+    /// Une entrée compressée qui ment sur sa taille (annoncée minuscule, décompressée bien plus grande) : écartée, et
+    /// les bornes tiennent sur ce qui est rendu, pas sur ce qui est annoncé.
+    #[test]
+    fn taille_annoncee_fausse() {
+        let gros = vec![b'a'; 60_000];
+        let deflate = miniz_oxide::deflate::compress_to_vec(&gros, 6);
+        let entrees: Vec<(String, Vec<u8>, u16, u32)> = (0..20)
+            .map(|i| (format!("pages/common/{i}.md"), deflate.clone(), 8, 1))
+            .collect();
+        let entrees: Vec<(&str, Vec<u8>, u16, u32)> = entrees
+            .iter()
+            .map(|(n, d, m, t)| (n.as_str(), d.clone(), *m, *t))
+            .collect();
+        let bornes = Bornes {
+            entrees: 100,
+            fichier: 1 << 16,
+            total: 1 << 17,
+        };
+        let lus = lire(&archive(&entrees), &bornes);
+        assert!(lus.iter().map(|(_, c)| c.len()).sum::<usize>() <= bornes.total);
+        assert!(lus.is_empty(), "{} entrées rendues", lus.len());
+    }
 
     proptest::proptest! {
         #![proptest_config(proptest::prelude::ProptestConfig { cases: 2000, failure_persistence: None, ..proptest::prelude::ProptestConfig::default() })]

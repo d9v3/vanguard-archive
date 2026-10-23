@@ -324,8 +324,8 @@ enum Commande {
     /// de surveillance, logiciels de surveillance connus. Lecture seule.
     #[command(name = "logiciels-espions", visible_alias = "spyware")]
     LogicielsEspions,
-    /// Logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java comparés à leur dernière version ;
-    /// failles exploitées. Lecture seule.
+    /// Logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java, 7-Zip, PuTTY, Slack comparés à leur
+    /// dernière version ; failles exploitées. Lecture seule.
     #[command(name = "logiciels-perimes", visible_alias = "outdated-software")]
     LogicielsPerimes,
     /// Caméra et micro : qui s'en sert ? Sous Windows, chaque programme et la dernière fois ; sous Linux, ce qui les
@@ -1881,10 +1881,11 @@ const AIDES_EN: &[(&str, &str)] = &[
                            connections and the DNS cache, programs reading the keyboard, apps allowed input \
                            monitoring, accessibility or screen recording (macOS), known monitoring software. \
                            Read-only"),
-    ("logiciels-perimes", "Outdated software (Windows, macOS): browsers, Office, Acrobat and Java compared with \
-                           their latest version (publishers' sites, endoflife.date; public files downloaded in full, \
-                           nothing about this computer is sent), each product's exploited flaws in CISA's catalog, \
-                           Firefox checked flaw by flaw (Mozilla advisories). Read-only"),
+    ("logiciels-perimes", "Outdated software (Windows, macOS): browsers, Office, Acrobat, Java, 7-Zip, PuTTY and \
+                           Slack compared with their latest version (publishers' sites, endoflife.date, Homebrew; \
+                           public files downloaded in full, nothing about this computer is sent), each product's \
+                           exploited flaws in CISA's catalog, Firefox and Edge checked flaw by flaw (Mozilla \
+                           advisories, Microsoft's list). Read-only"),
     ("camera-micro", "Camera and microphone: who uses them? On Windows, each program and the last time; on Linux, \
                       what holds them right now. Read-only"),
     ("acces", "Privacy check: the apps that have access to the location, contacts, camera and microphone, and their \

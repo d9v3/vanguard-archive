@@ -72,5 +72,7 @@ serveur https://clients.config.office.net/releases/
 essai https://res.public.onecdn.static.microsoft/mro1cdnstorage/C1297A47-86C4-4C1F-97FA-950631F94777/MacAutoupdate/0409 https://res.public.onecdn.static.microsoft/mro1cdnstorage/C1297A47-86C4-4C1F-97FA-950631F94777/MacAutoupdate/0409MSWD2019-chk.xml
 serveur https://endoflife.date/api/
 serveur https://formulae.brew.sh/api/
+# Slack : point d'accès d'une API non documentée (une adresse fixe par système) ; seul compte que le serveur réponde.
+serveur https://slack.com/api/desktop.latestRelease
 # L'archive des avis de sécurité de Mozilla (600 Kio en gzip) : seul compte que codeload réponde.
 serveur https://codeload.github.com/mozilla/foundation-security-advisories/

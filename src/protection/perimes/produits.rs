@@ -38,6 +38,9 @@ pub(crate) enum Produit {
     Acrobat,
     Reader,
     Java(Distribution),
+    SevenZip,
+    PuTTY,
+    Slack,
 }
 
 impl Produit {
@@ -56,6 +59,9 @@ impl Produit {
             Produit::Java(Distribution::Corretto) => ["Java (Amazon Corretto)"; 2],
             Produit::Java(Distribution::Microsoft) => ["Java (Microsoft)"; 2],
             Produit::Java(Distribution::Autre) => ["Java (autre distribution)", "Java (other distribution)"],
+            Produit::SevenZip => ["7-Zip"; 2],
+            Produit::PuTTY => ["PuTTY"; 2],
+            Produit::Slack => ["Slack"; 2],
         }
     }
 
@@ -115,6 +121,10 @@ pub(crate) struct Fiche {
     pub mac: &'static [AppMac],
     /// Les sources qui le jugent (identifiants de `sources::SOURCES`).
     pub sources: &'static [&'static str],
+    /// Sous macOS, les formules de Homebrew qui l'installent (dossiers `Cellar/<formule>/<version>`), pour un
+    /// logiciel sans application.
+    #[cfg_attr(windows, allow(dead_code))] // lu par l'inventaire de macOS
+    pub homebrew: &'static [&'static str],
     /// Une ligne du catalogue de la CISA (éditeur, produit) le concerne : couples exacts, mesurés sur le catalogue
     /// du 21 oct. 2026.
     pub kev: fn(&str, &str) -> bool,
@@ -178,7 +188,13 @@ fn kev_java(editeur: &str, produit: &str) -> bool {
     editeur == "Oracle" && produit.starts_with("Java")
 }
 
-/// Brave n'a aucune ligne au catalogue.
+fn kev_7zip(editeur: &str, produit: &str) -> bool {
+    editeur == "7-Zip" && produit == "7-Zip"
+}
+
+/// Brave, PuTTY et Slack n'ont aucune ligne au catalogue. Slack embarque Chromium (Electron), mais les failles de
+/// Chromium ne se reportent pas sur lui par sa version : Electron corrige sans changer de version de Chromium (étude,
+/// §10), et rien ne dirait si sa version en a.
 fn kev_aucune(_: &str, _: &str) -> bool {
     false
 }
@@ -204,6 +220,7 @@ pub(crate) const FICHES: &[Fiche] = &[
         windows: &[&["Google", "Chrome", "Application", "chrome.exe"]],
         mac: &[mac("com.google.Chrome", CleMac::Courte)],
         sources: CHROME,
+        homebrew: &[],
         kev: kev_chrome,
     },
     Fiche {
@@ -211,6 +228,7 @@ pub(crate) const FICHES: &[Fiche] = &[
         windows: &[&["Microsoft", "Edge", "Application", "msedge.exe"]],
         mac: &[mac("com.microsoft.edgemac", CleMac::Courte)],
         sources: &["edge"],
+        homebrew: &[],
         kev: kev_edge,
     },
     Fiche {
@@ -218,6 +236,7 @@ pub(crate) const FICHES: &[Fiche] = &[
         windows: &[&["Mozilla Firefox", "application.ini"]],
         mac: &[mac("org.mozilla.firefox", CleMac::Courte)],
         sources: &["mozilla", "mfsa"],
+        homebrew: &[],
         kev: kev_firefox,
     },
     Fiche {
@@ -230,6 +249,7 @@ pub(crate) const FICHES: &[Fiche] = &[
             "brave-macos-arm64",
             "brave-macos-x64",
         ],
+        homebrew: &[],
         kev: kev_aucune,
     },
     // Sous Windows, Office Click-to-Run se lit dans le registre ; en MSI, il reste à `fin_de_support`.
@@ -251,6 +271,7 @@ pub(crate) const FICHES: &[Fiche] = &[
             "mau-OPIM2019",
             "mau-ONMC2019",
         ],
+        homebrew: &[],
         kev: kev_office,
     },
     // Acrobat et Reader sous Windows : par leurs clés Uninstall (nom et éditeur exacts), puis l'exécutable.
@@ -259,6 +280,7 @@ pub(crate) const FICHES: &[Fiche] = &[
         windows: &[],
         mac: &[mac("com.adobe.Acrobat.Pro", CleMac::Courte)],
         sources: &["adobe-acrobat"],
+        homebrew: &[],
         kev: kev_adobe,
     },
     Fiche {
@@ -266,6 +288,7 @@ pub(crate) const FICHES: &[Fiche] = &[
         windows: &[],
         mac: &[mac("com.adobe.Reader", CleMac::Courte)],
         sources: &["adobe-reader"],
+        homebrew: &[],
         kev: kev_adobe,
     },
     // Java : par son fichier `release`, dans les dossiers connus de chaque distribution.
@@ -274,7 +297,36 @@ pub(crate) const FICHES: &[Fiche] = &[
         windows: &[],
         mac: &[],
         sources: &["eol"],
+        homebrew: &[],
         kev: kev_java,
+    },
+    // 7-Zip et PuTTY : l'exécutable sous Windows (ressource de version) ; sous macOS, sans application, la formule
+    // de Homebrew qui les installe. Leur dernière version vient de formula.json (Homebrew suit l'amont).
+    Fiche {
+        produit: Produit::SevenZip,
+        windows: &[&["7-Zip", "7z.exe"]],
+        mac: &[],
+        sources: &["formules"],
+        homebrew: &["sevenzip"],
+        kev: kev_7zip,
+    },
+    Fiche {
+        produit: Produit::PuTTY,
+        windows: &[&["PuTTY", "putty.exe"]],
+        mac: &[],
+        sources: &["formules"],
+        homebrew: &["putty"],
+        kev: kev_aucune,
+    },
+    // Slack : par machine sous `Program Files\Slack` (MSI, sans mise à jour automatique), par compte sous
+    // `AppData\Local\slack` (Squirrel, un dossier `app-<version>` par version) ; Windows ne distingue pas la casse.
+    Fiche {
+        produit: Produit::Slack,
+        windows: &[&["slack", "slack.exe"]],
+        mac: &[mac("com.tinyspeck.slackmacgap", CleMac::Courte)],
+        sources: &["slack-windows", "slack-macos"],
+        homebrew: &[],
+        kev: kev_aucune,
     },
 ];
 
@@ -346,6 +398,9 @@ mod tests {
             Produit::Java(Corretto),
             Produit::Java(Microsoft),
             Produit::Java(Autre),
+            Produit::SevenZip,
+            Produit::PuTTY,
+            Produit::Slack,
         ] {
             let [fr, en] = p.noms();
             assert!(!fr.is_empty() && !en.is_empty(), "{p:?}");
@@ -414,5 +469,25 @@ mod tests {
             "Java SE and JRockit"
         ));
         assert!(!kev(Produit::Brave, "Google", "Chromium V8"));
+        assert!(kev(Produit::SevenZip, "7-Zip", "7-Zip"));
+        assert!(!kev(Produit::SevenZip, "RARLAB", "WinRAR"));
+        assert!(!kev(Produit::PuTTY, "PuTTY", "PuTTY"));
+        // Slack embarque Chromium (Electron) : ses failles ne se reportent pas sur lui.
+        assert!(!kev(Produit::Slack, "Google", "Chromium V8"));
+    }
+
+    /// Les formules de Homebrew de la table sont celles que le lecteur de formula.json garde, et inversement.
+    #[test]
+    fn formules_de_homebrew() {
+        use crate::protection::perimes::sources::homebrew::FORMULES_SUIVIES;
+        let mut table: Vec<&str> = FICHES.iter().flat_map(|f| f.homebrew.iter().copied()).collect();
+        table.sort_unstable();
+        let mut suivies = FORMULES_SUIVIES.to_vec();
+        suivies.sort_unstable();
+        assert_eq!(table, suivies);
+        assert_eq!(
+            app_mac("com.tinyspeck.slackmacgap").map(|(p, _)| p),
+            Some(Produit::Slack)
+        );
     }
 }

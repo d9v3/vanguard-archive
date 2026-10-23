@@ -32,15 +32,20 @@ delivered just before it. Only the latest version has its download page; every v
   could not be checked is counted, and the verdict is never “no spyware”. In the full check too, without network.
 - **Outdated software.** `vanguard outdated-software` (or `logiciels-perimes`; Antivirus and protection menu, last; in
   the full check on Windows and macOS) compares the installed version of browsers (Chrome, Extended channel included,
-  Edge, Firefox and ESR, Brave), Office, Acrobat and Reader and Java with the latest published: public files from the
-  publishers and endoflife.date, downloaded in full once a day, the same for everyone (the list of your software never
-  leaves; Settings › Software versions to turn it off). Version read in the file itself (a reader of .exe version
-  resources written for Vanguard, Info.plist), all accounts as administrator. Firefox: each exploited flaw in CISA's
-  catalog checked against your version (Mozilla security advisories); a version older than the fix is critical. The
-  others: the number of exploited flaws of the product in the catalog, without concluding for your version. What has no
-  source (Edge Extended Stable, Acrobat 2020 and 2024, App Store) is said not checked; a browser that cannot be compared
-  keeps the 60-days-without-update check, which leaves end of support. On Linux, the command points to the package
-  manager.
+  Edge, Firefox and ESR, Brave), Office, Acrobat and Reader, Java, 7-Zip, PuTTY and Slack with the latest published:
+  public files from the publishers, endoflife.date and Homebrew (formula.json, also taken on Windows for 7-Zip and
+  PuTTY, whose formulae follow upstream), downloaded in full once a day, the same for everyone (the list of your
+  software never leaves; Settings › Software versions to turn it off). Version read in the file itself (a reader of .exe
+  version resources written for Vanguard, Info.plist, Homebrew Cellar folder), all accounts as administrator;
+  per-account Slack in its version folder, not its launcher. Firefox: each exploited flaw in CISA's catalog checked
+  against your version (Mozilla security advisories); Edge Stable likewise, from the flaws Microsoft says each version
+  fixes; a version older than the fix is critical. The others: the number of exploited flaws of the product in the
+  catalog, without concluding for your version (Slack embeds Chromium, but its flaws do not carry over to it). What has
+  no source (Edge Extended Stable, Acrobat 2020 and 2024, App Store) is said not checked, as is a Slack answer of an
+  unexpected form (its API is undocumented), a disabled or deprecated Homebrew formula, or an Edge flaw list of another
+  form; a browser that cannot be compared keeps the 60-days-without-update check, which leaves end of support. On Linux, the command points to the package manager. The zip reader (command guide) drops
+  an entry whose content does not have the announced size, which could exceed its limit; gzip and zip join the fuzzing
+  bench.
 - **Update chain of trust.** A backup key, kept offline, also signs releases (if the main key is lost or stolen,
   updates go on); the main key can be encrypted, its passphrase asked once per release (`outils/signer-versions.sh`,
   `--secours`). Vanguard remembers the highest signed version already seen and refuses an older manifest; a latest

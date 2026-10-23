@@ -1,8 +1,8 @@
 //! L'inventaire sous Windows, de la lecture la plus sûre à la moins sûre : la version écrite dans l'exécutable même
-//! (Chrome, Edge, Brave, Acrobat, par `pe`), puis les fichiers propres à l'éditeur (`application.ini` de Firefox,
-//! `release` de Java), puis le registre (Office Click-to-Run, clés Uninstall en dernier recours). Chaque compte :
-//! le sien, et en administrateur les autres (ruches chargées, dossiers `AppData` des profils), sans jamais charger
-//! la ruche d'une session fermée.
+//! (Chrome, Edge, Brave, Acrobat, 7-Zip, PuTTY, Slack, par `pe`), puis les fichiers propres à l'éditeur
+//! (`application.ini` de Firefox, `release` de Java), puis le registre (Office Click-to-Run, clés Uninstall en dernier
+//! recours). Chaque compte : le sien, et en administrateur les autres (ruches chargées, dossiers `AppData` des
+//! profils), sans jamais charger la ruche d'une session fermée.
 //!
 //! La partie fichiers se compile aussi pour les tests sous Linux (arbre jetable) ; le registre, sous Windows et Wine.
 
@@ -42,6 +42,9 @@ pub(crate) fn normaliser(produit: Produit, texte: &str) -> Option<Version> {
         Produit::Firefox => version::firefox(texte),
         Produit::Acrobat | Produit::Reader => version::adobe(texte),
         Produit::Java(_) => version::java_release(texte),
+        // « 26.5.0.0 » dans l'exécutable de 7-Zip, « 26.05 » dans sa clé Uninstall ; PuTTY « 0.85.0.0 » ; Slack
+        // « 4.52.182.0 ». Les champs à zéro ajoutés ne changent rien à la comparaison.
+        Produit::SevenZip | Produit::PuTTY | Produit::Slack => Version::lire(texte).filter(|v| v.longueur() <= 4),
     }
 }
 
@@ -108,6 +111,90 @@ pub(crate) fn navigateur(produit: Produit, exe: &Path) -> Option<Installe> {
         }
     }
     Some(i)
+}
+
+/// Un logiciel par son seul exécutable (7-Zip, PuTTY) : sa version de fichier et son architecture. `None` : pas
+/// d'exécutable à cet endroit ; illisible, il est trouvé sans version (« non vérifié »).
+pub(crate) fn executable(produit: Produit, exe: &Path) -> Option<Installe> {
+    let meta = std::fs::symlink_metadata(exe).ok()?;
+    let dossier = exe.parent()?;
+    let mut i = Installe::nouveau(produit, "", None, dossier);
+    if meta.is_file()
+        && let Ok(info) = crate::pe::version(exe)
+    {
+        let brute = quatre(info.fichier);
+        i = Installe::nouveau(produit, &brute, normaliser(produit, &brute), dossier);
+        i.plateforme = Plateforme::de_pe(info.machine);
+    }
+    i.branche = Branche::Release;
+    Some(i)
+}
+
+/// La version d'un dossier `app-4.52.182` de Squirrel (Slack par compte).
+fn version_squirrel(nom: &str) -> Option<Version> {
+    Version::lire(nom.strip_prefix("app-")?).filter(|v| v.longueur() == 3)
+}
+
+/// Slack installé dans `dossier`. Par compte (Squirrel), `slack.exe` n'est qu'un lanceur : la version est celle du
+/// plus haut dossier `app-<version>` qui contient un `slack.exe` (celui qui tourne ; l'ancien reste parfois à côté),
+/// lue dans cet exécutable, sinon dans le nom du dossier. Par machine (MSI), `slack.exe` lui-même. `None` : ni l'un
+/// ni l'autre.
+pub(crate) fn slack_dans(dossier: &Path) -> Option<Installe> {
+    let squirrel = entrees(dossier)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(c, d)| *d && existe(&c.join("slack.exe")))
+        .filter_map(|(c, _)| Some((version_squirrel(nom(&c)?)?, c)))
+        .max_by_key(|(v, _)| *v);
+    let Some((v, app)) = squirrel else {
+        return executable(Produit::Slack, &dossier.join("slack.exe"));
+    };
+    let mut i = executable(Produit::Slack, &app.join("slack.exe"))?;
+    if i.version.is_none() {
+        i = Installe::nouveau(Produit::Slack, &v.to_string(), Some(v), &app);
+        i.branche = Branche::Release;
+    }
+    i.lieu = dossier.to_path_buf();
+    Some(i)
+}
+
+/// 7-Zip ou PuTTY, d'après le nom affiché et l'éditeur exacts d'une clé Uninstall : « 7-Zip », « 7-Zip 26.05 »,
+/// « 7-Zip 26.05 (x64) » d'Igor Pavlov ; « PuTTY release 0.85 », « PuTTY release 0.85 (64-bit) » de Simon Tatham.
+/// Pour un logiciel installé ailleurs que dans `Program Files`.
+pub(crate) fn produit_par_cle(nom: &str, editeur: &str) -> Option<Produit> {
+    let (produit, reste) = match editeur.trim() {
+        "Igor Pavlov" => (Produit::SevenZip, nom.trim().strip_prefix("7-Zip")?),
+        "Simon Tatham" => (Produit::PuTTY, nom.trim().strip_prefix("PuTTY release ")?),
+        _ => return None,
+    };
+    let mut morceaux = reste.split_whitespace();
+    let version_ou_rien = morceaux.next().is_none_or(|v| Version::lire(v).is_some());
+    let suffixe = morceaux.collect::<Vec<_>>().join(" ");
+    let bon = version_ou_rien
+        && matches!(
+            suffixe.as_str(),
+            "" | "(x64)" | "(x64 edition)" | "(64-bit)" | "(arm64)"
+        )
+        && (produit == Produit::SevenZip || !reste.trim().is_empty());
+    bon.then_some(produit)
+}
+
+/// 7-Zip ou PuTTY trouvé par sa clé Uninstall : son exécutable sous l'emplacement d'installation, sinon
+/// `DisplayVersion`.
+pub(crate) fn par_cle(produit: Produit, affichee: &str, emplacement: Option<&Path>, cle: &str) -> Installe {
+    let exe = match produit {
+        Produit::SevenZip => "7z.exe",
+        _ => "putty.exe",
+    };
+    if let Some(i) = emplacement.and_then(|d| executable(produit, &d.join(exe)))
+        && i.version.is_some()
+    {
+        return i;
+    }
+    let lieu = emplacement.map_or_else(|| PathBuf::from(cle), Path::to_path_buf);
+    let mut i = Installe::nouveau(produit, affichee, normaliser(produit, affichee), &lieu);
+    i.branche = Branche::Release;
+    i
 }
 
 /// Firefox installé dans `dossier` : la version de `application.ini`, la branche de `channel-prefs.js` (sinon
@@ -270,6 +357,8 @@ pub(crate) fn fichiers(lieux: &Lieux, java_home: &[PathBuf], inv: &mut Inventair
                 let chemin = morceaux.iter().fold(racine.clone(), |c, m| c.join(m));
                 let trouve = match fiche.produit {
                     Produit::Firefox => chemin.parent().and_then(|d| firefox_dans(d, false)),
+                    Produit::Slack => chemin.parent().and_then(slack_dans),
+                    Produit::SevenZip | Produit::PuTTY => executable(fiche.produit, &chemin),
                     produit => navigateur(produit, &chemin),
                 };
                 if let Some(mut i) = trouve {
@@ -462,7 +551,7 @@ mod registre {
             }
         }
         super::fichiers(&lieux, &java_home, &mut inv);
-        // Les clés Uninstall : Firefox installé ailleurs qu'aux chemins connus, Acrobat et Reader.
+        // Les clés Uninstall : Firefox, 7-Zip et PuTTY installés ailleurs qu'aux chemins connus, Acrobat et Reader.
         let nom_du_compte = |p: &Portee| match p {
             Portee::Machine => None,
             Portee::CompteCourant => lieux.profils.first().map(|p| p.compte.clone()),
@@ -474,6 +563,8 @@ mod registre {
                 p.emplacement
                     .as_deref()
                     .and_then(|d| super::firefox_dans(d, p.nom.contains(" ESR")))
+            } else if let Some(produit) = super::produit_par_cle(&p.nom, &p.editeur) {
+                Some(super::par_cle(produit, &p.version, p.emplacement.as_deref(), &p.cle))
             } else {
                 super::produit_adobe(&p.nom, &p.editeur)
                     .map(|a| super::acrobat(a, &p.version, p.emplacement.as_deref(), &p.cle))
@@ -734,6 +825,99 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// 7-Zip et PuTTY par leur exécutable ; Slack par machine (son exécutable) et par compte (Squirrel : le plus
+    /// haut dossier `app-<version>` qui a un exécutable, pas le lanceur).
+    #[test]
+    fn sept_zip_putty_slack_d_un_arbre() {
+        let d = jetable("longue-traine");
+        let pf = d.join("Program Files");
+        let local = d.join("Users").join("alice").join("AppData").join("Local");
+        poser(&pf.join("7-Zip").join("7z.exe"), &exe([26, 5, 0, 0], 0x8664));
+        poser(&pf.join("PuTTY").join("putty.exe"), &exe([0, 81, 0, 0], 0xAA64));
+        poser(&pf.join("slack").join("slack.exe"), &exe([4, 52, 182, 0], 0x8664));
+        let squirrel = local.join("slack");
+        poser(&squirrel.join("slack.exe"), &exe([1, 0, 0, 0], 0x8664));
+        poser(
+            &squirrel.join("app-4.41.105").join("slack.exe"),
+            &exe([4, 41, 105, 0], 0x8664),
+        );
+        poser(&squirrel.join("app-4.47.69").join("slack.exe"), b"pas un PE");
+        // Un dossier plus haut sans exécutable (mise à jour interrompue) ne compte pas.
+        std::fs::create_dir_all(squirrel.join("app-4.60.1")).unwrap();
+        std::fs::create_dir_all(squirrel.join("packages")).unwrap();
+        let lieux = Lieux {
+            programmes: vec![pf.clone()],
+            profils: vec![Profil {
+                compte: "alice".into(),
+                local: local.clone(),
+            }],
+        };
+        let mut inv = Inventaire::default();
+        fichiers(&lieux, &[], &mut inv);
+        let lu = |p: Produit, compte: Option<&str>| {
+            inv.installes
+                .iter()
+                .find(|i| i.produit == p && i.compte.as_deref() == compte)
+                .unwrap_or_else(|| panic!("{p:?} {compte:?} : {:?}", inv.installes))
+        };
+        let sept = lu(Produit::SevenZip, None);
+        assert_eq!(
+            (sept.version, sept.plateforme, sept.branche.clone()),
+            (Version::lire("26.5"), Plateforme::X64, Branche::Release)
+        );
+        assert_eq!(lu(Produit::PuTTY, None).plateforme, Plateforme::Arm64);
+        assert_eq!(lu(Produit::Slack, None).version, Version::lire("4.52.182"));
+        // Le dossier 4.47.69 a un exécutable illisible : son nom suffit, et c'est le plus haut.
+        let par_compte = lu(Produit::Slack, Some("alice"));
+        assert_eq!(par_compte.version, Version::lire("4.47.69"));
+        assert_eq!(par_compte.lieu, squirrel);
+        std::fs::remove_file(squirrel.join("app-4.47.69").join("slack.exe")).unwrap();
+        let i = slack_dans(&squirrel).unwrap();
+        assert_eq!(
+            (i.brute.as_str(), i.plateforme, i.lieu.as_path()),
+            ("4.41.105.0", Plateforme::X64, squirrel.as_path())
+        );
+        // Ni lanceur ni dossier de version : rien.
+        assert!(slack_dans(&d.join("absent")).is_none());
+        assert_eq!(inv.installes.len(), 4, "{:?}", inv.installes);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn sept_zip_et_putty_par_leur_cle() {
+        let sept = |n: &str| produit_par_cle(n, "Igor Pavlov");
+        for bon in [
+            "7-Zip",
+            "7-Zip 26.05",
+            "7-Zip 26.05 (x64)",
+            "7-Zip 9.20 (x64 edition)",
+            " 7-Zip 24.09 (arm64) ",
+        ] {
+            assert_eq!(sept(bon), Some(Produit::SevenZip), "{bon}");
+        }
+        let putty = |n: &str| produit_par_cle(n, "Simon Tatham");
+        assert_eq!(putty("PuTTY release 0.85 (64-bit)"), Some(Produit::PuTTY));
+        assert_eq!(putty("PuTTY release 0.85"), Some(Produit::PuTTY));
+        for faux in ["7-Zipper", "7-Zip 26.05 Extra", "7-Zip beta", "7-Zip 26.05 (x64) (x64)"] {
+            assert_eq!(sept(faux), None, "{faux}");
+        }
+        for faux in ["PuTTY release", "PuTTY release x", "PuTTY", "KiTTY release 0.76"] {
+            assert_eq!(putty(faux), None, "{faux}");
+        }
+        assert_eq!(produit_par_cle("7-Zip 26.05", "Igor Pavlov Ltd"), None);
+        assert_eq!(produit_par_cle("PuTTY release 0.85", "Igor Pavlov"), None);
+        // Par l'exécutable de l'emplacement ; sinon DisplayVersion, la clé tenant lieu d'emplacement.
+        let d = jetable("cles");
+        poser(&d.join("7z.exe"), &exe([26, 5, 0, 0], 0x8664));
+        let i = par_cle(Produit::SevenZip, "24.09", Some(&d), "HKLM");
+        assert_eq!((i.version, i.lieu.as_path()), (Version::lire("26.5"), d.as_path()));
+        let i = par_cle(Produit::PuTTY, "0.85.0.0", Some(&d), r"HKLM\x\Uninstall\PuTTY");
+        assert_eq!((i.version, i.lieu.as_path()), (Version::lire("0.85"), d.as_path()));
+        let i = par_cle(Produit::PuTTY, "pas une version", None, "HKLM");
+        assert_eq!((i.version, i.branche), (None, Branche::Release));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn firefox_absent_ou_partiel() {
         let d = jetable("firefox");
@@ -839,6 +1023,12 @@ mod tests {
         );
         assert_eq!(normaliser(Produit::Chrome, "156.0.8078"), None);
         assert_eq!(
+            normaliser(Produit::SevenZip, "26.05"),
+            normaliser(Produit::SevenZip, "26.5.0.0")
+        );
+        assert_eq!(normaliser(Produit::Slack, "4.52.182.0.1"), None);
+        assert_eq!(normaliser(Produit::PuTTY, "Release 0.85"), None);
+        assert_eq!(
             normaliser(Produit::Office, "16.0.19127.20264")
                 .map(|v| v.to_string())
                 .as_deref(),
@@ -861,6 +1051,9 @@ mod tests {
             let _ = canal_office([None, None, Some(&url), None, None]);
             let _ = canal_office([None, Some(&url), None, None, None]);
             let _ = canal_edge(Some(&url));
+            let _ = produit_par_cle(&nom, "Igor Pavlov");
+            let _ = produit_par_cle(&format!("PuTTY release {nom}"), "Simon Tatham");
+            let _ = version_squirrel(&nom);
         }
     }
 }

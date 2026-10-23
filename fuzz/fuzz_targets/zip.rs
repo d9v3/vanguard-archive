@@ -1,0 +1,28 @@
+//! Les archives zip téléchargées (tldr-pages) : répertoire central qui ment sur les tailles et les positions, noms
+//! démesurés, flux deflate abîmés, entrées en nombre.
+#![no_main]
+
+/// Les bornes du lecteur (`archives::Bornes`), à la place où il les attend.
+#[derive(Clone, Copy)]
+pub struct Bornes {
+    pub entrees: usize,
+    pub fichier: usize,
+    pub total: usize,
+}
+
+#[allow(dead_code)]
+#[path = "../../src/archives/zip.rs"]
+mod zip;
+
+const BORNES: Bornes = Bornes {
+    entrees: 1000,
+    fichier: 1 << 16,
+    total: 1 << 18,
+};
+
+libfuzzer_sys::fuzz_target!(|octets: &[u8]| {
+    let lus = zip::lire(octets, &BORNES);
+    assert!(lus.len() <= BORNES.entrees);
+    assert!(lus.iter().map(|(_, c)| c.len()).sum::<usize>() <= BORNES.total);
+    assert!(lus.iter().all(|(_, c)| c.len() <= BORNES.fichier));
+});

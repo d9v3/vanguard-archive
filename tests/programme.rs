@@ -652,7 +652,7 @@ fn logiciels_perimes_hors_ligne() {
     let _ = std::fs::remove_dir_all(&maison);
     let aide = vanguard("en", &["outdated-software", "--help"], "", 30);
     assert!(
-        sans_couleurs(&aide.texte).contains("Firefox checked flaw by flaw"),
+        sans_couleurs(&aide.texte).contains("Firefox and Edge checked flaw by flaw"),
         "{}",
         aide.texte
     );

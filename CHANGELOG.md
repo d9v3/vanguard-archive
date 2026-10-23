@@ -34,15 +34,22 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   le verdict n'est jamais « aucun logiciel espion ». Au bilan aussi, sans réseau.
 - **Logiciels pas à jour.** `vanguard logiciels-perimes` (alias `outdated-software` ; menu Antivirus et protection, en
   dernier ; au bilan sous Windows et macOS) compare la version installée des navigateurs (Chrome, y compris le canal
-  Extended, Edge, Firefox et ESR, Brave), d'Office, d'Acrobat et Reader et de Java à la dernière publiée : fichiers
-  publics des éditeurs et d'endoflife.date, téléchargés en entier une fois par jour, les mêmes pour tous (la liste de
-  tes logiciels ne sort jamais ; Paramètres › Versions des logiciels pour couper). Version lue dans le fichier même
-  (lecteur de la ressource de version des .exe écrit pour Vanguard, Info.plist), tous les comptes en administrateur.
+  Extended, Edge, Firefox et ESR, Brave), d'Office, d'Acrobat et Reader, de Java, de 7-Zip, de PuTTY et de Slack à la
+  dernière publiée : fichiers publics des éditeurs, d'endoflife.date et de Homebrew (formula.json, pris sous Windows
+  aussi pour 7-Zip et PuTTY, dont les formules suivent l'amont), téléchargés en entier une fois par jour, les mêmes pour
+  tous (la liste de tes logiciels ne sort jamais ; Paramètres › Versions des logiciels pour couper). Version lue dans le
+  fichier même (lecteur de la ressource de version des .exe écrit pour Vanguard, Info.plist, dossier du Cellar de
+  Homebrew), tous les comptes en administrateur ; Slack par compte, dans son dossier de version, pas son lanceur.
   Firefox : chaque faille exploitée du catalogue de la CISA vérifiée contre ta version (avis de sécurité de Mozilla) ;
-  une version antérieure au correctif est critique. Les autres : le nombre de failles exploitées du produit au
-  catalogue, sans conclure pour ta version. Ce qui n'a pas de source (Edge Extended Stable, Acrobat 2020 et 2024, App
-  Store) est dit non vérifié ; un navigateur qui ne se compare pas garde le contrôle des 60 jours sans mise à jour, qui
-  quitte la fin de support. Sous Linux, la commande renvoie au gestionnaire de paquets.
+  Edge Stable de même, d'après les failles que Microsoft dit corrigées par chaque version ; une version antérieure au
+  correctif est critique. Les autres : le nombre de failles exploitées du produit au catalogue, sans conclure pour ta
+  version (Slack embarque Chromium, mais ses failles ne se reportent pas sur lui). Ce qui n'a pas de source (Edge
+  Extended Stable, Acrobat 2020 et 2024, App Store) est dit non vérifié, comme une réponse de Slack d'une forme
+  inattendue (son API n'est pas documentée), une formule de Homebrew désactivée ou obsolète, ou une liste de failles
+  d'Edge d'une autre forme ; un navigateur qui ne se compare pas garde le contrôle des 60 jours sans mise à jour, qui
+  quitte la fin de support. Sous Linux, la commande renvoie au gestionnaire de paquets. Le lecteur zip
+  (guide des commandes) écarte une entrée dont le contenu n'a pas la taille annoncée, qui pouvait dépasser sa borne ;
+  gzip et zip passent au banc de fuzzing.
 - **Chaîne de confiance des mises à jour.** Une clé de secours, gardée hors ligne, signe aussi les versions (la
   principale perdue ou volée, la mise à jour continue) ; la clé principale peut être chiffrée, sa phrase demandée une
   fois par publication (`outils/signer-versions.sh`, `--secours`). Vanguard retient la plus haute version signée déjà

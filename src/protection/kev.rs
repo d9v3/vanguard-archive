@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn copie_reduite_du_vrai_catalogue() {
         let c = analyser(include_bytes!("../../assets/essais/kev-extrait.json")).unwrap();
-        assert_eq!(c.len(), 15);
+        assert_eq!(c.len(), 16);
         assert!(
             c.iter()
                 .all(|e| e.cve.starts_with("CVE-") && e.ajoutee.is_some() && !e.produit.is_empty())
@@ -233,6 +233,7 @@ mod tests {
             ("Microsoft", "WordPad"),
             ("Adobe", "Reader and Acrobat"),
             ("Oracle", "Java SE and JRockit"),
+            ("7-Zip", "7-Zip"),
         ] {
             assert!(
                 c.iter().any(|e| e.editeur == editeur && e.produit == produit),

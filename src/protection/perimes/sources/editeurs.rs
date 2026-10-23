@@ -1,6 +1,6 @@
-//! Les fichiers des éditeurs (Mozilla, Google, Microsoft, Adobe, Brave) : des numéros de version, pris comme des
-//! faits. Aucun n'a de licence publiée ni de format documenté : une forme qui change donne `None`, et le logiciel est
-//! « non vérifié », jamais comparé de travers. JSON lu en structures typées (champs inconnus ignorés).
+//! Les fichiers des éditeurs (Mozilla, Google, Microsoft, Adobe, Brave, Slack) : des numéros de version, pris comme des
+//! faits. Aucun n'a de licence publiée ni de format documenté : une forme qui change donne `None`, et le logiciel
+//! est « non vérifié », jamais comparé de travers. JSON lu en structures typées (champs inconnus ignorés).
 
 use std::collections::BTreeMap;
 
@@ -98,9 +98,26 @@ struct SortieEdge {
     architecture: String,
     product_version: String,
     published_time: Option<Souple<String>>,
+    #[serde(rename = "CVEs", default)]
+    cves: Option<Souple<Vec<Souple<String>>>>,
 }
 
-/// La dernière Edge Stable d'une plateforme et d'une architecture, et quand elle a été publiée.
+/// CVE gardées au plus pour une version d'Edge (354 le 23 oct. 2026, une version de Chromium entière) : au-delà, la
+/// liste n'est pas celle attendue et ne sert pas.
+const CVES_PAR_VERSION_MAX: usize = 5000;
+/// Versions Stable gardées au plus par plateforme et architecture (une ou deux le 23 oct. 2026).
+const CORRECTIFS_MAX: usize = 64;
+
+/// Une version Edge Stable et les CVE qu'elle corrige, selon Microsoft ; `cves` à `None` : liste absente, d'une
+/// autre forme ou démesurée, rien ne se juge faille par faille pour cette version.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CorrectifEdge {
+    pub version: Version,
+    pub cves: Option<Vec<String>>,
+}
+
+/// La dernière Edge Stable d'une plateforme et d'une architecture, quand elle a été publiée, et chaque version
+/// Stable de la liste avec les CVE qu'elle corrige (la liste de Microsoft ne garde que les dernières).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EdgeStable {
     /// « Windows », « MacOS »…
@@ -109,10 +126,33 @@ pub(crate) struct EdgeStable {
     pub architecture: String,
     pub version: Version,
     pub publiee: Option<NaiveDateTime>,
+    pub correctifs: Vec<CorrectifEdge>,
+}
+
+/// « CVE-2026-12345 » : quatre chiffres d'année, quatre à sept de numéro ; écrit en majuscules.
+pub(crate) fn cve(texte: &str) -> Option<String> {
+    let t = texte.trim().to_ascii_uppercase();
+    let reste = t.strip_prefix("CVE-")?;
+    let (annee, numero) = reste.split_once('-')?;
+    let chiffres =
+        |s: &str, n: std::ops::RangeInclusive<usize>| n.contains(&s.len()) && s.bytes().all(|o| o.is_ascii_digit());
+    (chiffres(annee, 4..=4) && chiffres(numero, 4..=7)).then_some(t)
+}
+
+/// Les CVE d'une version : `None` si la liste manque, a une autre forme, dépasse la borne ou contient une seule
+/// entrée qui n'est pas une CVE. Les vraies listes n'en ont aucune : une entrée d'une autre forme veut dire que le
+/// format a changé, et ignorer les entrées une à une rendrait une liste vide, prise pour « aucune faille corrigée ».
+fn cves_de(brutes: Option<Souple<Vec<Souple<String>>>>) -> Option<Vec<String>> {
+    let brutes = brutes?.bon()?;
+    if brutes.len() > CVES_PAR_VERSION_MAX {
+        return None;
+    }
+    brutes.into_iter().map(|c| cve(&c.bon()?)).collect()
 }
 
 /// `edgeupdates.microsoft.com/api/products` : pour le produit « Stable », la plus haute version de chaque
-/// plateforme et architecture (la liste n'est pas triée). Le canal Extended Stable n'y est pas.
+/// plateforme et architecture (la liste n'est pas triée), et les CVE corrigées par chaque version. Le canal
+/// Extended Stable n'y est pas.
 pub(crate) fn edge(octets: &[u8]) -> Option<Vec<EdgeStable>> {
     let produits: Vec<ProduitEdge> = serde_json::from_slice(octets).ok()?;
     let stable = produits.into_iter().find(|p| p.product == "Stable")?;
@@ -123,21 +163,30 @@ pub(crate) fn edge(octets: &[u8]) -> Option<Vec<EdgeStable>> {
             .published_time
             .and_then(Souple::bon)
             .and_then(|t| NaiveDateTime::parse_from_str(t.get(..19)?, "%Y-%m-%dT%H:%M:%S").ok());
-        match dernieres
+        let correctif = CorrectifEdge {
+            version,
+            cves: cves_de(s.cves),
+        };
+        let Some(d) = dernieres
             .iter_mut()
             .find(|d| d.plateforme == s.platform && d.architecture == s.architecture)
-        {
-            Some(d) if d.version >= version => {}
-            Some(d) => {
-                d.version = version;
-                d.publiee = publiee;
-            }
-            None => dernieres.push(EdgeStable {
+        else {
+            dernieres.push(EdgeStable {
                 plateforme: s.platform,
                 architecture: s.architecture,
                 version,
                 publiee,
-            }),
+                correctifs: vec![correctif],
+            });
+            continue;
+        };
+        if d.correctifs.len() >= CORRECTIFS_MAX {
+            return None;
+        }
+        d.correctifs.push(correctif);
+        if version > d.version {
+            d.version = version;
+            d.publiee = publiee;
         }
     }
     (!dernieres.is_empty()).then_some(dernieres)
@@ -266,6 +315,29 @@ pub(crate) fn mau(octets: &[u8], id: &str) -> Option<Version> {
 #[cfg(not(any(target_os = "macos", test)))]
 pub(crate) fn mau(_octets: &[u8], _id: &str) -> Option<Version> {
     None
+}
+
+// ───────────────────────────── Slack ─────────────────────────────
+
+#[derive(Deserialize)]
+struct SlackBrut {
+    ok: bool,
+    #[serde(default)]
+    version: Option<Souple<String>>,
+    #[serde(default)]
+    platform: Option<Souple<String>>,
+}
+
+/// `slack.com/api/desktop.latestRelease` (adresse fixe, la même pour tous ; API non documentée) :
+/// `{"ok": true, "version": "4.52.182", "platform": "win32", …}`. La réponse doit être celle de `plateforme`
+/// (« win32 », « darwin ») et dire `ok` ; une autre forme, une erreur ou une version d'un autre nombre de champs
+/// donnent `None`, et Slack est « non vérifié ».
+pub(crate) fn slack(octets: &[u8], plateforme: &str) -> Option<Version> {
+    let brut: SlackBrut = serde_json::from_slice(octets).ok()?;
+    if !brut.ok || brut.platform.and_then(Souple::bon)? != plateforme {
+        return None;
+    }
+    Version::lire(&brut.version.and_then(Souple::bon)?).filter(|v| v.longueur() == 3)
 }
 
 // ───────────────────────────── Adobe, Brave ─────────────────────────────
@@ -398,6 +470,21 @@ mod tests {
         );
         let mac = e.iter().find(|s| s.plateforme == "MacOS").unwrap();
         assert_eq!((mac.architecture.as_str(), mac.publiee), ("universal", None));
+        // Chaque version Stable garde ses CVE ; une liste absente ne vaut pas une liste vide.
+        assert_eq!(
+            windows.correctifs,
+            [
+                CorrectifEdge {
+                    version: v("155.0.4283.61"),
+                    cves: Some(vec!["CVE-2026-0001".into()])
+                },
+                CorrectifEdge {
+                    version: v("156.0.4314.42"),
+                    cves: Some(vec![])
+                }
+            ]
+        );
+        assert_eq!(mac.correctifs[0].cves, None);
         // Pas de Stable : rien (la Beta n'est jamais prise à sa place).
         assert_eq!(edge(EDGE.replace("\"Stable\"", "\"Autre\"").as_bytes()), None);
         assert_eq!(edge(b"[]"), None);
@@ -471,6 +558,80 @@ mod tests {
         assert_eq!(mau(b"<html></html>", "XCEL2019"), None);
     }
 
+    /// Les CVE d'Edge : forme vérifiée, majuscules, entrées étrangères ignorées, liste démesurée ou d'un autre type
+    /// refusée (sans rendre la version illisible).
+    #[test]
+    fn edge_cves_bornees() {
+        assert_eq!(cve(" cve-2026-112992 ").as_deref(), Some("CVE-2026-112992"));
+        for faux in [
+            "CVE-26-1234",
+            "CVE-2026-123",
+            "CVE-2026-12345678",
+            "CVE-2026",
+            "XSA-2026-1234",
+            "CVE-2026-12a4",
+        ] {
+            assert_eq!(cve(faux), None, "{faux}");
+        }
+        let avec = |cves: &str| {
+            let json = format!(
+                r#"[{{"Product": "Stable", "Releases": [{{"Platform": "Windows", "Architecture": "x64",
+                    "ProductVersion": "156.0.4314.42", "PublishedTime": "2026-10-22T19:20:00", "CVEs": {cves}}}]}}]"#
+            );
+            edge(json.as_bytes()).unwrap()[0].correctifs[0].cves.clone()
+        };
+        assert_eq!(
+            avec(r#"["CVE-2026-0001", "cve-2026-0002"]"#),
+            Some(vec!["CVE-2026-0001".into(), "CVE-2026-0002".into()])
+        );
+        assert_eq!(avec("[]"), Some(vec![]));
+        // Un seul élément qui n'est pas une CVE : toute la liste est refusée. Une liste abîmée qui deviendrait vide
+        // passerait pour « aucune faille corrigée ».
+        for abimee in [
+            r#"["CVE-2026-0001", 3]"#,
+            r#"["CVE-2026-0001", null]"#,
+            r#"["CVE-2026-0001", "pas une CVE"]"#,
+            r#"[{"id": "CVE-2026-0001"}]"#,
+            r#"["CVE-2026-112992 (Chromium)"]"#,
+        ] {
+            assert_eq!(avec(abimee), None, "{abimee}");
+        }
+        assert_eq!(avec("null"), None);
+        assert_eq!(avec(r#""CVE-2026-0001""#), None);
+        let trop: Vec<String> = (0..=CVES_PAR_VERSION_MAX)
+            .map(|i| format!("\"CVE-2026-{i:05}\""))
+            .collect();
+        assert_eq!(avec(&format!("[{}]", trop.join(","))), None);
+        // Trop de versions pour une même plateforme : pas la liste attendue.
+        let sorties: Vec<String> = (0..=CORRECTIFS_MAX)
+            .map(|i| format!(r#"{{"Platform": "Windows", "Architecture": "x64", "ProductVersion": "156.0.1.{i}"}}"#))
+            .collect();
+        let json = format!(r#"[{{"Product": "Stable", "Releases": [{}]}}]"#, sorties.join(","));
+        assert_eq!(edge(json.as_bytes()), None);
+    }
+
+    #[test]
+    fn slack_par_plateforme() {
+        let windows = br#"{"ok":true,"version":"4.52.182","download_url":"https:\/\/downloads.example.com\/windows\/x64\/4.52.182\/slack-standalone-4.52.182.0.msi","platform":"win32","arch":"x64"}"#;
+        assert_eq!(slack(windows, "win32"), Some(v("4.52.182")));
+        // La réponse d'une autre plateforme n'est pas prise pour celle-ci.
+        assert_eq!(slack(windows, "darwin"), None);
+        let mac = br#"{"ok":true,"version":"4.52.182","platform":"darwin","arch":"universal"}"#;
+        assert_eq!(slack(mac, "darwin"), Some(v("4.52.182")));
+        // Une erreur, une forme inattendue : rien (Slack sera « non vérifié »).
+        for faux in [
+            &br#"{"ok":false,"error":"desktop_variant_arch_mismatch"}"#[..],
+            br#"{"ok":true,"version":"4.52","platform":"win32"}"#,
+            br#"{"ok":true,"version":4,"platform":"win32"}"#,
+            br#"{"ok":true,"platform":"win32"}"#,
+            br#"{"ok":"true","version":"4.52.182","platform":"win32"}"#,
+            br#"{"version":"4.52.182","platform":"win32"}"#,
+            b"<html>Portail</html>",
+        ] {
+            assert_eq!(slack(faux, "win32"), None, "{}", String::from_utf8_lossy(faux));
+        }
+    }
+
     #[test]
     fn fichiers_texte() {
         assert_eq!(adobe(b"26.002.22031"), Some(v("26.2.22031")));
@@ -493,6 +654,8 @@ mod tests {
             let _ = mau(&octets, "XCEL2019");
             let _ = adobe(&octets);
             let _ = brave(&octets);
+            let _ = slack(&octets, "win32");
+            let _ = cve(&String::from_utf8_lossy(&octets));
         }
     }
 }
