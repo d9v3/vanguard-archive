@@ -126,6 +126,105 @@ fn le_protocole_et_ses_bornes() {
     assert_eq!((lu.lignes.len(), lu.lignes_en_trop), (400, 100));
 }
 
+/// Un dossier signé par la clé d'essai : le manifeste dit sa clé publique, plugin.sig signe l'empreinte du reste.
+fn signer_le_dossier(d: &Path, cle: &ed25519_dalek::SigningKey) {
+    use ed25519_dalek::Signer;
+    let publique = hex(&cle.verifying_key().to_bytes());
+    let texte = std::fs::read_to_string(d.join(MANIFESTE)).unwrap();
+    std::fs::write(d.join(MANIFESTE), format!("cle_auteur = \"{publique}\"\n{texte}")).unwrap();
+    let _ = std::fs::remove_file(d.join(SIGNATURE));
+    let fichiers = arbre(d, None, false).unwrap();
+    let message = format!("{DOMAINE_PLUGIN}\n{}\n", empreinte_arbre(&fichiers));
+    std::fs::write(d.join(SIGNATURE), hex(&cle.sign(message.as_bytes()).to_bytes())).unwrap();
+}
+
+/// L'auteur vérifié : signé par la clé que dit le manifeste, oui ; un fichier changé après la signature, une
+/// signature d'une autre clé, une signature absente : refusés ; sans clé dite, l'auteur reste « non vérifié ».
+#[test]
+fn l_auteur_est_verifie_par_sa_signature() {
+    let j = Jetable::nouveau();
+    ecrire_source(&j, 5, SCRIPT);
+    let d = j.source();
+    let lire = || (lire_manifeste(&d).unwrap().0, arbre(&d, None, false).unwrap());
+    let (m, f) = lire();
+    assert_eq!(auteur_verifie(&m, &d, &f), Ok(None));
+    let alice = ed25519_dalek::SigningKey::from_bytes(&[11; 32]);
+    signer_le_dossier(&d, &alice);
+    let (m, f) = lire();
+    assert_eq!(auteur_verifie(&m, &d, &f), Ok(Some(alice.verifying_key().to_bytes())));
+    // Un octet changé après la signature.
+    std::fs::write(d.join("donnees").join("liste.txt"), "Salon et cuisine\n").unwrap();
+    let (m, f) = lire();
+    assert!(auteur_verifie(&m, &d, &f).is_err());
+    // Re-signé par une autre clé, mais le manifeste dit toujours celle d'alice.
+    let autre = ed25519_dalek::SigningKey::from_bytes(&[12; 32]);
+    let fichiers = arbre(&d, None, false).unwrap();
+    let sans: Fichiers = fichiers.into_iter().filter(|(c, _)| c != SIGNATURE).collect();
+    let message = format!("{DOMAINE_PLUGIN}\n{}\n", empreinte_arbre(&sans));
+    std::fs::write(
+        d.join(SIGNATURE),
+        hex(&ed25519_dalek::Signer::sign(&autre, message.as_bytes()).to_bytes()),
+    )
+    .unwrap();
+    let (m, f) = lire();
+    assert!(auteur_verifie(&m, &d, &f).is_err());
+    // Plus de signature du tout.
+    std::fs::remove_file(d.join(SIGNATURE)).unwrap();
+    let (m, f) = lire();
+    assert!(auteur_verifie(&m, &d, &f).is_err());
+    // Une clé mal écrite dans le manifeste : le manifeste est refusé.
+    let texte = std::fs::read_to_string(d.join(MANIFESTE)).unwrap();
+    let premiere = texte.lines().next().unwrap().to_string();
+    std::fs::write(d.join(MANIFESTE), texte.replacen(&premiere, "cle_auteur = \"abc\"", 1)).unwrap();
+    assert!(lire_manifeste(&d).is_err());
+}
+
+/// La recette donnée aux auteurs dans extensions/LISEZMOI.md (sha256sum, sort, openssl) signe ce que Vanguard
+/// vérifie : la même empreinte de l'arbre, le même message. Sans ces outils (Wine), rien à essayer.
+#[cfg(unix)]
+#[test]
+fn la_recette_d_openssl_signe_ce_que_vanguard_verifie() {
+    let present = std::process::Command::new("sh")
+        .args(["-c", "command -v openssl && command -v sha256sum && command -v od"])
+        .output()
+        .is_ok_and(|r| r.status.success());
+    if !present {
+        return crate::essais::saute("openssl ou sha256sum absents");
+    }
+    let j = Jetable::nouveau();
+    ecrire_source(&j, 5, SCRIPT);
+    let d = j.source();
+    let cle = j.0.join("auteur.pem");
+    let lancer = |script: &str| {
+        let r = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .current_dir(&d)
+            .output()
+            .unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        String::from_utf8(r.stdout).unwrap()
+    };
+    lancer(&format!("openssl genpkey -algorithm ed25519 -out '{}'", cle.display()));
+    let publique = lancer(&format!(
+        "openssl pkey -in '{}' -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \\n'",
+        cle.display()
+    ));
+    let texte = std::fs::read_to_string(d.join(MANIFESTE)).unwrap();
+    std::fs::write(d.join(MANIFESTE), format!("cle_auteur = \"{publique}\"\n{texte}")).unwrap();
+    // La recette, telle qu'extensions/LISEZMOI.md la donne.
+    let lisezmoi = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/extensions/LISEZMOI.md")).unwrap();
+    let recette = lisezmoi
+        .split("```sh\n# signer-plugin\n")
+        .nth(1)
+        .and_then(|r| r.split("```").next())
+        .expect("recette de signature absente d'extensions/LISEZMOI.md");
+    lancer(&recette.replace("auteur.pem", &cle.display().to_string()));
+    let (m, _) = lire_manifeste(&d).unwrap();
+    let f = arbre(&d, None, false).unwrap();
+    assert!(auteur_verifie(&m, &d, &f).unwrap().is_some());
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
@@ -138,7 +237,7 @@ mod unix {
     #[test]
     fn ajoute_approuve_puis_lance_la_copie_verifiee() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         ecrire_source(&j, 20, SCRIPT);
@@ -200,7 +299,7 @@ mod unix {
     #[test]
     fn un_programme_ou_un_manifeste_change_est_refuse_jusqu_a_l_approbation() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         ecrire_source(&j, 20, "echo un\n");
@@ -238,7 +337,7 @@ mod unix {
     #[test]
     fn liens_et_dossiers_partages_refuses() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         ecrire_source(&j, 20, "echo un\n");
@@ -297,7 +396,7 @@ mod unix {
     #[test]
     fn noms_et_chemins_hors_du_dossier_refuses() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         let racine = j.racine();
@@ -329,7 +428,7 @@ mod unix {
     #[test]
     fn un_manifeste_demande_la_confiance_sans_jamais_l_obtenir_seul() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         ecrire_source(&j, 20, "echo confiance\n");
@@ -383,7 +482,7 @@ mod unix {
     #[test]
     fn a_moi_tombe_quand_le_dossier_change() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         ecrire_source(&j, 20, ". ./lib.sh\necho \"$NOM\"\n");
@@ -416,7 +515,7 @@ mod unix {
     #[test]
     fn le_plugin_perd_le_terminal() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         ecrire_source(
@@ -435,7 +534,7 @@ mod unix {
     #[test]
     fn un_plugin_trop_long_est_arrete_au_delai() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         ecrire_source(&j, 1, "echo debut\nsleep 30\necho fin\n");
@@ -463,7 +562,7 @@ mod labo_unix {
     #[test]
     fn un_script_est_montre_approuve_puis_redemande_s_il_change() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         let racine = j.racine();
@@ -504,7 +603,7 @@ mod labo_unix {
     #[test]
     fn sans_restrictions_rien_n_est_demande_sauf_le_dossier() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         let racine = j.racine();
@@ -533,7 +632,7 @@ mod labo_unix {
     #[test]
     fn une_archive_zip_est_depliee_analysee_puis_ajoutee() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let j = Jetable::nouveau();
         let racine = j.racine();
@@ -569,13 +668,13 @@ mod labo_unix {
     #[test]
     fn isole_sans_reseau_ni_ecriture() {
         if en_root() {
-            return;
+            return crate::essais::saute("en root : extensions refusées");
         }
         let essai = std::process::Command::new("bwrap")
             .args(["--ro-bind", "/", "/", "--unshare-all", "true"])
             .status();
         if !essai.is_ok_and(|s| s.success()) {
-            return;
+            return crate::essais::saute("bubblewrap ne peut pas tourner ici");
         }
         let j = Jetable::nouveau();
         let racine = j.racine();
@@ -606,6 +705,46 @@ mod labo_unix {
         );
         assert!(!Path::new(&maison).join(".vanguard-isole-essai").exists());
     }
+
+    /// Isolé sous macOS (sandbox-exec) : le dossier personnel ni lu ni écrit, pas de réseau, le dossier de
+    /// l'extension relu mais pas écrit ; l'écriture permise reste celle du dossier jetable (HOME de l'extension).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn isole_sous_macos_sans_reseau_ni_dossier_personnel() {
+        if !Path::new("/usr/bin/sandbox-exec").is_file() {
+            return crate::essais::saute("sandbox-exec absent");
+        }
+        let j = Jetable::nouveau();
+        let racine = j.racine();
+        poser(
+            &j,
+            "isole.sh",
+            "ls \"$1\" >/dev/null 2>&1 && echo lit\n\
+             touch \"$1/.vanguard-isole-essai\" 2>/dev/null && echo ecrit\n\
+             /usr/bin/nc -z -G 2 1.1.1.1 53 >/dev/null 2>&1 && echo reseau\n\
+             touch ./essai 2>/dev/null && echo dossier\n\
+             touch \"$HOME/essai\" 2>/dev/null && echo jetable\n",
+        );
+        let maison = std::env::var("HOME").unwrap_or_default();
+        let b = labo::lancer(
+            &racine,
+            "isole.sh",
+            std::slice::from_ref(&maison),
+            Facon {
+                isole: true,
+                auto: None,
+            },
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(
+            b.sortie.split_whitespace().collect::<Vec<_>>(),
+            ["jetable"],
+            "{}",
+            b.erreurs
+        );
+        assert!(!Path::new(&maison).join(".vanguard-isole-essai").exists());
+    }
 }
 
 /// En administrateur (ici, la suite refaite dans `unshare -rn`, où le compte est 0) : rien ne tourne tout seul, et
@@ -614,7 +753,7 @@ mod labo_unix {
 #[test]
 fn en_administrateur_rien_ne_tourne_tout_seul() {
     if !en_root() {
-        return;
+        return crate::essais::saute("pas en root");
     }
     let racine = std::env::temp_dir().join(format!("vanguard-admin-{}", std::process::id()));
     let auto = Facon {

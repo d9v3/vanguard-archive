@@ -117,9 +117,10 @@ compiler() {
   fi
   # Les deux programmes d'un seul cargo, qui les mène de front : l'optimisation finale (LTO, une seule unité de code)
   # n'occupe qu'un cœur chacune. Deux cargo lancés ensemble, eux, s'attendaient l'un l'autre (« Blocking waiting for
-  # file lock on build directory ») : 97 s au lieu de 52 (mesuré le 19 oct. 2026).
+  # file lock on build directory ») : 97 s au lieu de 52 (mesuré le 19 oct. 2026). Par la recette que la CI refait
+  # (outils/compiler-version.sh : chaîne épinglée, Cargo.lock tel quel, chemins de la compilation retirés).
   local debut=$SECONDS
-  cargo auditable build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
+  outils/compiler-version.sh
   git rev-parse HEAD >"$COMMIT_COMPILE"
   duree compilation "$debut"
 }

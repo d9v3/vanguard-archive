@@ -675,7 +675,7 @@ mod tests {
             super::super::sortie("resolvectl", &["dns"]),
             std::fs::read_to_string(RESOLV_CONF_AMONT),
         ) else {
-            return;
+            return crate::essais::saute("resolvectl ou resolv.conf amont absent");
         };
         // Même ensemble : resolved retire les doublons du fichier, et l'ordre des interfaces peut changer.
         let ensemble = |v: Vec<IpAddr>| v.into_iter().collect::<std::collections::BTreeSet<_>>();
@@ -693,13 +693,13 @@ mod tests {
     fn resolveurs_comme_systemctl() {
         let noms: Vec<&str> = RESOLVEURS.iter().map(|r| r.0).collect();
         let Some(natif) = crate::machine::linux::natif::services_actifs(&noms) else {
-            return;
+            return crate::essais::saute("services illisibles par D-Bus");
         };
         for (service, actif) in noms.iter().zip(natif) {
             let Some(r) =
                 crate::commande::lancer(std::process::Command::new("systemctl").args(["is-active", service]), 10)
             else {
-                return;
+                return crate::essais::saute("systemctl absent");
             };
             // Une réponse vide : systemctl n'a pas répondu à temps (machine chargée), rien à comparer.
             let etat = r.sortie.trim();

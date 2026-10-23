@@ -472,7 +472,7 @@ LISTEN 0 4096 [::1]:631 [::]:* ino:15003 sk:4001 cgroup:/system.slice/cups.servi
     #[test]
     fn prises_comme_ss() {
         let Some(avant) = par_netlink() else {
-            return;
+            return crate::essais::saute("netlink illisible");
         };
         let lancer = |o: &str| {
             crate::commande::lancer(std::process::Command::new("ss").arg(o), 10)
@@ -480,7 +480,7 @@ LISTEN 0 4096 [::1]:631 [::]:* ino:15003 sk:4001 cgroup:/system.slice/cups.servi
                 .map(|r| r.sortie)
         };
         let (Some(tcp), Some(udp)) = (lancer("-Htlnpe"), lancer("-Hulnpe")) else {
-            return;
+            return crate::essais::saute("ss absent");
         };
         let apres = par_netlink().unwrap_or_default();
         let natives: HashMap<u64, &Ecoute> = avant.iter().chain(&apres).map(|e| (e.inode, e)).collect();

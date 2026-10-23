@@ -479,12 +479,12 @@ mod tests {
             .into_iter()
             .find(|p| Path::new(p).exists())
         else {
-            return;
+            return crate::essais::saute("sshd absent");
         };
         let Some(attendue) = crate::commande::lancer(Command::new(sshd).arg("-V"), 5)
             .and_then(|r| version_openssh(&r.erreurs).or_else(|| version_openssh(&r.sortie)))
         else {
-            return;
+            return crate::essais::saute("version de sshd illisible");
         };
         if let Some(v) = version_du_paquet() {
             assert_eq!(v, attendue, "paquet");

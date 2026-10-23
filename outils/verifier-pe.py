@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Vérifie que le programme Windows ne charge ses DLL importées que depuis System32.
+"""Vérifie que le programme Windows ne charge ses DLL importées que depuis System32, et qu'il porte son manifeste.
 
 Le champ DependentLoadFlags (0x800) du répertoire « Load Config » du PE ferme le chargement d'une DLL posée à côté
 de vanguard.exe (clé USB, Téléchargements), avant même la première ligne du programme : voir
 src/machine/windows/chargement.rs. Le test unitaire le vérifie sur le programme des tests ; ce script le vérifie sur
 le programme compilé en version publiée, que l'optimisation à l'édition de liens aurait pu changer.
+
+Le manifeste (build.rs) donne la page de code UTF-8 (sans lui, accents et chemins sont cassés dans la console et
+les fichiers) et asInvoker (Vanguard démarre sans droits d'administrateur). Ses deux réglages sont cherchés tels que
+build.rs les écrit : ce texte n'existe dans le .exe que si la ressource y a été intégrée.
 
     python3 outils/verifier-pe.py target/x86_64-pc-windows-gnu/release/vanguard.exe
 """
@@ -35,14 +39,21 @@ def drapeaux(pe: bytes):
     return None
 
 
+MANIFESTE = (b'<requestedExecutionLevel level="asInvoker"', b">UTF-8</activeCodePage>")
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__.strip().splitlines()[-1].strip())
     with open(sys.argv[1], "rb") as f:
-        lu = drapeaux(f.read())
+        pe = f.read()
+    lu = drapeaux(pe)
     if not lu or lu[1] != SYSTEM32_SEULEMENT:
         sys.exit(f"✖ {sys.argv[1]} : DLL importées pas limitées à System32 (Load Config : {lu}) ; ne pas le livrer")
-    print(f"✔ {sys.argv[1]} : DLL importées depuis System32 seulement")
+    manquants = [m.decode() for m in MANIFESTE if m not in pe]
+    if manquants:
+        sys.exit(f"✖ {sys.argv[1]} : manifeste absent ou incomplet ({', '.join(manquants)}) ; ne pas le livrer")
+    print(f"✔ {sys.argv[1]} : DLL importées depuis System32 seulement, manifeste UTF-8 et asInvoker")
 
 
 if __name__ == "__main__":

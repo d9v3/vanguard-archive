@@ -1,9 +1,10 @@
 //! Plugins : des programmes ajoutés à Vanguard sans changer son code (un essai, un outil expérimental), chacun dans
 //! son sous-dossier de `<dossier local>/plugins/`, décrit par un `plugin.toml` (voir `manifeste`).
 //!
-//! Un plugin n'est pas du code de Vanguard : il ne tourne qu'à la demande (`vanguard plugin <nom>`, menu Cette
-//! machine › Plugins), jamais dans le bilan, `complet`, la surveillance ni l'entretien, jamais en administrateur, et
-//! ses constats ne touchent jamais la note. Il doit avoir été approuvé : `vanguard plugin ajouter` montre ce qu'il
+//! Un plugin n'est pas du code de Vanguard : il ne tourne qu'à la demande (`vanguard plugin <nom>`, menu
+//! Extensions), jamais en administrateur, et ses constats ne touchent jamais la note. Avec le bilan complet ou la
+//! surveillance, seulement s'il le demande et que la personne l'a accordé par une question à part (sans restrictions,
+//! pour ce dossier tel qu'il est : `reglages`) ; jamais avec l'entretien. Il doit avoir été approuvé : `vanguard plugin ajouter` montre ce qu'il
 //! lancera et note l'empreinte SHA-256 du manifeste et de chaque programme ; une empreinte qui change ensuite le fait
 //! refuser jusqu'à une nouvelle approbation. Au lancement, le programme est copié en même temps qu'il est haché, et
 //! c'est la copie vérifiée qui tourne : le remplacer entre la vérification et le lancement ne sert à rien. La
@@ -32,6 +33,10 @@ use crate::ui::*;
 use crate::{tr, trf, trp};
 
 const MANIFESTE: &str = "plugin.toml";
+/// La signature de l'auteur, à la racine du dossier, quand le manifeste donne `cle_auteur` (voir `auteur_verifie`).
+const SIGNATURE: &str = "plugin.sig";
+/// Ce qui précède l'empreinte dans le message signé : une signature faite pour autre chose ne vaut pas ici.
+const DOMAINE_PLUGIN: &str = "vanguard-plugin 1";
 const APPROUVES: &str = "approuves.json";
 /// Les constats gardés par `--rapport`, un fichier par plugin, repris par le rapport HTML.
 pub(crate) const CONSTATS: &str = ".constats";
@@ -217,6 +222,10 @@ struct Approbation {
     /// Chemin relatif → SHA-256 de chaque fichier : pour dire ce qui a changé.
     fichiers: Fichiers,
     le: String,
+    /// La clé de l'auteur vérifiée à l'approbation (hexadécimal), s'il en avait une : une mise à jour signée par une
+    /// autre, ou plus signée du tout, se voit à l'approbation suivante.
+    #[serde(default)]
+    cle_auteur: Option<String>,
 }
 
 /// Les fichiers d'un plugin : chemin relatif (séparateur « / ») → SHA-256.
@@ -446,6 +455,75 @@ fn empreinte_arbre(fichiers: &Fichiers) -> String {
         h.update(format!("{empreinte}  {chemin}\n").as_bytes());
     }
     hex(&h.finalize())
+}
+
+/// L'auteur du plugin, vérifié : quand le manifeste donne `cle_auteur`, `plugin.sig` doit être la signature Ed25519,
+/// par cette clé, de « vanguard-plugin 1 », d'un saut de ligne, de l'empreinte de l'arbre sans `plugin.sig`
+/// (`empreinte_arbre`) et d'un saut de ligne ; en 128 chiffres hexadécimaux. `Ok(None)` : le plugin ne dit pas de clé
+/// (son auteur reste « non vérifié ») ; `Err` : une clé dite et une signature absente ou fausse, refusé. La clé, elle,
+/// vient du manifeste : elle prouve que tout le dossier vient de qui tient la clé privée, pas qui c'est. D'où la
+/// comparaison avec la clé notée à l'approbation d'avant, qui voit un autre auteur prendre la place du premier.
+fn auteur_verifie(m: &Manifeste, copie: &Path, fichiers: &Fichiers) -> Result<Option<[u8; 32]>, String> {
+    let Some(cle) = m.cle_auteur else {
+        return Ok(None);
+    };
+    let refus = || {
+        tr!(
+            "« cle_auteur » est donnée, mais plugin.sig manque ou n'est pas la signature de ce dossier par cette clé : refusé (dossier changé après sa signature ?).",
+            "“cle_auteur” is given, but plugin.sig is missing or is not this folder's signature by that key: refused (folder changed after it was signed?)."
+        )
+        .to_string()
+    };
+    let texte = lire_sur(&copie.join(SIGNATURE), 1024).map_err(|_| refus())?;
+    let hex_sig = String::from_utf8(texte).map_err(|_| refus())?;
+    let hex_sig = hex_sig.trim();
+    let mut signature = [0u8; 64];
+    let lue = hex_sig.len() == 128
+        && signature.iter_mut().enumerate().all(|(i, o)| {
+            hex_sig
+                .get(2 * i..2 * i + 2)
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+                .map(|v| *o = v)
+                .is_some()
+        });
+    let sans_signature: Fichiers = fichiers
+        .iter()
+        .filter(|(f, _)| f.as_str() != SIGNATURE)
+        .map(|(f, e)| (f.clone(), e.clone()))
+        .collect();
+    let message = format!("{DOMAINE_PLUGIN}\n{}\n", empreinte_arbre(&sans_signature));
+    let valide = lue
+        && ed25519_dalek::VerifyingKey::from_bytes(&cle).is_ok_and(|k| {
+            k.verify_strict(message.as_bytes(), &ed25519_dalek::Signature::from_bytes(&signature))
+                .is_ok()
+        });
+    if valide { Ok(Some(cle)) } else { Err(refus()) }
+}
+
+/// Ce que l'approbation dit de l'auteur, comparé à celle d'avant : même clé, autre clé, plus de clé.
+fn comparer_auteur(avant: Option<&Approbation>, cle: Option<&[u8; 32]>) {
+    let Some(a) = avant else {
+        return;
+    };
+    let ici = cle.map(|c| hex(c));
+    match (&a.cle_auteur, &ici) {
+        (Some(x), Some(y)) if x == y => trp!(
+            "  {VERT}✔{RESET} Même auteur que lors de l'approbation du {} (même clé).",
+            "  {VERT}✔{RESET} Same author as at the approval of {} (same key).",
+            affichable(&a.le)
+        ),
+        (Some(_), _) => afficher_aligne(
+            &format!("  {}⚠{RESET} ", couleur(crate::risk::Niveau::Eleve)),
+            &trf!(
+                "Il n'est plus signé par la clé de l'auteur approuvé le {} : quelqu'un d'autre a pu le remplacer. Ne l'approuve que si tu sais pourquoi.",
+                "It is no longer signed by the key of the author approved on {}: someone else may have replaced it. Only approve it if you know why.",
+                affichable(&a.le)
+            ),
+            4,
+            "",
+        ),
+        (None, _) => {}
+    }
 }
 
 /// Ce qui a changé entre deux arbres : fichiers changés, ajoutés ou retirés.
@@ -836,7 +914,14 @@ fn rappel(texte: &str) {
 /// Ce que l'approbation montre : nom, auteur et source (non vérifiés), ce qu'il lancera, ses fichiers et leur taille,
 /// les empreintes notées, ce que le manifeste demande, et le résultat de l'analyse. `copie` : le dossier tel qu'il
 /// sera approuvé.
-fn presenter(copie: &Path, destination: &Path, m: &Manifeste, fichiers: &Fichiers, analyse: &str) {
+fn presenter(
+    copie: &Path,
+    destination: &Path,
+    m: &Manifeste,
+    fichiers: &Fichiers,
+    analyse: &str,
+    cle_auteur: Option<&[u8; 32]>,
+) {
     println!();
     trp!(
         "  {GRAS}Plugin « {} »{RESET} ({})",
@@ -846,13 +931,23 @@ fn presenter(copie: &Path, destination: &Path, m: &Manifeste, fichiers: &Fichier
     );
     afficher_aligne("  ", &affichable(m.description()), 2, GRIS);
     let non_verifie = tr!("non vérifié par Vanguard", "not checked by Vanguard");
-    for (libelle, valeur) in [
-        (tr!("  Auteur     : ", "  Author     : "), &m.auteur),
-        (tr!("  Source     : ", "  Source     : "), &m.source),
+    // Signé : le nom reste celui que le manifeste dit, mais tout le dossier vient de qui tient cette clé.
+    let signe = cle_auteur.map(|c| {
+        let h = hex(c);
+        trf!(
+            "signé par la clé {}…, signature vérifiée",
+            "signed by key {}…, signature checked",
+            &h[..16]
+        )
+    });
+    for (libelle, valeur, verifie) in [
+        (tr!("  Auteur     : ", "  Author     : "), &m.auteur, signe.as_deref()),
+        (tr!("  Source     : ", "  Source     : "), &m.source, None),
     ] {
+        let etat = verifie.unwrap_or(non_verifie);
         let texte = valeur.as_deref().map_or_else(
-            || trf!("non dit ({non_verifie})", "not given ({non_verifie})"),
-            |v| format!("{} ({non_verifie})", affichable(v)),
+            || trf!("non dit ({etat})", "not given ({etat})"),
+            |v| format!("{} ({etat})", affichable(v)),
         );
         afficher_aligne(libelle, &texte, 15, "");
     }
@@ -1028,8 +1123,13 @@ fn ajouter_dossier(racine: &Path, source: &Path, mut accord: impl FnMut(&str) ->
         arbre(source, Some(&copie), false).map_err(|e| trf!("Plugin non ajouté : {e}.", "Plugin not added: {e}."))?;
     let (m, _) = lire_manifeste(&copie)?;
     let destination = racine.join(&m.nom);
+    let cle =
+        auteur_verifie(&m, &copie, &fichiers).map_err(|e| trf!("Plugin non ajouté : {e}", "Plugin not added: {e}"))?;
     let analyse = analyser_avant_accord(&copie)?;
-    presenter(&copie, &destination, &m, &fichiers, &analyse);
+    presenter(&copie, &destination, &m, &fichiers, &analyse, cle.as_ref());
+    if destination.exists() {
+        comparer_auteur(approbations(racine).plugins.get(&m.nom), cle.as_ref());
+    }
     let question = if destination.exists() {
         trf!(
             "\n  Un plugin « {} » est déjà là : le remplacer par celui-ci et l'approuver ? [o/N] : ",
@@ -1052,7 +1152,7 @@ fn ajouter_dossier(racine: &Path, source: &Path, mut accord: impl FnMut(&str) ->
     std::fs::rename(&copie, &destination).map_err(|e| e.to_string())?;
     // Un plugin remplacé perd la confiance de l'ancien.
     reglages::oublier(racine, false, &m.nom)?;
-    noter(racine, &m.nom, fichiers.clone())?;
+    noter(racine, &m.nom, fichiers.clone(), cle.as_ref())?;
     demander_confiance(racine, &m, &empreinte_arbre(&fichiers), &mut accord)?;
     Ok(m.nom)
 }
@@ -1092,7 +1192,7 @@ fn demander_confiance(
     Ok(())
 }
 
-fn noter(racine: &Path, nom: &str, fichiers: Fichiers) -> Result<(), String> {
+fn noter(racine: &Path, nom: &str, fichiers: Fichiers, cle_auteur: Option<&[u8; 32]>) -> Result<(), String> {
     let mut a = approbations(racine);
     a.plugins.insert(
         nom.to_string(),
@@ -1100,6 +1200,7 @@ fn noter(racine: &Path, nom: &str, fichiers: Fichiers) -> Result<(), String> {
             arbre: empreinte_arbre(&fichiers),
             fichiers,
             le: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+            cle_auteur: cle_auteur.map(|c| hex(c)),
         },
     );
     enregistrer(racine, &a)
@@ -1126,8 +1227,10 @@ fn approuver(racine: &Path, nom: &str, mut accord: impl FnMut(&str) -> bool) -> 
         ));
     }
     let avant = approbations(racine).plugins.get(nom).cloned();
+    let cle = auteur_verifie(&m, &copie, &fichiers)?;
     let analyse = analyser_avant_accord(&copie)?;
-    presenter(&copie, &d, &m, &fichiers, &analyse);
+    presenter(&copie, &d, &m, &fichiers, &analyse, cle.as_ref());
+    comparer_auteur(avant.as_ref(), cle.as_ref());
     if let Some(a) = &avant {
         let changes = changements(&a.fichiers, &fichiers);
         if changes.is_empty() {
@@ -1152,7 +1255,7 @@ fn approuver(racine: &Path, nom: &str, mut accord: impl FnMut(&str) -> bool) -> 
         return Err(tr!("Rien n'a été approuvé.", "Nothing was approved.").to_string());
     }
     let empreinte = empreinte_arbre(&fichiers);
-    noter(racine, nom, fichiers)?;
+    noter(racine, nom, fichiers, cle.as_ref())?;
     demander_confiance(racine, &m, &empreinte, &mut accord)
 }
 
@@ -1224,8 +1327,8 @@ pub enum Auto {
     Surveillance,
 }
 
-/// Comment lancer : `isole` (Linux, bubblewrap) sans réseau, dossier personnel invisible ; `auto`, sans personne
-/// devant l'écran.
+/// Comment lancer : `isole` (Linux : bubblewrap ; macOS : sandbox-exec) sans réseau, dossier personnel invisible ;
+/// `auto`, sans personne devant l'écran.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct Facon {
     pub isole: bool,
@@ -1265,11 +1368,30 @@ fn commande_de(
             c.args(a);
             c
         }
-        #[cfg(not(target_os = "linux"))]
+        // macOS : sandbox-exec, le bac à sable du système, avec le profil de `isoler` (pas de réseau, dossier
+        // personnel illisible, écriture dans le jetable seulement).
+        #[cfg(target_os = "macos")]
+        Some(jetable) => {
+            let ligne: Vec<String> = std::iter::once(p.to_string_lossy().into_owned()).chain(tout).collect();
+            let a = crate::protection::isoler::arguments_extension(jetable, dossier, &ligne).ok_or_else(|| {
+                tr!(
+                    "Isolement impossible : sandbox-exec n'est pas là.",
+                    "Isolation not possible: sandbox-exec is not there."
+                )
+                .to_string()
+            })?;
+            let mut c = Command::new("/usr/bin/sandbox-exec");
+            c.args(a);
+            c
+        }
+        // Windows Sandbox est une machine à part, effacée à la fermeture : la sortie de l'extension n'en reviendrait
+        // pas à Vanguard (ni son filtre, ni ses constats). Sans équivalent léger dans le système, l'isolement est dit
+        // indisponible, jamais promis.
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         Some(_) => {
             return Err(tr!(
-                "Isolement non disponible sur ce système (Linux et bubblewrap seulement).",
-                "Isolation not available on this system (Linux and bubblewrap only)."
+                "Isolement non disponible sous Windows : Windows Sandbox est une machine à part, d'où la sortie de l'extension ne reviendrait pas.",
+                "Isolation not available on Windows: Windows Sandbox is a separate machine, from which the extension's output would not come back."
             )
             .to_string());
         }
@@ -1277,6 +1399,11 @@ fn commande_de(
     c.current_dir(dossier);
     if !libre {
         environnement(&mut c);
+    }
+    // Isolée sous macOS, l'extension écrit chez elle dans le jetable : son dossier personnel est illisible.
+    #[cfg(target_os = "macos")]
+    if let Some(j) = isole {
+        c.env("HOME", j).env("TMPDIR", j);
     }
     #[cfg(unix)]
     {

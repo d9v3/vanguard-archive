@@ -955,7 +955,7 @@ mod tests {
     fn vraies_copies_si_presentes() {
         use crate::protection::perimes::sources::editeurs;
         let Some(dossier) = std::env::var_os("VANGUARD_ESSAI_PERIMES").map(std::path::PathBuf::from) else {
-            return;
+            return crate::essais::saute("VANGUARD_ESSAI_PERIMES non donné");
         };
         let lire = |nom: &str| std::fs::read(dossier.join(nom)).unwrap();
         let ff = editeurs::firefox(&lire("firefox_versions.json")).unwrap();

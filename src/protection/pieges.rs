@@ -759,7 +759,7 @@ mod tests {
         std::fs::set_permissions(&pieges[0].chemin, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::read(&pieges[0].chemin).is_ok() {
             let _ = std::fs::remove_dir_all(&d);
-            return;
+            return crate::essais::saute("en root : un fichier en 000 se lit encore");
         }
         let (restes, _) = retirer_tous(&pieges, &liste);
         assert_eq!(restes, [pieges[0].chemin.clone()]);

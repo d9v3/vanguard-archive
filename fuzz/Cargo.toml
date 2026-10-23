@@ -21,6 +21,10 @@ libc = "0.2.191"
 # Les lecteurs gzip et zip (src/archives/) : la même version que Cargo.lock de Vanguard.
 miniz_oxide = "=0.9.1"
 
+# `fuzzing` : posé par cargo-fuzz ; src/sqlite.rs s'en sert pour ouvrir sa lecture des colonnes ici.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
 [workspace]
 members = ["."]
 
@@ -97,6 +101,20 @@ bench = false
 [[bin]]
 name = "zip"
 path = "fuzz_targets/zip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sqlite"
+path = "fuzz_targets/sqlite.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "echap"
+path = "fuzz_targets/echap.rs"
 test = false
 doc = false
 bench = false

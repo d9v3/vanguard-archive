@@ -107,6 +107,16 @@ A security flaw? No public issue or pull request: report it privately, see [SECU
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/banniere-blanche.png`, `assets/banniere-noire.png`, `assets/icones/`, `assets/vanguard.ico` | the banner (no background, one per GitHub theme) and the icon (the V), drawn cell by cell in the terminal banner's lettering by `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
+| `src/commande.rs` | runs system commands with a maximum delay (`commande::lancer`), outputs read in the background: a tool that stops answering never freezes Vanguard |
+| `src/http.rs` | Vanguard's HTTPS requests (reqwest, instead of curl), bounded in size and time; an API key never goes through another program's command line |
+| `src/journal.rs` | error log, anonymized, on the key's VANGUARDLOG partition or in Vanguard's folder; brought back by `outils/deployer.sh` |
+| `src/diagnostic.rs` | computer diagnostic: hardware, system, recent errors and crashes; a text copy saved |
+| `src/fenetre.rs` | the terminal window sized to each menu, centered on the screen |
+| `src/essais.rs` | for tests only: a test that cannot run here says it was “skipped”, and `outils/verifier.sh` counts the skips |
+| `src/machine/administrateurs.rs`, `journaux.rs`, `navigateur.rs`, `navigation_detournee.rs` | new administrators (noted the first time they are seen); sealed or cleared logs; browser security settings; imposed proxy and hijacked hosts file, in the check |
+| `src/mise_a_jour/github.rs` | update from GitHub: Ed25519-signed manifest (main or backup key), highest version already seen, freshness; signed history of versions, to check a copy that is not the latest |
+| `src/protection/integrite.rs`, `isoler.rs`, `memoire_dns.rs` | critical file integrity (BLAKE3 fingerprints); sandbox for an unknown program (bubblewrap or firejail, Windows Sandbox, sandbox-exec), also used for extensions; the computer's DNS cache, read without flushing it |
+| `src/protection/kev.rs`, `sites_bloques.rs`, `src/reseau/upnp.rs` | CISA catalog of exploited flaws; dangerous sites blocked by the hosts file (URLhaus, ThreatFox); ports opened to the Internet through UPnP |
 | `fuzz/` | fuzzing bench, outside the program's build: one target per reader, which includes its `src/` module by path (`fuzz/cale/` for the rest), seeds with made-up values (`outils/fuzz.sh`) |
 
 ### Extensions (plugins and lab)
@@ -182,10 +192,18 @@ macOS: built and tested on a GitHub Mac (`.github/workflows/macos.yml`, universa
 every night if the code changed or on demand (`gh workflow run macos.yml`). `deployer.sh` fetches the latest
 successful build for the key.
 
-Continuous integration (`.github/workflows/ci.yml`): on each push to GitHub, formatting, clippy without warnings on
-the four targets and the tests, on Linux; on a real Windows (PowerShell, registry), every night if the code changed,
-on each pull request and on demand (`gh workflow run ci.yml`). Not Windows or Mac on each push: on a private
-repository, their minutes count double and tenfold.
+Continuous integration (`.github/workflows/ci.yml`): on each push to master and each pull request,
+`outils/verifier.sh --ci`, the same check as on the author's computer except Wine, then the check-up on real
+distributions; a real Windows (PowerShell, registry) on each push, each pull request, every night if the code
+changed (`.github/hors-code.txt`) and on demand (`gh workflow run ci.yml`), with the reproducible build and the
+delivered .exe (MinGW) tried on Windows. Every night: cargo audit, cargo deny, and five minutes of fuzzing per
+target. The repository is public: Linux and Windows minutes do not count.
+
+Skipped tests: a test that cannot run on a computer (missing system tool, unreachable registry, root of a namespace)
+does not return silently, it calls `crate::essais::saute("reason")` (`src/essais.rs`): `verifier.sh` counts these
+skips next to the passed tests and shows their reasons, since a skipped test checked nothing. Menu navigation is
+tried for real in a pseudo-terminal (`tests/programme.rs`, `menus_dans_un_terminal`), and the displayed texts are
+compared with master (`outils/textes.py`).
 
 Dependencies: `cargo deny` (`deny.toml`: known RustSec vulnerabilities, licenses from its list, crates.io only,
 duplicates; `extensions/deny.toml` for the extensions library and the Rust example, which have no dependencies) and
@@ -196,8 +214,10 @@ a possible dual license of Vanguard: any other, even free and GPL-compatible (MP
 approval.
 
 Fuzzing: `outils/fuzz.sh [target|tout] [seconds]` (cargo-fuzz and the nightly toolchain), on the readers of data coming
-from elsewhere (plist, HTTP and DNS replies, timeline logs, the router's UPnP XML), by hand: too long for
-`outils/verifier.sh`, which only checks its dependencies (cargo deny, `fuzz/deny.toml`).
+from elsewhere (plist, HTTP and DNS replies, timeline logs, the router's UPnP XML, SQLite, Échap's YAML, archives,
+.exe resources…). `outils/verifier.sh` builds the bench and spends five seconds on each target (a target broken by a
+change in `src/` shows at once), CI five minutes every night; its dependencies go through cargo deny
+(`fuzz/deny.toml`). A target is added in `fuzz/Cargo.toml`, which `fuzz.sh` reads.
 
 Dead links: `outils/liens.py` opens every link of the repository (documentation, the program's code except tests,
 scripts, licenses) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads
@@ -205,6 +225,20 @@ of the latest release. It runs by itself before each push by `deployer.sh` and b
 the internal links (`--hors-ligne`). A dead link stops the push, a doubtful one (a site refusing programs, a server
 down) is only shown. Links that cannot be opened as they are (an API endpoint, a namespace) are described in
 `outils/liens.txt`.
+
+
+### Reproducible build
+
+Published programs are built by `outils/compiler-version.sh`, the same recipe for `outils/deployer.sh`, CI and anyone
+who wants to rebuild a program from its tag: the toolchain of `rust-toolchain.toml`, Cargo.lock as is, the CI's
+cargo-auditable version, the commit date (never the build time), and the build paths removed (the repository becomes
+`/vanguard`, cargo's folder `/cargo`). Measured on October 23, 2026: the same commit built in two different folders
+of this computer gives two identical programs, Linux and Windows alike; before, home folder paths stayed in the .exe
+(`~/Projects/vanguard/target/…`), and two folders gave two programs. What can still differ from one computer to
+another: the versions of musl-gcc and MinGW (gcc, binutils, startup libraries), which compile the C of ring and
+YARA-X and link the programs. CI writes the fingerprint of its builds in its log (`EMPREINTE-VANGUARD-LINUX`,
+`-WINDOWS`), to compare with `SHA256SUMS.txt`; they are not yet the same as the author's computer's while these tools
+differ (Arch versus Ubuntu).
 
 ## Screenshots and social preview
 

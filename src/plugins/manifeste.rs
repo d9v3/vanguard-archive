@@ -89,6 +89,10 @@ pub struct Manifeste {
     /// Qui l'a écrit et d'où il vient, tels que le manifeste les dit : jamais vérifiés.
     pub auteur: Option<String>,
     pub source: Option<String>,
+    /// `cle_auteur` : la clé publique Ed25519 de l'auteur (64 chiffres hexadécimaux). Avec elle, le dossier doit porter
+    /// `plugin.sig`, sa signature : l'auteur est alors vérifié (voir `plugins::auteur_verifie`), et une mise à jour
+    /// signée par une autre clé se voit à l'approbation.
+    pub cle_auteur: Option<[u8; 32]>,
     /// La commande commune, puis celle de chaque section `[système]`.
     commune: Option<Commande>,
     par_systeme: Vec<(Systeme, Commande)>,
@@ -402,7 +406,7 @@ fn construire(paires: Vec<Paire>) -> Result<Manifeste, String> {
     let mut vues: Vec<(Option<String>, String)> = Vec::new();
     let (mut nom, mut titre, mut description) = (None, [None, None], [None, None]);
     let (mut systemes, mut delai) = (None, None);
-    let (mut auteur, mut source) = (None, None);
+    let (mut auteur, mut source, mut cle_auteur) = (None, None, None);
     let (mut confiance_totale, mut dans_le_bilan, mut dans_la_surveillance) = (false, false, false);
     let mut commandes: Vec<CommandeLue> = Vec::new();
     for (section, cle, valeur, ligne) in paires {
@@ -471,6 +475,24 @@ fn construire(paires: Vec<Paire>) -> Result<Manifeste, String> {
             }
             (false, "auteur") => auteur = Some(chaine(valeur)?),
             (false, "source") => source = Some(chaine(valeur)?),
+            (false, "cle_auteur") => {
+                let hex = chaine(valeur)?;
+                let mut cle = [0u8; 32];
+                let lue = hex.len() == 64
+                    && cle.iter_mut().enumerate().all(|(i, o)| {
+                        hex.get(2 * i..2 * i + 2)
+                            .and_then(|h| u8::from_str_radix(h, 16).ok())
+                            .map(|v| *o = v)
+                            .is_some()
+                    });
+                if !lue {
+                    return Err(erreur(tr!(
+                        "« cle_auteur » : la clé publique Ed25519, en 64 chiffres hexadécimaux",
+                        "“cle_auteur”: the Ed25519 public key, as 64 hexadecimal digits"
+                    )));
+                }
+                cle_auteur = Some(cle);
+            }
             (false, "systemes") => match valeur {
                 Valeur::Tableau(t) => systemes = Some(t),
                 _ => {
@@ -592,6 +614,7 @@ fn construire(paires: Vec<Paire>) -> Result<Manifeste, String> {
         dans_la_surveillance,
         auteur,
         source,
+        cle_auteur,
         commune,
         par_systeme,
     };

@@ -497,10 +497,10 @@ mod tests {
             let Some(r) = crate::commande::lancer(Command::new("systemctl").args(["is-active", unite]), 10)
                 .filter(|r| !r.sortie.trim().is_empty())
             else {
-                return;
+                return crate::essais::saute("systemctl sans réponse");
             };
             let Some(natif) = service_tourne_dans(&RACINES_CGROUP.map(Path::new), &format!("{unite}.service")) else {
-                return;
+                return crate::essais::saute("cgroups illisibles");
             };
             assert_eq!(natif, r.sortie.trim() == "active", "{unite} : {}", r.sortie.trim());
         }

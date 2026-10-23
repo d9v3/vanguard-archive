@@ -46,9 +46,9 @@ Menu (↑ ↓ to select, Enter to run, Esc or Backspace to go back; or the numbe
 Search: in any menu, type a word (wifi, disk, dns…): only the lines containing it stay, Enter opens the
 highlighted one, Esc clears it. In the main menu, it also finds each tool of the submenus (“5.3”: group 5,
 3rd tool, which can also be typed as is) and each page of the guide.
-  1  Full check (machine + network), with what changed since the previous check
+  1  Full check: machine + network, with what changed since the previous check
   2  Fix the problems found (each fix is shown, then confirmed)
-  3  Detailed report (browser), with the grade history
+  3  Detailed report in the browser, with the grade history
 
   4  This machine ›
        Security audit · Updates (system, programs, drivers, firmware)
@@ -80,11 +80,13 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Watcher (Linux): programs started and connections closed seen as they happen, off by default
          (vanguard watcher on)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
-       Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
+       Address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent; vanguard blocklists)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
        NAT type for gaming (open, moderate or strict) · Hidden cameras? (rental, someone else's place)
        Router and connected devices: the router's model, cameras, printers, NAS… and their default password
          (from the last scan, nothing is probed)
+       Public Wi-Fi mode (café, hotel, airport): incoming connections closed, sharing and name announcement off,
+         protective DNS, after your consent; everything put back exactly when you leave (vanguard public-wifi)
   6  Antivirus and protection ›
        Quick scan · Full scan of the home folder
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)
@@ -100,14 +102,23 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Email address: has it leaked? (sent to the search service, after your consent)
        Who talks to the Internet? Each program's connections, with the server's name, and known botnet
          servers (Feodo Tracker, ThreatFox); read-only
-       Camera and microphone: who uses them? (Windows: each program and the last time; read-only)
+       Camera and mic: who uses them? (Windows: each program and the last time; read-only)
        Privacy check: who can access location, contacts, camera and microphone (read-only)
        Is someone controlling my PC? Remote control tools (tech-support scam), removed after your consent
        Is this link dangerous? Checked without opening it; its age and public lists, after your consent
        Check a downloaded file: checksum compared with the site's, name and content, YARA, antivirus
-       Quarantine: the files isolated by the antivirus or YARA, put back in their place (false positive) or deleted
+       Quarantine: restore a file isolated by the antivirus or YARA (false positive), or delete it
        Secrets in git projects: passwords and keys forgotten in the history (and gitleaks, if present)
        Flaws in Docker images: known serious or critical flaws (trivy, if present)
+       Block dangerous sites: URLhaus ones and ThreatFox command servers, in the hosts file, after your consent;
+         removed exactly (vanguard dangerous-sites)
+       Latest exploited flaws: those CISA just added to its catalog (vanguard latest-flaws)
+       Is this email a scam? A saved email (.eml) examined without opening anything: sender, links, attachments
+         (vanguard suspicious-email)
+       Spyware: is someone watching me? Known servers and sites, programs reading the keyboard, monitoring
+         permissions (read-only; vanguard spyware)
+       Outdated software (Windows, macOS): browsers, Office, Acrobat, Java, 7-Zip… and their exploited flaws
+         (read-only; vanguard outdated-software)
        Threat blocking: one-click "Block" for each threat found (action shown, written down, undoable);
          active protection, once enabled, blocks clear-cut threats by itself (vanguard blocking)
   7  Install and play ›

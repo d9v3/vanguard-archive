@@ -108,6 +108,16 @@ Une faille de sécurité ? Pas de ticket ni de demande de fusion publics : signa
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/banniere-blanche.png`, `assets/banniere-noire.png`, `assets/icones/`, `assets/vanguard.ico` | la bannière (sans fond, une par thème de GitHub) et l'icône (le V), dessinées case par case dans l'écriture de la bannière du terminal par `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
+| `src/commande.rs` | lancement des commandes du système avec un délai maximal (`commande::lancer`), sorties lues en fond : un outil qui ne répond plus ne fige jamais Vanguard |
+| `src/http.rs` | les demandes HTTPS de Vanguard (reqwest, à la place de curl), bornées en taille et en durée ; une clé d'API ne passe jamais par la ligne de commande d'un autre programme |
+| `src/journal.rs` | journal des erreurs, anonymisé, sur la partition VANGUARDLOG de la clé ou dans le dossier de Vanguard ; rapatrié par `outils/deployer.sh` |
+| `src/diagnostic.rs` | diagnostic de l'ordinateur : matériel, système, erreurs et plantages récents ; une copie texte enregistrée |
+| `src/fenetre.rs` | la fenêtre du terminal à la taille de chaque menu, centrée sur l'écran |
+| `src/essais.rs` | pour les tests seulement : un essai qui ne peut pas tourner ici se dit « sauté », et `outils/verifier.sh` compte les sauts |
+| `src/machine/administrateurs.rs`, `journaux.rs`, `navigateur.rs`, `navigation_detournee.rs` | nouveaux administrateurs (notés la première fois qu'ils sont vus) ; journaux scellés ou effacés ; réglages de sécurité des navigateurs ; proxy imposé et fichier hosts détourné, au bilan |
+| `src/mise_a_jour/github.rs` | mise à jour depuis GitHub : manifeste signé en Ed25519 (clé principale ou de secours), plus haute version déjà vue, fraîcheur ; historique signé des versions, pour vérifier une copie qui n'est pas la dernière |
+| `src/protection/integrite.rs`, `isoler.rs`, `memoire_dns.rs` | intégrité des fichiers critiques (empreintes BLAKE3) ; bac à sable d'un programme inconnu (bubblewrap ou firejail, Windows Sandbox, sandbox-exec), aussi pour les extensions ; la mémoire DNS de l'ordinateur, lue sans la vider |
+| `src/protection/kev.rs`, `sites_bloques.rs`, `src/reseau/upnp.rs` | catalogue des failles exploitées de la CISA ; sites dangereux bloqués par le fichier hosts (URLhaus, ThreatFox) ; ports ouverts vers Internet par UPnP |
 | `fuzz/` | banc de fuzzing, hors de la compilation du programme : une cible par lecteur, qui inclut son module de `src/` par son chemin (`fuzz/cale/` pour le reste), graines aux valeurs inventées (`outils/fuzz.sh`) |
 
 ### Extensions (plugins et laboratoire)
@@ -183,10 +193,18 @@ macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`, 
 Intel), chaque nuit si le code a changé ou à la demande (`gh workflow run macos.yml`). `deployer.sh` récupère la
 dernière compilation réussie pour la clé.
 
-Intégration continue (`.github/workflows/ci.yml`) : à chaque envoi sur GitHub, la mise en forme, clippy sans
-remarque sur les quatre cibles et les tests, sous Linux ; sur un vrai Windows (PowerShell, registre), chaque nuit si
-le code a changé, à chaque demande de fusion et à la demande (`gh workflow run ci.yml`). Pas Windows ni Mac à chaque
-envoi : sur un dépôt privé, leurs minutes comptent double et dix fois.
+Intégration continue (`.github/workflows/ci.yml`) : à chaque envoi sur master et à chaque demande de fusion,
+`outils/verifier.sh --ci`, la même vérification que sur l'ordinateur de l'auteur sauf Wine, puis le bilan sur de
+vraies distributions ; un vrai Windows (PowerShell, registre) à chaque envoi, à chaque demande de fusion, la nuit si
+le code a changé (`.github/hors-code.txt`) et à la demande (`gh workflow run ci.yml`), avec la compilation
+reproductible et le .exe livré (MinGW) essayé sur Windows. Chaque nuit : cargo audit, cargo deny, et cinq minutes
+de fuzzing par cible. Le dépôt est public : les minutes de Linux et de Windows ne comptent pas.
+
+Tests sautés : un test qui ne peut pas tourner sur un ordinateur (outil du système absent, registre inaccessible,
+root d'un espace de noms) ne rend pas la main en silence, il appelle `crate::essais::saute("raison")`
+(`src/essais.rs`) : `verifier.sh` compte ces sauts à côté des tests passés et en montre les raisons, car un test
+sauté n'a rien vérifié. La navigation dans les menus est essayée pour de vrai dans un pseudo-terminal
+(`tests/programme.rs`, `menus_dans_un_terminal`), et les textes affichés comparés à master (`outils/textes.py`).
 
 Dépendances : `cargo deny` (`deny.toml` : failles connues de RustSec, licences de sa liste, crates.io seulement,
 doublons ; `extensions/deny.toml` pour la bibliothèque des extensions et l'exemple en Rust, sans dépendance) et
@@ -197,8 +215,10 @@ double licence possible de Vanguard : toute autre, même libre et compatible ave
 l'accord de l'auteur.
 
 Fuzzing : `outils/fuzz.sh [cible|tout] [secondes]` (cargo-fuzz et la chaîne nightly), sur les lecteurs de données venues
-d'ailleurs (plist, réponses HTTP et DNS, journaux de la chronologie, XML UPnP de la box), à la main : trop long pour
-`outils/verifier.sh`, qui vérifie seulement ses dépendances (cargo deny, `fuzz/deny.toml`).
+d'ailleurs (plist, réponses HTTP et DNS, journaux de la chronologie, XML UPnP de la box, SQLite, YAML d'Échap,
+archives, ressources des .exe…). `outils/verifier.sh` compile le banc et passe cinq secondes sur chaque cible (une
+cible cassée par un changement de `src/` se voit tout de suite), la CI cinq minutes chaque nuit ; ses dépendances
+passent à cargo deny (`fuzz/deny.toml`). Une cible s'ajoute dans `fuzz/Cargo.toml`, que `fuzz.sh` lit.
 
 Liens morts : `outils/liens.py` ouvre tous les liens du dépôt (documentation, code du programme hors tests, scripts,
 licences) et vérifie les liens internes des pages Markdown : fichier visé, titre d'une ancre, téléchargements de la
@@ -206,6 +226,21 @@ dernière version. Il est lancé tout seul avant chaque envoi par `deployer.sh` 
 vérifie les liens internes (`--hors-ligne`). Un lien mort arrête l'envoi, un lien douteux (site qui refuse les
 programmes, serveur en panne) est seulement montré. Les liens qu'on ne peut pas ouvrir tels quels (point d'accès
 d'une API, espace de noms) se décrivent dans `outils/liens.txt`.
+
+
+### Compilation reproductible
+
+Les programmes publiés sont compilés par `outils/compiler-version.sh`, la même recette pour `outils/deployer.sh`, la
+CI et quiconque veut refaire un programme à partir de son étiquette : la chaîne de `rust-toolchain.toml`, Cargo.lock
+tel quel, cargo-auditable de la version de la CI, la date du commit (jamais l'heure de la compilation), et les chemins
+de la compilation retirés (le dépôt devient `/vanguard`, le dossier de cargo `/cargo`). Mesuré le 23 octobre 2026 :
+le même commit compilé dans deux dossiers différents de cet ordinateur donne deux programmes identiques, Linux comme
+Windows ; avant, les chemins du dossier personnel restaient dans le .exe (`~/Projects/vanguard/target/…`), et deux
+dossiers donnaient deux programmes. Ce qui peut encore différer d'un ordinateur à l'autre : les versions de musl-gcc
+et de MinGW (gcc, binutils, bibliothèques de démarrage), qui compilent le C de ring et de YARA-X et lient les
+programmes. La CI écrit l'empreinte de ses compilations dans son journal (`EMPREINTE-VANGUARD-LINUX`, `-WINDOWS`), à
+comparer à `SHA256SUMS.txt` ; elles ne sont pas encore les mêmes que celles de l'ordinateur de l'auteur tant que ces
+outils diffèrent (Arch contre Ubuntu).
 
 ## Captures d'écran et image de partage
 

@@ -47,9 +47,9 @@ Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap ou Retour arrière pour 
 Recherche : dans tout menu, un mot tapé (wifi, disque, dns…) ne laisse que les lignes qui le contiennent ;
 Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trouve aussi chaque outil des sous-menus
 (« 5.3 » : groupe 5, 3e outil, aussi tapable tel quel) et chaque page du guide.
-  1  Bilan complet (machine + réseau), avec ce qui a changé depuis le bilan précédent
+  1  Bilan complet : machine + réseau, avec ce qui a changé depuis le bilan précédent
   2  Corriger les problèmes trouvés (chaque correction est montrée, puis confirmée)
-  3  Rapport détaillé (navigateur), avec la courbe des notes
+  3  Rapport détaillé dans le navigateur, avec la courbe des notes
 
   4  Cette machine ›
        Audit de sécurité · Mises à jour (système, programmes, pilotes, firmware)
@@ -81,11 +81,13 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Veilleur (Linux) : programmes lancés et connexions fermées vus sur le moment, coupé par défaut
          (vanguard veilleur on)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé aux mesures habituelles
-       Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après accord)
+       Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après accord ; vanguard listes-noires)
        Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur le routeur)
        Type de NAT pour le jeu (ouvert, modéré ou strict) · Caméras cachées ? (location, chez quelqu'un)
        Box et objets connectés : modèle du routeur, caméras, imprimantes, NAS… et leur mot de passe d'origine
          (d'après le dernier scan, rien n'est sondé)
+       Mode Wi-Fi public (café, hôtel, aéroport) : entrées fermées, partage et annonce du nom coupés, DNS
+         protecteur, après accord ; tout se remet exactement en partant (vanguard wifi-public)
   6  Antivirus et protection ›
        Analyse rapide · Analyse complète du dossier personnel
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
@@ -95,7 +97,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
          à la demande ; la mémoire de LSASS et des processus protégés n'est jamais lue (vanguard memoire)
        Fichiers-pièges : des leurres dans les dossiers personnels ; un rançongiciel qui les touche déclenche l'alerte
        Blocages de Windows Defender : vol de mots de passe, pièces jointes piégées, sites dangereux, rançongiciels
-       Bac à sable : lancer un programme inconnu sans réseau, à l'écart des fichiers personnels
+       Bac à sable : programme inconnu lancé sans réseau, à l'écart des fichiers personnels
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Mots de passe des navigateurs : comptés et leur protection décrite, jamais lus ; la vérification de chacun
        Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après accord)
@@ -106,9 +108,18 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Quelqu'un contrôle mon ordi ? Logiciels de prise de contrôle à distance (faux technicien), retirés après accord
        Ce lien est-il dangereux ? Examiné sans l'ouvrir ; son âge et des listes publiques, après accord
        Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA, antivirus
-       Quarantaine : les fichiers isolés par l'antivirus ou YARA, remis à leur place (faux positif) ou supprimés
+       Quarantaine : remettre un fichier isolé par l'antivirus ou YARA (faux positif), ou le supprimer
        Secrets dans les projets git : mots de passe et clés oubliés dans l'historique (et gitleaks, s'il est là)
        Failles des images Docker : failles connues, graves ou critiques (trivy, s'il est là)
+       Bloquer les sites dangereux : ceux d'URLhaus et les serveurs de commande de ThreatFox, dans le fichier
+         hosts, après accord ; retirés exactement (vanguard sites-dangereux)
+       Dernières failles exploitées : celles que la CISA vient d'ajouter à son catalogue (vanguard dernieres-failles)
+       Ce courriel est-il une arnaque ? Un courriel enregistré (.eml) examiné sans rien ouvrir : expéditeur, liens,
+         pièces jointes (vanguard courriel-suspect)
+       Logiciels espions : en ai-je un ? Serveurs et sites connus, programmes qui lisent le clavier, autorisations
+         de surveillance (lecture seule ; vanguard logiciels-espions)
+       Logiciels pas à jour (Windows, macOS) : navigateurs, Office, Acrobat, Java, 7-Zip… et leurs failles
+         exploitées (lecture seule ; vanguard logiciels-perimes)
        Blocage des menaces : « Bloquer » d'un clic pour chaque menace trouvée (geste montré, noté, annulable) ;
          la protection active, une fois mise en marche, bloque toute seule ce qui ne fait aucun doute
          (vanguard blocage)

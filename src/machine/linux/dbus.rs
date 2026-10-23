@@ -1581,7 +1581,7 @@ mod tests {
             20,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("systemctl absent");
         };
         let mut attendues: Vec<String> = r
             .sortie

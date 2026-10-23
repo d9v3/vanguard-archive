@@ -1540,7 +1540,7 @@ mod tests {
     #[test]
     fn comme_pacman_q() {
         let Some(sortie) = commande("pacman", &["-Q"]) else {
-            return;
+            return crate::essais::saute("pacman absent");
         };
         let attendu: Vec<(String, String)> = sortie
             .lines()
@@ -1568,7 +1568,7 @@ mod tests {
     #[test]
     fn comme_dpkg_query() {
         let Some(sortie) = commande("dpkg-query", &["-W", "-f=${db:Status-Status} ${Package} ${Version}\n"]) else {
-            return;
+            return crate::essais::saute("dpkg-query absent");
         };
         let mut attendu: Vec<(String, String)> = sortie
             .lines()
@@ -1590,7 +1590,7 @@ mod tests {
     #[test]
     fn comme_lsblk() {
         let Some(sortie) = commande("lsblk", &["-dnbP", "-o", "NAME,SIZE,ROTA,RM,TYPE,TRAN,MODEL,SERIAL"]) else {
-            return;
+            return crate::essais::saute("lsblk absent");
         };
         let natifs = disques();
         for ligne in sortie.lines() {
@@ -1626,11 +1626,11 @@ mod tests {
     #[test]
     fn comme_findmnt() {
         let Some(sortie) = commande("findmnt", &["-no", "SOURCE,FSTYPE", "/"]) else {
-            return;
+            return crate::essais::saute("findmnt absent");
         };
         let mut c = sortie.split_whitespace();
         let (Some(source), Some(genre)) = (c.next(), c.next()) else {
-            return;
+            return crate::essais::saute("findmnt illisible");
         };
         // findmnt ajoute « [/sous-volume] » à la source d'un Btrfs.
         let source = source.split('[').next().unwrap_or(source);
@@ -1645,7 +1645,7 @@ mod tests {
     #[test]
     fn comme_id_ng() {
         let Some(sortie) = commande("id", &["-nG"]) else {
-            return;
+            return crate::essais::saute("id absent");
         };
         let attendu: HashSet<&str> = sortie.split_whitespace().collect();
         let natif = groupes().unwrap();

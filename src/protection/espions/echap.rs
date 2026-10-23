@@ -868,7 +868,7 @@ mod tests {
     #[test]
     fn vrai_fichier_d_echap() {
         let Some(chemin) = std::env::var_os("VANGUARD_ESSAI_ECHAP") else {
-            return;
+            return crate::essais::saute("VANGUARD_ESSAI_ECHAP non donné");
         };
         let texte = std::fs::read_to_string(chemin).unwrap();
         let l = lire_yaml(&texte).unwrap();

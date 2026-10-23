@@ -1,35 +1,62 @@
 #!/usr/bin/env bash
 # Tout vérifier en une commande, avant un commit ou une livraison : mise en forme, clippy sur les quatre cibles, tests
 # Linux et Windows (sous Wine), les tests Linux refaits sans Internet, scripts PowerShell, shell et Python, essais des
-# outils de la clé (outils/essais-cle.sh), liens internes, textes français et anglais, dépendances (cargo deny) et
-# leurs failles connues (cargo audit).
+# outils de la clé (outils/essais-cle.sh), de la signature des versions (outils/essais-signature.sh) et de ce script
+# même sous --seulement (outils/essais-verifier.sh), liens internes, textes français et anglais (outils/textes.py),
+# dépendances (cargo deny) et leurs failles connues (cargo audit), banc de fuzzing compilé et passé quelques secondes
+# par cible.
+# La CI lance ce même script (.github/workflows/ci.yml) : une seule logique, ici.
 # Chaque cible de compilation a sa chaîne (clippy, puis ses tests) et les quatre tournent en même temps : cargo garde
 # un dossier par cible, elles ne s'attendent presque pas. À la fin, une ligne par étape ; le code de sortie dit si tout
 # est vert.
 #   outils/verifier.sh               tout
 #   outils/verifier.sh --rapide      mise en forme, clippy et tests Linux seulement
 #   outils/verifier.sh --sans-wine   tout, sauf les tests Windows
+#   outils/verifier.sh --ci          pour la CI de GitHub : tout sauf Wine, et l'essai du veilleur sur le vrai noyau
+#                                    peut s'y dire sauté (les runners refusent le connecteur de processus)
+#   outils/verifier.sh --seulement dependances,failles-connues   ces étapes-là (la nuit en CI), sans les autres ;
+#                                    une étape demandée qui se dit sautée, ou ne tourne pas, y est un échec, et un nom
+#                                    inconnu est refusé (code 2)
+# Un test qui ne peut pas tourner ici (outil du système absent, root d'un espace de noms…) se dit « sauté »
+# (src/essais.rs) : ses sauts sont comptés à côté des tests passés, et leurs raisons montrées.
 # Les scripts PowerShell du programme sont aussi analysés et rejoués dans un bac à sable (outils/rejouer-ps.py).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
 MODE=${1:-}
+SEULEMENT=
+if [[ $MODE == --seulement ]]; then
+  SEULEMENT=",${2:?--seulement étape[,étape]},"
+  # Un nom mal écrit, ou une étape renommée sans suivre ci.yml, ne lancerait rien et finirait « Tout est vert » :
+  # l'audit de nuit serait vert pour toujours sans rien vérifier. Les noms connus sont ceux du résumé (les appels
+  # de ligne, plus bas) : la liste est ce script même, rien n'est recopié.
+  CONNUES=$(sed -nE 's/^ *ligne ([a-z-]+) .*/\1/p' "$0")
+  for n in ${2//,/ }; do
+    grep -qxF -- "$n" <<<"$CONNUES" || { echo "✖ --seulement : étape inconnue : $n" >&2; exit 2; }
+  done
+fi
 WINE=${VANGUARD_WINE:-$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine}
+# pwsh : celui que l'auteur garde à part, sinon celui du système (préinstallé sur les runners Linux de GitHub).
 PWSH=${VANGUARD_PWSH:-$HOME/.cache/vanguard-dev/pwsh/pwsh}
+[[ -x $PWSH ]] || PWSH=$(command -v pwsh || true)
 # Journaux et préfixe Wine hors de /tmp, dont le quota est partagé par les sessions ; retirés à la fin.
+mkdir -p "$HOME/.cache/vanguard-dev"
 TRAVAIL=$(mktemp -d "$HOME/.cache/vanguard-dev/verifier.XXXX")
 trap 'rm -rf "$TRAVAIL"' EXIT
 DEBUT=$SECONDS
 
 # Une étape qui ne peut pas tourner ici (outil absent) sort avec ce code et dit pourquoi en première ligne : elle est
-# dite « sautée », sans compter comme un échec. 77, comme les tests d'automake ; 1 et 2 sont déjà ceux des échecs.
+# dite « sautée », sans compter comme un échec, sauf avec --seulement (voir ligne). 77, comme les tests d'automake ;
+# 1 et 2 sont déjà ceux des échecs.
 SAUTEE=77
 
-# Une étape : sa commande, son journal, son état (« ok 41 », « sautee 0 » ou « echec 41 », en secondes).
+# Une étape : sa commande, son journal, son état (« ok 41 », « sautee 0 » ou « echec 41 », en secondes). Avec
+# --seulement, une étape qui n'est pas demandée ne tourne pas (« non lancé » au résumé, qui ne la montre pas).
 etape() {
   local nom=$1 debut=$SECONDS code
   shift
+  [[ -z $SEULEMENT || $SEULEMENT == *",$nom,"* ]] || return 0
   "$@" >"$TRAVAIL/$nom.log" 2>&1
   code=$?
   if ((code == 0)); then
@@ -64,11 +91,28 @@ for outil in musl-gcc x86_64-w64-mingw32-gcc clang; do
   command -v "$outil" >/dev/null || echo "⚠ $outil manque (Arch : musl, mingw-w64-gcc, clang) : la compilation de YARA-X échouera."
 done
 
+# Les tests sautés (src/essais.rs) d'une étape : un fichier par étape, qu'ils remplissent d'une ligne chacun.
+sautes() { echo "$TRAVAIL/sautes-$1.txt"; }
+
+# Les tests Linux : le veilleur sur le vrai noyau est exigé (VANGUARD_EXIGER_VEILLEUR : son échec fait échouer le
+# test au lieu de le dire sauté), sauf en CI, où les runners n'ouvrent pas le connecteur de processus.
+tests_linux() {
+  if [[ $MODE == --ci ]]; then
+    VANGUARD_TESTS_SAUTES=$(sautes tests-linux) cargo test -q
+  else
+    VANGUARD_TESTS_SAUTES=$(sautes tests-linux) VANGUARD_EXIGER_VEILLEUR=1 cargo test -q
+  fi
+}
+
 tests_wine() {
   local prefixe resultat
+  [[ -x $WINE ]] || { echo "Wine absent ($WINE ; VANGUARD_WINE pour un autre)"; return "$SAUTEE"; }
   prefixe=$(mktemp -d "$TRAVAIL/wine.XXXX")
+  # Le fichier des sauts sous son nom pour Windows : Wine montre la racine de Linux comme le lecteur Z:.
+  local f
+  f=$(sautes tests-windows)
   WINEPREFIX=$prefixe WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=$WINE \
-    cargo test -q --target x86_64-pc-windows-gnu
+    VANGUARD_TESTS_SAUTES="Z:${f//\//\\}" cargo test -q --target x86_64-pc-windows-gnu
   resultat=$?
   # Le serveur de Wine survit quelques secondes aux tests et écrit encore dans le préfixe : arrêté avant le ménage.
   WINEPREFIX=$prefixe "${WINE%/*}/wineserver" -k 2>/dev/null
@@ -78,6 +122,7 @@ tests_wine() {
 
 scripts_powershell() {
   local erreurs=0 f
+  [[ -n $PWSH ]] || { echo "pwsh absent (VANGUARD_PWSH pour le donner)"; return "$SAUTEE"; }
   for f in outils/test-windows/*.ps1 extensions/exemples/*/*.ps1; do
     "$PWSH" -NoProfile -NonInteractive -Command \
       "\$e = \$null; \$t = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$PWD/$f', [ref]\$t, [ref]\$e); if (\$e.Count) { \$e | ForEach-Object { '$f : ' + \$_.Message }; exit 1 }" ||
@@ -91,8 +136,20 @@ scripts_powershell() {
 # lui-même et dire pourquoi. Sans espaces de noms d'utilisateur (noyau qui les refuse), l'étape n'est pas lancée.
 hors_ligne() {
   unshare -rn true 2>/dev/null || { echo "espaces de noms d'utilisateur indisponibles"; return 2; }
-  unshare -rn sh -c 'ip link set lo up && VANGUARD_HORS_LIGNE=1 exec cargo test -q --offline'
+  VANGUARD_TESTS_SAUTES=$(sautes tests-hors-ligne) \
+    unshare -rn sh -c 'ip link set lo up && VANGUARD_HORS_LIGNE=1 exec cargo test -q --offline'
 }
+
+rejeu_powershell() {
+  [[ -n $PWSH ]] || { echo "pwsh absent (VANGUARD_PWSH pour le donner)"; return "$SAUTEE"; }
+  python3 outils/rejouer-ps.py --pwsh "$PWSH"
+}
+
+# Le banc de fuzzing (fuzz/) compilé, puis chaque cible passée quelques secondes (VANGUARD_FUZZ_SECONDES, 5 par
+# défaut) : une cible que la moindre modification de src/ a cassée se voit à la vérification suivante, pas au
+# prochain lancement à la main ; la CI y passe cinq minutes par cible chaque nuit. Sautée sans cargo-fuzz ou sans la
+# chaîne nightly (outils/fuzz.sh le dit).
+fuzzing() { bash outils/fuzz.sh tout "${VANGUARD_FUZZ_SECONDES:-5}"; }
 
 # La bibliothèque des extensions (extensions/sdk) et l'exemple en Rust : des crates à part, hors de l'espace de travail
 # de Vanguard ; leurs propres clippy, tests et compilation, dans un dossier de compilation à eux.
@@ -155,52 +212,32 @@ dependances() {
 }
 
 # Les failles connues des dépendances selon cargo audit : un second avis, indépendant de cargo deny (sa propre copie
-# de la base RustSec, sa propre lecture de Cargo.lock), jugé comme outils/failles-programmes.sh juge les programmes :
-# abandon, code défaillant et avis « notice » refusés, seules exceptions celles de deny.toml (--ignore, par
-# outils/exceptions-rustsec.py). .cargo/audit.toml, que cargo audit lit aussi, doit en avoir les mêmes identifiants.
-# Sautée sans cargo-audit, et sans Internet : une base qui n'est plus à jour dirait vert à tort.
-failles_connues() {
-  python3 -I outils/exceptions-rustsec.py --audit-toml || return 1
-  command -v cargo-audit >/dev/null || { echo "cargo-audit absent (cargo install --locked cargo-audit)"; return "$SAUTEE"; }
-  internet || { echo "sans Internet, base RustSec pas à jour"; return "$SAUTEE"; }
-  local exceptions id sortie code=0 options=(--color never --deny unmaintained --deny unsound)
-  exceptions=$(python3 -I outils/exceptions-rustsec.py) || return 1
-  for id in $exceptions; do
-    options+=(--ignore "$id")
-  done
-  sortie=$(cargo audit "${options[@]}" 2>&1) || code=1
-  printf '%s\n' "$sortie"
-  # cargo audit n'a pas d'option pour refuser une « notice » : comptée ici, comme dans outils/failles-programmes.sh
-  # (une version retirée de crates.io reste un simple avertissement).
-  if awk '$1 == "Warning:" && $2 != "yanked" { n++ } END { exit !n }' <<<"$sortie"; then
-    echo "✖ avis que cargo deny refuse aussi (notice)"
-    code=1
-  fi
-  echo "exceptions de deny.toml : $(printf '%s\n' "$exceptions" | paste -sd, - | sed 's/,/, /g')"
-  return "$code"
-}
+# de la base RustSec, sa propre lecture de Cargo.lock), jugé par outils/failles-programmes.sh comme il juge les
+# programmes compilés : abandon, code défaillant et avis « notice » refusés, seules exceptions celles de deny.toml,
+# que .cargo/audit.toml doit recopier. Une seule copie de ce jugement, que la CI lance aussi. Sautée sans
+# cargo-audit, et sans Internet : une base qui n'est plus à jour dirait vert à tort.
+failles_connues() { bash outils/failles-programmes.sh --depot; }
 
-# Les textes affichés comparés à master : un texte perdu ou nouveau se voit avant le commit. Sur master, rien à
-# comparer.
+# Les textes affichés comparés à master (outils/textes.py) : un texte perdu ou nouveau se voit avant le commit. Sur
+# master, rien à comparer ; sans master (clone partiel de la CI), sautée.
 textes() {
   [[ $(git rev-parse HEAD) == $(git rev-parse master 2>/dev/null) ]] && { echo "sur master"; return 0; }
-  python3 "$HOME/.cache/vanguard-dev/outils-dp40/textes.py"
+  python3 outils/textes.py
 }
 
-if ! etape mise-en-forme cargo fmt --check; then
+if [[ -z $SEULEMENT ]] && ! etape mise-en-forme cargo fmt --check; then
   echo "✖ mise en forme : lancer cargo fmt"
   sed -n '1,20p' "$TRAVAIL/mise-en-forme.log"
   exit 1
 fi
 
-# VANGUARD_EXIGER_VEILLEUR : l'essai du veilleur sur le vrai noyau échoue au lieu de se dire sauté (un test sauté
-# passerait pour réussi) ; pas dans la passe sans Internet, où le connecteur de processus n'existe pas.
+# Pas d'exigence du veilleur dans la passe sans Internet, où le connecteur de processus n'existe pas.
 {
-  etape clippy-linux clippy x86_64-unknown-linux-musl && etape tests-linux env VANGUARD_EXIGER_VEILLEUR=1 cargo test -q &&
+  etape clippy-linux clippy x86_64-unknown-linux-musl && etape tests-linux tests_linux &&
     if [[ $MODE != --rapide ]]; then etape tests-hors-ligne hors_ligne; fi
 } &
 if [[ $MODE != --rapide ]]; then
-  if [[ $MODE == --sans-wine ]]; then
+  if [[ $MODE == --sans-wine || $MODE == --ci ]]; then
     etape clippy-windows clippy x86_64-pc-windows-gnu &
   else
     { etape clippy-windows clippy x86_64-pc-windows-gnu && etape tests-windows tests_wine; } &
@@ -208,15 +245,18 @@ if [[ $MODE != --rapide ]]; then
   etape clippy-macos-arm clippy aarch64-apple-darwin &
   etape clippy-macos-intel clippy x86_64-apple-darwin &
   etape powershell scripts_powershell &
-  etape rejeu-powershell python3 outils/rejouer-ps.py --pwsh "$PWSH" &
+  etape rejeu-powershell rejeu_powershell &
   etape shell scripts_shell &
   etape essais-cle bash outils/essais-cle.sh &
+  etape signature bash outils/essais-signature.sh &
+  etape essais-verifier bash outils/essais-verifier.sh &
   etape extensions extensions &
   etape python scripts_python &
   etape liens python3 outils/liens.py --hors-ligne &
   etape textes textes &
   etape dependances dependances &
   etape failles-connues failles_connues &
+  etape fuzzing fuzzing &
 fi
 wait
 
@@ -226,22 +266,50 @@ for d in /tmp/vanguard-tests-*; do
   [[ -d $d ]] && ! kill -0 "${d##*-}" 2>/dev/null && rm -rf "$d"
 done
 
-# Nombre de tests passés, lu dans « test result: ok. 313 passed ».
-passes() { grep -o 'ok\. [0-9]* passed' "$TRAVAIL/$1.log" 2>/dev/null | awk '{s += $2} END {print s + 0}'; }
+# Nombre de tests passés, lu dans « test result: ok. 313 passed », et des sautés parmi eux : « 1544 » ou « 1544,
+# 12 sautés ».
+passes() {
+  local n s
+  n=$(grep -o 'ok\. [0-9]* passed' "$TRAVAIL/$1.log" 2>/dev/null | awk '{s += $2} END {print s + 0}')
+  s=$(cat "$(sautes "$1")" 2>/dev/null | wc -l)
+  if ((s > 0)); then echo "$n, $s sautés"; else echo "$n"; fi
+}
+
+# Les raisons des tests sautés d'une étape, les plus fréquentes d'abord : ce que cette passe n'a pas vérifié.
+raisons_des_sautes() {
+  local f
+  f=$(sautes "$1")
+  [[ -s $f ]] || return 0
+  cut -f2 "$f" | sort | uniq -c | sort -rn | head -n 8 | sed -E 's/^ *([0-9]+) /      \1 × /'
+  (($(cut -f2 "$f" | sort -u | wc -l) <= 8)) || echo "      … (liste complète : VANGUARD_TESTS_SAUTES=fichier cargo test)"
+}
 
 ECHECS=0
 # Le résumé est aussi gardé dans un fichier : la page des fonctions (outils/page-fonctions.py) y lit les nombres de
 # tests de la dernière vérification, au déploiement.
 RESUME=$HOME/.cache/vanguard-dev/verifier-dernier.txt
-mkdir -p "$(dirname "$RESUME")" && : >"$RESUME"
+# Avec --seulement, le résumé de la dernière vérification complète reste celui que la page des fonctions lit.
+[[ -n $SEULEMENT ]] && RESUME=/dev/null
+mkdir -p "$HOME/.cache/vanguard-dev" && : >"$RESUME"
 ligne() {
   local nom=$1 libelle=$2 etat duree
-  [[ -f $TRAVAIL/$nom.etat ]] || { printf '  · %-34s non lancé\n' "$libelle" | tee -a "$RESUME"; return; }
+  [[ -z $SEULEMENT || $SEULEMENT == *",$nom,"* ]] || return 0
+  # Une étape demandée nommément (--seulement : l'audit de nuit de la CI) qui n'a pas tourné, ou qui s'est dite
+  # sautée, n'a rien vérifié : ce n'est pas un vert. Sans --seulement, un saut a ses raisons (outil absent ici,
+  # clone partiel de la CI) et reste dit sans échouer.
+  if [[ ! -f $TRAVAIL/$nom.etat ]]; then
+    printf '  · %-34s non lancé\n' "$libelle" | tee -a "$RESUME"
+    [[ -z $SEULEMENT ]] || ECHECS=$((ECHECS + 1))
+    return
+  fi
   read -r etat duree <"$TRAVAIL/$nom.etat"
   if [[ $etat == ok ]]; then
     printf '  ✔ %-34s %4s s\n' "$libelle" "$duree" | tee -a "$RESUME"
-  elif [[ $etat == sautee ]]; then
+  elif [[ $etat == sautee && -z $SEULEMENT ]]; then
     printf '  · %-34s sautée : %s\n' "$libelle" "$(head -n1 "$TRAVAIL/$nom.log")" | tee -a "$RESUME"
+  elif [[ $etat == sautee ]]; then
+    ECHECS=$((ECHECS + 1))
+    printf '  ✖ %-34s sautée, rien vérifié : %s\n' "$libelle" "$(head -n1 "$TRAVAIL/$nom.log")" | tee -a "$RESUME"
   else
     ECHECS=$((ECHECS + 1))
     printf '  ✖ %-34s %4s s\n' "$libelle" "$duree" | tee -a "$RESUME"
@@ -270,16 +338,23 @@ echo
 ligne mise-en-forme "mise en forme"
 ligne clippy-linux "clippy Linux"
 ligne tests-linux "tests Linux ($(passes tests-linux))"
+raisons_des_sautes tests-linux
 if [[ $MODE != --rapide ]]; then
   ligne tests-hors-ligne "tests Linux sans Internet ($(passes tests-hors-ligne))"
+  raisons_des_sautes tests-hors-ligne
   ligne clippy-windows "clippy Windows"
-  [[ $MODE == --sans-wine ]] || ligne tests-windows "tests Windows sous Wine ($(passes tests-windows))"
+  if [[ $MODE != --sans-wine && $MODE != --ci ]]; then
+    ligne tests-windows "tests Windows sous Wine ($(passes tests-windows))"
+    raisons_des_sautes tests-windows
+  fi
   ligne clippy-macos-arm "clippy macOS Apple Silicon"
   ligne clippy-macos-intel "clippy macOS Intel"
   ligne powershell "scripts PowerShell"
   ligne rejeu-powershell "PowerShell du programme rejoué"
   ligne shell "scripts shell"
   ligne essais-cle "essais des outils de la clé"
+  ligne signature "signature des versions"
+  ligne essais-verifier "essais de verifier.sh (--seulement)"
   ligne extensions "extensions (sdk, exemple Rust)"
   ligne python "scripts Python"
   ligne liens "liens internes"
@@ -288,6 +363,7 @@ if [[ $MODE != --rapide ]]; then
   ligne dependances "dépendances (cargo deny)"
   remarques_dependances
   ligne failles-connues "failles connues (cargo audit)"
+  ligne fuzzing "banc de fuzzing ($(awk '/^  ✔/ { n++ } END { print n + 0 }' "$TRAVAIL/fuzzing.log" 2>/dev/null) cibles)"
 fi
 DUREE=$((SECONDS - DEBUT))
 if ((ECHECS)); then

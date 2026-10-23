@@ -1362,7 +1362,7 @@ mod tests {
             20,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("coredumpctl absent");
         };
         let maintenant = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1374,7 +1374,7 @@ mod tests {
             depuis,
             systeme::attribut_exe,
         ) else {
-            return;
+            return crate::essais::saute("plantages de coredump illisibles");
         };
         let journal = systeme::plantages_coredumpctl(&r.sortie);
         for (l, (nom, pid)) in r.sortie.lines().filter(|l| l.contains(" /")).zip(&journal) {

@@ -880,7 +880,7 @@ mod tests {
                 .map(|v| v["data"].clone())
         };
         let Some(arbre) = busctl(&["--list", "tree", "org.freedesktop.UDisks2"]) else {
-            return;
+            return crate::essais::saute("busctl ou UDisks2 absent");
         };
         let mut attendus = Vec::new();
         for chemin in arbre

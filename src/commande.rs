@@ -651,8 +651,7 @@ mod tests_powershell {
             Command::new(programme).args(["-NoProfile", "-NonInteractive", "-Command", &script]),
             60,
         ) else {
-            eprintln!("{programme} absent : essai sauté");
-            return;
+            return crate::essais::saute(&format!("{programme} absent"));
         };
         // Une injection réussie écrirait « INJECTE » sur une ligne à part.
         assert!(!r.sortie.lines().any(|l| l.trim() == "INJECTE"), "{}", r.sortie);

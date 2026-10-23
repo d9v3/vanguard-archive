@@ -216,11 +216,12 @@ pub(crate) fn compter_lignes(octets: &[u8], table: &str) -> Option<usize> {
 
 // ───────────────────────────── Lire des colonnes ─────────────────────────────
 
-/// La lecture des colonnes ne sert qu'à macOS (TCC.db) ; ailleurs, seulement aux essais.
-#[cfg(any(target_os = "macos", test))]
+/// La lecture des colonnes ne sert qu'à macOS (TCC.db) ; ailleurs, seulement aux essais et au banc de fuzzing
+/// (fuzz/, où cargo-fuzz pose `--cfg fuzzing`).
+#[cfg(any(target_os = "macos", test, fuzzing))]
 pub(crate) use colonnes::{compteur, lignes};
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", test, fuzzing))]
 mod colonnes {
     use super::{Sqlite, taille_colonne, u32be, varint};
     use std::collections::HashSet;

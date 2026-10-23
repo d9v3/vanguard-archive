@@ -1161,7 +1161,7 @@ mod tests {
         let Some(r) =
             crate::commande::lancer(std::process::Command::new("lspci").arg("-vmmk"), 20).filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("lspci absent");
         };
         let natifs: Vec<(String, String)> = cartes_graphiques()
             .into_iter()
@@ -1195,7 +1195,7 @@ mod tests {
             20,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("udevadm absent");
         };
         let fichier = std::fs::read_to_string("/run/udev/data/+dmi:id").unwrap_or_default();
         assert_eq!(barrettes_udev(&proprietes_udev(&fichier)), barrettes_udev(&r.sortie));
@@ -1236,7 +1236,7 @@ mod tests {
         let Some(r) = crate::commande::lancer(std::process::Command::new("lscpu").env("LC_ALL", "C"), 20)
             .filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("lscpu absent");
         };
         let Some(attendu) = r
             .sortie
@@ -1244,7 +1244,7 @@ mod tests {
             .find_map(|l| l.strip_prefix("Model name:"))
             .map(str::trim)
         else {
-            return;
+            return crate::essais::saute("lscpu sans « Model name »");
         };
         let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
         let midr =
@@ -1282,7 +1282,7 @@ mod tests {
         let Some(r) = crate::commande::lancer(std::process::Command::new("lsblk").args(["-dno", "NAME,TYPE"]), 20)
             .filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("lsblk absent");
         };
         let garde = |nom: &str| !["zram", "loop", "ram", "sr"].iter().any(|p| nom.starts_with(p));
         let mut attendus: Vec<&str> = r

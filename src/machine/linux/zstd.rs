@@ -1078,7 +1078,7 @@ mod tests {
     #[test]
     fn comme_le_programme_zstd() {
         if !crate::machine::linux::natif::present("zstd") {
-            return;
+            return crate::essais::saute("zstd absent");
         }
         let d = std::env::temp_dir().join(format!("vanguard-zstd-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -1138,7 +1138,7 @@ mod tests {
     #[test]
     fn fichiers_du_systeme_comme_zstd() {
         if !crate::machine::linux::natif::present("zstd") {
-            return;
+            return crate::essais::saute("zstd absent");
         }
         let mut fichiers: Vec<std::path::PathBuf> = Vec::new();
         if let Ok(version) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {

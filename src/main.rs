@@ -18,6 +18,8 @@ mod diagnostic;
 mod dns_rapide;
 mod donnees;
 mod entretien;
+#[cfg(test)]
+mod essais;
 mod fenetre;
 mod fiche;
 mod gaming;
@@ -147,25 +149,25 @@ enum Commande {
         #[arg(long, visible_alias = "no-open")]
         sans_ouvrir: bool,
     },
-    /// Veilleur (Linux 6.6 et plus) : chaque programme lancé et chaque connexion fermée, vus sur le moment et jugés
-    /// comme au bilan ; il observe et n'arrête rien. Coupé par défaut. Sans argument : son état, puis l'allumer ou le
-    /// couper, après accord.
-    /// Sites dangereux bloqués par le fichier hosts : ceux d'URLhaus et les serveurs de commande de ThreatFox (clé
-    /// abuse.ch), après accord et avec les droits d'administrateur ; « off » les retire exactement. Sans argument :
-    /// leur état.
-    #[command(name = "dernieres-failles", visible_alias = "latest-flaws")]
     /// Dernières failles exploitées : celles que la CISA a ajoutées à son catalogue (attaques réelles connues) ces
     /// derniers jours, les plus récentes d'abord ; sous Arch, celles qui touchent un paquet de cet ordinateur en tête.
+    #[command(name = "dernieres-failles", visible_alias = "latest-flaws")]
     DernieresFailles {
         /// Combien de jours en arrière (7 par défaut).
         #[arg(long, visible_alias = "days", default_value_t = 7)]
         jours: u32,
     },
+    /// Sites dangereux bloqués par le fichier hosts : ceux d'URLhaus et les serveurs de commande de ThreatFox (clé
+    /// abuse.ch), après accord et avec les droits d'administrateur ; « off » les retire exactement. Sans argument :
+    /// leur état.
     #[command(name = "sites-dangereux", visible_alias = "dangerous-sites")]
     SitesDangereux {
         #[arg(value_parser = ["on", "off"])]
         etat: Option<String>,
     },
+    /// Veilleur (Linux 6.6 et plus) : chaque programme lancé et chaque connexion fermée, vus sur le moment et jugés
+    /// comme au bilan ; il observe et n'arrête rien. Coupé par défaut. Sans argument : son état, puis l'allumer ou le
+    /// couper, après accord.
     #[command(visible_alias = "watcher")]
     Veilleur {
         #[arg(value_parser = ["on", "off"])]
@@ -211,6 +213,18 @@ enum Commande {
         /// Montrer ce qui pourrait être nettoyé et la place à gagner, sans rien effacer.
         #[arg(long, visible_alias = "list")]
         liste: bool,
+    },
+    /// Optimiser : les réglages recommandés, ceux de confidentialité, de performance (sauf macOS) et de confort, chacun
+    /// montré, accepté puis annulable exactement ; « annuler » remet tout comme avant. Sans argument : le menu
+    /// Optimiser.
+    #[command(visible_alias = "optimize")]
+    Optimiser {
+        /// recommandes, confidentialite, performance, confort ou annuler.
+        #[arg(value_parser = [
+            "recommandes", "recommended", "confidentialite", "privacy", "performance", "confort", "comfort",
+            "annuler", "undo",
+        ])]
+        quoi: Option<String>,
     },
     /// Ce que Vanguard a appris sur cet ordinateur : les alertes déclarées normales, et les oublier.
     #[command(visible_alias = "learned")]
@@ -507,9 +521,14 @@ enum Commande {
     #[command(visible_alias = "relative")]
     Proche,
     /// Vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 du programme (à comparer à la
-    /// page de la version) et, sur la clé du propriétaire, le manifeste de la clé.
+    /// page de la version), sur la clé du propriétaire le manifeste de la clé, et après accord l'historique signé des
+    /// versions publiées ; ou une autre copie de Vanguard, par son empreinte et cet historique.
     #[command(name = "verifier-moi", visible_alias = "self-check")]
-    VerifierMoi,
+    VerifierMoi {
+        /// Une autre copie de Vanguard à vérifier (celle d'une autre clé, une version d'avant), par son empreinte et
+        /// l'historique signé des versions.
+        programme: Option<std::path::PathBuf>,
+    },
     /// Manifeste de la clé VANGUARD : écrit au déploiement (outils/deployer.sh), comparé à la clé branchée.
     #[command(hide = true)]
     Manifeste {
@@ -933,8 +952,9 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
         let chemin = format!("{} ›", groupe.titre());
         for (j, a) in groupe.actions().into_iter().filter(|a| a.disponible()).enumerate() {
             let (texte, precision) = a.libelle();
-            lignes
-                .push(Ligne::cachee(&format!("{cle}.{}", j + 1), &chemin, texte, precision).avec_mots(a.outil().mots));
+            // Le nom de sa sous-commande aussi : qui connaît « vanguard sortantes » la retrouve au menu.
+            let mots = format!("{} {}", a.outil().mots, a.outil().commande);
+            lignes.push(Ligne::cachee(&format!("{cle}.{}", j + 1), &chemin, texte, precision).avec_mots(&mots));
         }
     }
     lignes.extend(pages_du_guide);
@@ -1131,11 +1151,14 @@ enum Action {
     Parametres,
 }
 
-/// Un outil du menu : son groupe (aucun pour 1, 2 et 3, au menu principal), sa lettre des menus d'avant la 0.43
+/// Un outil du menu : la sous-commande qui fait la même chose en ligne de commande (vide : aucune, et la raison est
+/// dans `MENU_SEULEMENT`), son groupe (aucun pour 1, 2 et 3, au menu principal), sa lettre des menus d'avant la 0.43
 /// (vide : aucune ; les chiffres, eux, ont changé de sens), son titre et sa précision en français puis en anglais, et
-/// les mots que la recherche trouve en plus, jamais affichés.
+/// les mots que la recherche trouve en plus, jamais affichés. Une seule table pour le menu et la ligne de commande :
+/// les tests de `tests_menu` la comparent aux sous-commandes, à leur aide anglaise, au README et à `outils/LISEZMOI.txt`.
 struct Outil {
     action: Action,
+    commande: &'static str,
     groupe: Option<Groupe>,
     lettre: &'static str,
     titre: [&'static str; 2],
@@ -1147,337 +1170,337 @@ struct Outil {
 /// (surveillance, entretien) suit leur état : `Action::libelle`.
 #[rustfmt::skip] // une ligne de données par outil, que rustfmt étalerait sur huit
 const OUTILS: &[Outil] = &[
-    Outil { action: Action::Complet, groupe: None, lettre: "",
+    Outil { action: Action::Complet, commande: "complet", groupe: None, lettre: "",
         titre: ["Bilan complet : machine + réseau", "Full check: machine + network"], precision: ["", ""],
         mots: "" },
-    Outil { action: Action::Corriger, groupe: None, lettre: "",
+    Outil { action: Action::Corriger, commande: "corriger", groupe: None, lettre: "",
         titre: ["Corriger les problèmes trouvés", "Fix the problems found"], precision: ["", ""],
         mots: "" },
-    Outil { action: Action::Rapport, groupe: None, lettre: "",
+    Outil { action: Action::Rapport, commande: "", groupe: None, lettre: "",
         titre: ["Rapport détaillé dans le navigateur", "Detailed report in the browser"], precision: ["", ""],
         mots: "" },
-    Outil { action: Action::Audit, groupe: Some(Groupe::Machine), lettre: "",
+    Outil { action: Action::Audit, commande: "machine", groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Audit de sécurité", "Security audit"],
         precision: ["pare-feu, comptes, chiffrement…", "firewall, accounts, encryption…"],
         mots: "sécurité security pare-feu firewall ports ssh chiffrement encryption comptes accounts" },
-    Outil { action: Action::Maj, groupe: Some(Groupe::Machine), lettre: "u",
+    Outil { action: Action::Maj, commande: "maj", groupe: Some(Groupe::Machine), lettre: "u",
         titre: ["Mises à jour", "Updates"], precision: ["système, programmes, pilotes", "system, programs, drivers"],
         mots: "update upgrade pilotes drivers firmware bios windows update" },
-    Outil { action: Action::Reparer, groupe: Some(Groupe::Machine), lettre: "r",
+    Outil { action: Action::Reparer, commande: "reparer", groupe: Some(Groupe::Machine), lettre: "r",
         titre: ["Réparer et nettoyer", "Repair and clean up"],
         precision: ["réseau, disque, système…", "network, disk, system…"],
         mots: "internet wifi dns proxy hosts pare-feu firewall antivirus disque disk smart heure time sfc dism \
                winsock" },
-    Outil { action: Action::Diagnostic, groupe: Some(Groupe::Machine), lettre: "o",
+    Outil { action: Action::Diagnostic, commande: "diagnostic", groupe: Some(Groupe::Machine), lettre: "o",
         titre: ["Diagnostic", "Diagnostic"], precision: ["matériel, plantages, erreurs", "hardware, crashes, errors"],
         mots: "plantages crashes erreurs errors écran bleu bsod journal logs matériel hardware" },
-    Outil { action: Action::Integrite, groupe: Some(Groupe::Machine), lettre: "i",
+    Outil { action: Action::Integrite, commande: "integrite", groupe: Some(Groupe::Machine), lettre: "i",
         titre: ["Intégrité des fichiers critiques", "Critical file integrity"],
         precision: ["comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"],
         mots: "blake3 empreintes fingerprints fichiers files" },
-    Outil { action: Action::Appris, groupe: Some(Groupe::Machine), lettre: "",
+    Outil { action: Action::Appris, commande: "appris", groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Ce que Vanguard a appris", "What Vanguard has learned"],
         precision: ["tes choix, tes habitudes", "your choices, your habits"],
         mots: "apprentissage learning appris learned choix choices normal oublier forget" },
-    Outil { action: Action::Lenteur, groupe: Some(Groupe::Machine), lettre: "",
+    Outil { action: Action::Lenteur, commande: "lenteur", groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Pourquoi c'est lent ?", "Why is it slow?"],
         precision: ["processeur, mémoire, démarrage", "processor, memory, startup"],
         mots: "lent slow lenteur rame processeur cpu mémoire memory ram démarrage startup" },
-    Outil { action: Action::Fiche, groupe: Some(Groupe::Machine), lettre: "",
+    Outil { action: Action::Fiche, commande: "fiche", groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Fiche de l'ordinateur", "Computer specs"],
         precision: ["modèle, processeur, mémoire…", "model, processor, memory…"],
         mots: "fiche specs matériel hardware modèle model processeur carte graphique gpu mémoire ram série" },
-    Outil { action: Action::ALaisser, groupe: Some(Groupe::Machine), lettre: "",
+    Outil { action: Action::ALaisser, commande: "a-laisser", groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Rapport à laisser", "Report to leave behind"],
         precision: ["une page simple, à imprimer", "a simple page, to print"],
         mots: "rapport report imprimer print dépannage help famille family laisser leave page résumé summary" },
-    Outil { action: Action::Changements, groupe: Some(Groupe::Machine), lettre: "",
+    Outil { action: Action::Changements, commande: "changements", groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Ce que Vanguard a changé", "What Vanguard changed"],
         precision: ["chaque correction, datée", "each fix, dated"],
         mots: "changements changes historique history corrections fixes journal log annuler undo" },
-    Outil { action: Action::Entretien, groupe: Some(Groupe::Machine), lettre: "",
+    Outil { action: Action::Entretien, commande: "entretien", groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Entretien du mois", "Monthly check-up"], precision: ["", ""],
         mots: "maintenance mensuel monthly mois month rappel reminder notification" },
-    Outil { action: Action::Scanner, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Scanner, commande: "reseau", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Scanner le réseau", "Scan the network"],
         precision: ["appareils, ports, nouveautés", "devices, ports, changes"],
         mots: "appareils devices ports réseau network lan nmap" },
-    Outil { action: Action::AuditReseau, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::AuditReseau, commande: "audit-reseau", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Audit du réseau", "Network audit"],
         precision: ["six notes : box, Wi-Fi, DNS…", "six grades: router, Wi-Fi, DNS…"],
         mots: "audit réseau network exposition exposure wifi dns tls segmentation appareils devices objets postes \
                computers upnp redirection note grade cyberdéfense cyberdefense box routeur router" },
-    Outil { action: Action::Appareil, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Appareil, commande: "reseau", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Scan approfondi d'un appareil", "Deep scan of one device"], precision: ["tous les ports", "all ports"],
         mots: "appareils devices ports réseau network lan nmap" },
-    Outil { action: Action::Nommer, groupe: Some(Groupe::Reseau), lettre: "n",
+    Outil { action: Action::Nommer, commande: "nommer", groupe: Some(Groupe::Reseau), lettre: "n",
         titre: ["Nommer un appareil", "Name a device"], precision: ["« imprimante HP »", "“HP printer”"],
         mots: "surnom nickname" },
-    Outil { action: Action::Surveillance, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Surveillance, commande: "surveillance", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Surveillance toutes les heures", "Hourly monitoring"], precision: ["", ""],
         mots: "monitor surveiller notification" },
-    Outil { action: Action::Tableau, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Tableau, commande: "tableau", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Tableau de bord de la surveillance", "Monitoring dashboard"],
         precision: ["alertes, nouveaux appareils", "alerts, new devices"],
         mots: "tableau dashboard historique history alertes alerts nouveaux new appareils devices botnet \
                connexions suspectes suspicious connections" },
-    Outil { action: Action::Veilleur, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Veilleur, commande: "veilleur", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Veilleur : lancements et connexions", "Watcher: launches and connections"], precision: ["", ""],
         mots: "veilleur watcher lancements launches processus processes connexions connections brèves brief \
                connecteur connector temps réel live" },
-    Outil { action: Action::Connexion, groupe: Some(Groupe::Reseau), lettre: "c",
+    Outil { action: Action::Connexion, commande: "connexion", groupe: Some(Groupe::Reseau), lettre: "c",
         titre: ["Test de connexion pour le jeu", "Connection test for gaming"],
         precision: ["ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"],
         mots: "ping latence latency débit speed jitter gigue bufferbloat jeu" },
-    Outil { action: Action::ListesNoires, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::ListesNoires, commande: "listes-noires", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Adresse sur liste noire ?", "Address on blocklists?"],
         precision: ["si oui, un appareil est infecté", "if so, a device is infected"],
         mots: "spamhaus botnet liste noire blocklist blacklist dnsbl" },
-    Outil { action: Action::WifiCanaux, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::WifiCanaux, commande: "canaux", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Wi-Fi encombré ?", "Crowded Wi-Fi?"],
         precision: ["canaux voisins, le plus libre", "nearby channels, the freest"],
         mots: "wifi canal canaux channel encombré crowded interférences interference voisins neighbors signal box \
                router" },
-    Outil { action: Action::Nat, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Nat, commande: "nat", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Type de NAT pour le jeu", "NAT type for gaming"],
         precision: ["ouvert, modéré ou strict", "open, moderate or strict"],
         mots: "nat stun upnp console xbox playstation jeu game multijoueur multiplayer redirection port forwarding \
                ouvert open modéré moderate strict" },
-    Outil { action: Action::Cameras, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Cameras, commande: "cameras", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Caméras cachées ?", "Hidden cameras?"],
         precision: ["location, chez quelqu'un", "rental, someone else's place"],
         mots: "caméra camera espion spy cachée hidden location rental airbnb rtsp onvif" },
-    Outil { action: Action::Objets, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::Objets, commande: "objets", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Box et objets connectés", "Router and connected devices"],
         precision: ["modèle, mots de passe d'origine", "model, default passwords"],
         mots: "box routeur router modem objets connectés iot smart caméra camera imprimante printer nas télé tv \
                domotique smart home mot de passe d'origine default password firmware upnp" },
-    Outil { action: Action::WifiPublic, groupe: Some(Groupe::Reseau), lettre: "",
+    Outil { action: Action::WifiPublic, commande: "wifi-public", groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Mode Wi-Fi public", "Public Wi-Fi mode"],
         precision: ["café, hôtel : allumer, éteindre", "café, hotel: turn on, off"],
         mots: "wifi public café cafe hôtel hotel aéroport airport portail captif captive portal pare-feu firewall \
                partage sharing découverte discovery dns chiffré encrypted" },
-    Outil { action: Action::AntivirusRapide, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::AntivirusRapide, commande: "antivirus", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Analyse rapide", "Quick scan"], precision: ["téléchargements, bureau…", "downloads, desktop…"],
         mots: "virus malware clamav defender" },
-    Outil { action: Action::AntivirusComplet, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::AntivirusComplet, commande: "antivirus", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Analyse complète", "Full scan"], precision: ["dossier personnel", "home folder"],
         mots: "virus malware clamav defender" },
-    Outil { action: Action::AntivirusDossier, groupe: Some(Groupe::Protection), lettre: "a",
+    Outil { action: Action::AntivirusDossier, commande: "antivirus", groupe: Some(Groupe::Protection), lettre: "a",
         titre: ["Clé USB ou dossier", "USB drive or folder"], precision: ["et pièges de clé", "and drive traps"],
         mots: "virus usb clé autorun" },
-    Outil { action: Action::Yara, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Yara, commande: "yara", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Analyse YARA", "YARA scan"],
         precision: ["règles de logiciels malveillants", "malware detection rules"],
         mots: "yara règles rules malware" },
-    Outil { action: Action::Memoire, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Memoire, commande: "memoire", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Mémoire des processus", "Process memory"],
         precision: ["YARA sur ce qui tourne", "YARA on what is running"],
         mots: "mémoire memory yara processus sans fichier fileless" },
-    Outil { action: Action::Pieges, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Pieges, commande: "pieges", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Fichiers-pièges", "Decoy files"],
         precision: ["alerte si un rançongiciel chiffre", "early ransomware warning"],
         mots: "rançongiciel ransomware leurre decoy piège trap" },
-    Outil { action: Action::Protection, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Protection, commande: "durcir", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Blocages de Windows Defender", "Windows Defender blocking"],
         precision: ["ASR, réseau, dossiers contrôlés", "ASR, network, folders"],
         mots: "defender asr bloquer block exploit dossiers contrôlés controlled folder pua" },
     // Titres de 34 caractères au plus dans ce groupe : au-delà, la colonne des précisions recule et les plus
     // longues (YARA, fichiers-pièges) sortent des 76 colonnes.
-    Outil { action: Action::Bac, groupe: Some(Groupe::Protection), lettre: "b",
+    Outil { action: Action::Bac, commande: "isoler", groupe: Some(Groupe::Protection), lettre: "b",
         titre: ["Bac à sable : programme inconnu", "Sandbox: run an unknown program"],
         precision: ["sans réseau, isolé", "no network, isolated"],
         mots: "sandbox isoler firejail bubblewrap" },
-    Outil { action: Action::MotsDePasse, groupe: Some(Groupe::Protection), lettre: "p",
+    Outil { action: Action::MotsDePasse, commande: "motdepasse", groupe: Some(Groupe::Protection), lettre: "p",
         titre: ["Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"],
         precision: ["rien n'est envoyé en clair", "nothing sent in clear"],
         mots: "password hibp pwned fuite leak" },
-    Outil { action: Action::Navigateurs, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Navigateurs, commande: "navigateurs", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Mots de passe des navigateurs", "Browser passwords"],
         precision: ["comptés, jamais lus", "counted, never read"],
         mots: "navigateur browser firefox chrome edge chromium brave vivaldi mots de passe password \
                enregistrés saved faible weak réutilisé reused fuite leak checkup about:logins" },
-    Outil { action: Action::Courriel, groupe: Some(Groupe::Protection), lettre: "e",
+    Outil { action: Action::Courriel, commande: "courriel", groupe: Some(Groupe::Protection), lettre: "e",
         titre: ["Courriel : a-t-il fuité ?", "Email address: has it leaked?"],
         precision: ["avec ton accord", "with your consent"],
         mots: "email mail fuite leak" },
-    Outil { action: Action::QuiParle, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::QuiParle, commande: "sortantes", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Qui parle à Internet ?", "Who talks to the Internet?"],
         precision: ["connexions de chaque programme", "each program's connections"],
         mots: "connexions connections sortantes outbound espion spyware mouchard télémétrie telemetry serveurs \
                servers" },
-    Outil { action: Action::CameraMicro, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::CameraMicro, commande: "camera-micro", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Caméra et micro : qui s'en sert ?", "Camera and mic: who uses them?"],
         precision: ["programmes et dernière fois", "programs and last time"],
         mots: "caméra camera webcam micro microphone espion spy écoute voyant light enregistre record" },
-    Outil { action: Action::Acces, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Acces, commande: "acces", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Bilan de confidentialité", "Privacy check"],
         precision: ["position, contacts, caméra, micro", "location, contacts, camera, mic"],
         mots: "confidentialité privacy permissions autorisations accès access position location localisation gps \
                contacts carnet address book caméra camera micro microphone flatpak snap tcc applications apps" },
-    Outil { action: Action::Distance, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Distance, commande: "distance", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Quelqu'un contrôle mon ordi ?", "Is someone controlling my PC?"],
         precision: ["faux technicien, accès à distance", "tech-support scam, remote access"],
         mots: "arnaque scam faux technicien fake tech support anydesk teamviewer rustdesk accès distance remote \
                access contrôle control prise de contrôle" },
-    Outil { action: Action::Lien, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Lien, commande: "lien", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Ce lien est-il dangereux ?", "Is this link dangerous?"],
         precision: ["examiné sans l'ouvrir", "checked without opening it"],
         mots: "url lien link phishing hameçonnage arnaque scam texto sms courriel email domaine domain" },
-    Outil { action: Action::VerifierFichier, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::VerifierFichier, commande: "verifier-fichier", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Vérifier un fichier téléchargé", "Check a downloaded file"],
         precision: ["empreinte, YARA, antivirus", "checksum, YARA, antivirus"],
         mots: "sha256 empreinte checksum hash télécharger download iso installateur installer fichier file" },
-    Outil { action: Action::Quarantaine, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Quarantaine, commande: "quarantaine", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Quarantaine : remettre un fichier", "Quarantine: restore a file"],
         precision: ["isolés, remis à l'identique", "isolated, put back exactly"],
         mots: "quarantaine quarantine isolé isolated faux positif false positive remettre restore restaurer" },
-    Outil { action: Action::SecretsGit, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::SecretsGit, commande: "secrets", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Secrets dans les projets git", "Secrets in git projects"],
         precision: ["mots de passe et clés oubliés", "forgotten passwords and keys"],
         mots: "secrets git gitleaks clé key api jeton token mot de passe password historique history dépôt \
                repository fuite leak" },
-    Outil { action: Action::Conteneurs, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Conteneurs, commande: "conteneurs", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Failles des images Docker", "Flaws in Docker images"],
         precision: ["failles connues (trivy)", "known flaws (trivy)"],
         mots: "docker podman conteneur container image trivy faille vulnerability cve" },
-    Outil { action: Action::Blocage, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::Blocage, commande: "blocage", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Blocage des menaces", "Threat blocking"], precision: ["", ""],
         mots: "bloquer block blocage blocking protection active automatique automatic pare-feu firewall arrêter stop \
                processus process quarantaine quarantine malwarebazaar botnet threatfox pilotes drivers annuler undo" },
-    Outil { action: Action::SitesDangereux, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::SitesDangereux, commande: "sites-dangereux", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Bloquer les sites dangereux", "Block dangerous sites"],
         precision: ["fichier hosts, annulable", "hosts file, undoable"],
         mots: "bloquer block sites dangereux dangerous malveillant malicious hosts urlhaus threatfox botnet \
                hameçonnage phishing" },
-    Outil { action: Action::DernieresFailles, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::DernieresFailles, commande: "dernieres-failles", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Dernières failles exploitées", "Latest exploited flaws"],
         precision: ["catalogue de la CISA, 7 jours", "CISA catalog, 7 days"],
         mots: "failles flaws vulnérabilités vulnerabilities cve kev cisa exploitées exploited récentes latest \
                nouvelles new rançongiciel ransomware" },
-    Outil { action: Action::CourrielSuspect, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::CourrielSuspect, commande: "courriel-suspect", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Ce courriel est-il une arnaque ?", "Is this email a scam?"],
         precision: ["examiné sans rien ouvrir", "checked without opening anything"],
         mots: "courriel email mail eml arnaque scam hameçonnage phishing expéditeur sender pièce jointe attachment \
                spf dkim dmarc thunderbird outlook gmail msg usurpation spoofing" },
-    Outil { action: Action::LogicielsEspions, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::LogicielsEspions, commande: "logiciels-espions", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Logiciels espions : en ai-je un ?", "Spyware: is someone watching me?"],
         precision: ["clavier épié, indicateurs Échap", "keyboard spying, Échap indicators"],
         mots: "espion spyware stalkerware logiciel espion keylogger enregistreur de frappe clavier keyboard \
                surveillance monitoring harcèlement stalking échap mspy flexispy contrôle parental parental control" },
-    Outil { action: Action::LogicielsPerimes, groupe: Some(Groupe::Protection), lettre: "",
+    Outil { action: Action::LogicielsPerimes, commande: "logiciels-perimes", groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Logiciels pas à jour", "Outdated software"],
         precision: ["versions, failles exploitées", "versions, exploited flaws"],
         mots: "logiciel software version périmé outdated mise à jour update navigateur browser chrome edge \
                firefox brave office word excel acrobat reader java kev faille exploitée exploited" },
-    Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
+    Outil { action: Action::Logiciels, commande: "logiciels", groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
-    Outil { action: Action::Gaming, groupe: Some(Groupe::Installer), lettre: "g",
+    Outil { action: Action::Gaming, commande: "gaming", groupe: Some(Groupe::Installer), lettre: "g",
         titre: ["Gaming", "Gaming"],
         precision: if cfg!(windows) { ["composants et réglages de Windows", "components and Windows settings"] }
             else if cfg!(target_os = "macos") { ["Rosetta, Steam, Epic, GOG…", "Rosetta, Steam, Epic, GOG…"] }
             else { ["Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…"] },
         mots: "jeux games steam directx vulkan" },
-    Outil { action: Action::Nettoyer, groupe: Some(Groupe::Optimiser), lettre: "v",
+    Outil { action: Action::Nettoyer, commande: "nettoyer", groupe: Some(Groupe::Optimiser), lettre: "v",
         titre: ["Nettoyer le système", "Clean up the system"],
         precision: ["caches, temporaires, corbeille…", "caches, temp files, trash…"],
         mots: "place space disque plein disk full cache corbeille trash" },
-    Outil { action: Action::OptimiserRecommandes, groupe: Some(Groupe::Optimiser), lettre: "",
+    Outil { action: Action::OptimiserRecommandes, commande: "optimiser", groupe: Some(Groupe::Optimiser), lettre: "",
         titre: ["Réglages recommandés", "Recommended settings"],
         precision: ["en une fois, tout s'annule", "in one go, all undoable"],
         mots: "réglages settings" },
-    Outil { action: Action::OptimiserConfidentialite, groupe: Some(Groupe::Optimiser), lettre: "",
+    Outil { action: Action::OptimiserConfidentialite, commande: "optimiser", groupe: Some(Groupe::Optimiser), lettre: "",
         titre: ["Confidentialité", "Privacy"],
         precision: if cfg!(windows) { ["télémétrie, publicités, suivi", "telemetry, ads, tracking"] }
             else if cfg!(target_os = "macos") { ["publicités, analyses", "ads, analytics"] }
             else { ["rapports et statistiques", "reports and statistics"] },
         mots: "télémétrie telemetry vie privée privacy publicité ads" },
     #[cfg(not(target_os = "macos"))]
-    Outil { action: Action::OptimiserPerformance, groupe: Some(Groupe::Optimiser), lettre: "",
+    Outil { action: Action::OptimiserPerformance, commande: "optimiser", groupe: Some(Groupe::Optimiser), lettre: "",
         titre: ["Performance et fiabilité", "Performance and reliability"],
         precision: if cfg!(windows) { ["démarrage rapide, widgets…", "fast startup, widgets…"] }
             else { ["SSD, taille du journal", "SSD, journal size"] },
         mots: "ssd démarrage startup journal" },
-    Outil { action: Action::OptimiserConfort, groupe: Some(Groupe::Optimiser), lettre: "",
+    Outil { action: Action::OptimiserConfort, commande: "optimiser", groupe: Some(Groupe::Optimiser), lettre: "",
         titre: ["Confort et fichiers", "Comfort and files"],
         precision: if cfg!(windows) { ["extensions, clés USB, clic droit", "extensions, USB drives, menus"] }
             else if cfg!(target_os = "macos") { ["extensions, .DS_Store, Finder", "extensions, .DS_Store, Finder"] }
             else { ["annonces d'Ubuntu", "Ubuntu announcements"] },
         mots: "extensions fichiers cachés hidden files" },
-    Outil { action: Action::DnsRapide, groupe: Some(Groupe::Optimiser), lettre: "",
+    Outil { action: Action::DnsRapide, commande: "dns-rapide", groupe: Some(Groupe::Optimiser), lettre: "",
         titre: ["DNS le plus rapide", "Fastest DNS"], precision: ["mesuré ici, annulable", "measured here, undoable"],
         mots: "dns rapide fast résolveur resolver cloudflare quad9 google adguard vitesse speed" },
-    Outil { action: Action::OptimiserAnnuler, groupe: Some(Groupe::Optimiser), lettre: "",
+    Outil { action: Action::OptimiserAnnuler, commande: "optimiser", groupe: Some(Groupe::Optimiser), lettre: "",
         titre: ["Tout remettre comme avant", "Put everything back"],
         precision: ["annule ce que Vanguard a changé", "undo what Vanguard changed"],
         mots: "annuler undo restaurer" },
-    Outil { action: Action::Sauvegarder, groupe: Some(Groupe::Donnees), lettre: "d",
+    Outil { action: Action::Sauvegarder, commande: "sauvegarder", groupe: Some(Groupe::Donnees), lettre: "d",
         titre: ["Sauvegarder ou restaurer", "Back up or restore"],
         precision: ["base des appareils, réglages", "device database, settings"],
         mots: "backup restore sauvegarde base" },
-    Outil { action: Action::CopierFichiers, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::CopierFichiers, commande: "copier-fichiers", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Copier mes fichiers", "Copy my files"],
         precision: ["vers un disque externe, vérifié", "to an external disk, checked"],
         mots: "copier copy sauvegarde backup photos disque externe external drive fichiers" },
-    Outil { action: Action::SauvegardeAuto, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::SauvegardeAuto, commande: "sauvegarde-auto", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Sauvegarde automatique", "Automatic backup"],
         precision: ["chaque jour, sur un autre disque", "every day, to an external disk"],
         mots: "sauvegarde backup automatique automatic time machine historique des fichiers file history deja dup \
                rsync disque externe external drive" },
-    Outil { action: Action::VerifierCopie, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::VerifierCopie, commande: "verifier-copie", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Vérifier une copie", "Check a copy"],
         precision: ["relue, comparée aux originaux", "read back, compared"],
         mots: "restauration restore test vérifier verify copie copy sauvegarde backup relire" },
-    Outil { action: Action::VerifierCle, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::VerifierCle, commande: "verifier-cle", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Vérifier ma clé", "Check my drive"],
         precision: ["vraie capacité, vitesse, erreurs", "real capacity, speed, errors"],
         mots: "clé key usb fausse fake capacité capacity vitesse speed débit secteurs sectors erreurs errors f3 h2testw \
                disque externe external drive" },
-    Outil { action: Action::Raccourci, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::Raccourci, commande: "raccourci", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Raccourci sur cet ordinateur", "Shortcut on this computer"],
         precision: ["lancer Vanguard d'un clic", "start Vanguard with one click"],
         mots: "raccourci shortcut bureau desktop installer install menu lancer launch icône icon" },
-    Outil { action: Action::Ordinateurs, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::Ordinateurs, commande: "ordinateurs", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Mes ordinateurs", "My computers"],
         precision: ["suivis par la clé VANGUARD", "tracked by the VANGUARD key"],
         mots: "ordinateurs computers tableau dashboard suivi parc famille family clé key" },
-    Outil { action: Action::ProtegerDonnees, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::ProtegerDonnees, commande: "", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Protéger les données de la clé", "Protect the key's data"],
         precision: ["carnet chiffré par une phrase", "record encrypted by a passphrase"],
         mots: "chiffrer encrypt chiffrement encryption phrase passphrase mot de passe password protéger protect \
                perdue lost" },
-    Outil { action: Action::MettreAJour, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::MettreAJour, commande: "se-mettre-a-jour", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Mettre Vanguard à jour", "Update Vanguard"],
         precision: ["sur cet ordinateur, depuis la clé", "on this computer, from the key"],
         mots: "mise à jour mettre update upgrade vanguard version nouvelle new copie copy installer install" },
-    Outil { action: Action::VerifierSauvegarde, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::VerifierSauvegarde, commande: "verifier-sauvegarde", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Vérifier ma sauvegarde", "Check my backup"],
         precision: ["relue pour de vrai", "really read back"],
         mots: "sauvegarde backup vérifier verify restauration restore test rsync time machine" },
     // Au bout de Données, avec ce qui installe Vanguard ici (raccourci, mise à jour) : Paramètres ne montre que des
     // réglages avec leur valeur, et aucune place annoncée ne bouge.
-    Outil { action: Action::Desinstaller, groupe: Some(Groupe::Donnees), lettre: "",
+    Outil { action: Action::Desinstaller, commande: "desinstaller", groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Retirer Vanguard de cet ordinateur", "Remove Vanguard from this computer"],
         precision: ["ce qu'il a posé, montré d'abord", "what it placed, shown first"],
         mots: "désinstaller uninstall désinstallation retirer remove supprimer delete effacer erase installer install \
                installé installed" },
-    Outil { action: Action::Guide, groupe: Some(Groupe::Guide), lettre: "",
+    Outil { action: Action::Guide, commande: "guide", groupe: Some(Groupe::Guide), lettre: "",
         titre: ["Guide des commandes", "Command guide"],
         precision: ["Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"],
         mots: "commandes commands terminal aide help" },
-    Outil { action: Action::Depanner, groupe: Some(Groupe::Depanner), lettre: "",
+    Outil { action: Action::Depanner, commande: "depanner", groupe: Some(Groupe::Depanner), lettre: "",
         titre: ["Dépanner pas à pas", "Troubleshoot step by step"],
         precision: ["Internet, son, imprimante…", "Internet, sound, printer…"],
         mots: "dépanner troubleshoot panne problème internet son imprimante" },
-    Outil { action: Action::Extensions, groupe: Some(Groupe::Extensions), lettre: "",
+    Outil { action: Action::Extensions, commande: "extensions", groupe: Some(Groupe::Extensions), lettre: "",
         titre: ["Extensions", "Extensions"],
         precision: ["plugins et labo, hors Vanguard", "plugins and lab, not Vanguard"],
         mots: "plugin plugins extension module ajouter add expérimental experimental script labo lab laboratoire \
                programme program essai test" },
     // Au bout de Cette machine, et « s » au menu principal (dit sur la ligne de « q ») : aucune ligne de plus au
     // menu principal, qui doit tenir dans 24 lignes.
-    Outil { action: Action::Parametres, groupe: Some(Groupe::Machine), lettre: "s",
+    Outil { action: Action::Parametres, commande: "parametres", groupe: Some(Groupe::Machine), lettre: "s",
         titre: ["Paramètres", "Settings"],
         precision: ["langue, surveillance, blocage…", "language, monitoring, blocking…"],
         mots: "paramètres settings réglages options préférences preferences langue language emojis internet \
@@ -1889,7 +1912,7 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("navigateurs", "Passwords saved in the browsers: how many and how protected (counted, never read), where to run \
                      the browser's built-in check (weak, reused, compromised), and the HIBP check of a typed password"),
     ("sortantes", "Who talks to the Internet? Each program's current connections, with the server's name. Read-only"),
-    ("verifier-moi", "Check Vanguard itself: version, build date, SHA-256 fingerprint of the program (to compare with the release page) and, on the owner's key, the key manifest"),
+    ("verifier-moi", "Check Vanguard itself: version, build date, SHA-256 fingerprint of the program (to compare with the release page), on the owner's key the key manifest, and after your consent the signed history of published versions; or another copy of Vanguard, by its fingerprint and that history"),
     ("distance", "Is someone controlling my computer? Remote control software (AnyDesk, TeamViewer, RustDesk…) installed, started at boot, running or downloaded: the fake technicians' tool. Removed after your consent; a running program asks for a second consent"),
     ("lien", "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists"),
     ("verifier-fichier", "Check a downloaded file: checksum compared with the site's, name and content, YARA and \
@@ -1968,6 +1991,9 @@ const AIDES_EN: &[(&str, &str)] = &[
               outside Vanguard's program. No argument: the list to choose from; “open”: the folder; “<file> \
               [arguments]” runs it (approved by its fingerprint on the first run). Never as administrator"),
     ("extensions", "Extensions: the menu of plugins and lab scripts, to choose and run"),
+    ("optimiser", "Optimize: the recommended settings, the privacy, performance (except macOS) and comfort ones, each \
+                   shown, accepted, then exactly undoable; “undo” puts everything back as it was. No argument: the \
+                   Optimize menu"),
     ("proche", "A relative's computer: three questions (who uses it, why you were asked to look at it, their \
                 network), the check-up, a summary in plain words, the fixes accepted one by one, then the page to \
                 leave with its tips"),
@@ -2030,6 +2056,9 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
                               takes --for 1h or 4h"),
     ("blocage", "quoi", "“search”, “undo”, “status”, “auto” or “click” (active protection), or a category (programs, \
                            connections, startup, agents) followed by a mode (off, click, auto)"),
+    ("optimiser", "quoi", "recommended, privacy, performance, comfort or undo"),
+    ("verifier-moi", "programme", "Another copy of Vanguard to check (from another key, an earlier version), by its \
+                                     fingerprint and the signed version history"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];
@@ -2050,6 +2079,29 @@ fn ligne_de_commande() -> clap::Command {
         c = c.mut_subcommand(commande, |s| s.mut_arg(option, |a| a.help(aide)));
     }
     c
+}
+
+/// `vanguard optimiser [quoi]` : l'outil du menu Optimiser qui porte ce nom, lancé comme depuis le menu (la même
+/// ligne de `OUTILS`, la même `executer`) ; sans nom, le sous-menu.
+async fn optimiser_en_ligne_de_commande(quoi: Option<&str>) {
+    let mut s = Session::default();
+    let action = match quoi {
+        None => return sous_menu(&mut s, Groupe::Optimiser).await,
+        Some("recommandes" | "recommended") => Action::OptimiserRecommandes,
+        Some("confidentialite" | "privacy") => Action::OptimiserConfidentialite,
+        #[cfg(not(target_os = "macos"))]
+        Some("performance") => Action::OptimiserPerformance,
+        Some("confort" | "comfort") => Action::OptimiserConfort,
+        Some("annuler" | "undo") => Action::OptimiserAnnuler,
+        Some(_) => {
+            trp!(
+                "Pas de réglages de performance proposés sur ce système.",
+                "No performance settings offered on this system."
+            );
+            return;
+        }
+    };
+    executer(&mut s, action).await;
 }
 
 /// La portée d'une analyse demandée en ligne de commande : le dossier donné, sinon tout le dossier personnel
@@ -2181,9 +2233,11 @@ async fn main() {
         Some(Commande::MotDePasse) => protection::fuites::verifier(),
         Some(Commande::Navigateurs) => machine::mots_de_passe::navigateurs(),
         Some(Commande::Courriel) => protection::fuites::verifier_courriel(),
+        // Un seul écran, sans la boucle du menu (clé abuse.ch, « Après une infection ») : une commande se lit d'un
+        // script. Le menu, lui, lance `sortantes::menu`, qui montre le même écran puis propose la suite.
         Some(Commande::Sortantes) => protection::sortantes::afficher(),
         Some(Commande::Distance) => protection::distance::menu(),
-        Some(Commande::VerifierMoi) => protection::manifeste::verifier_moi(),
+        Some(Commande::VerifierMoi { programme }) => protection::manifeste::verifier_moi(programme.as_deref()),
         Some(Commande::Manifeste { ecrire, accepter }) => {
             protection::manifeste::commande(ecrire.as_deref(), accepter);
         }
@@ -2204,6 +2258,7 @@ async fn main() {
         Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
         Some(Commande::Durcir) => optimiser::protection(),
+        // La portée vient des options ; le menu la demande (`yara::menu`), puis lance la même analyse.
         Some(Commande::Yara { complet, dossier }) => protection::yara::analyser(&portee(dossier, complet)),
         Some(Commande::Memoire) => protection::memoire::analyser(),
         Some(Commande::ListesNoires) => reseau::listes_noires::verifier(),
@@ -2212,6 +2267,7 @@ async fn main() {
         Some(Commande::Cameras) => reseau::cameras::chercher_cameras().await,
         Some(Commande::Objets) => reseau::objets::montrer(),
         Some(Commande::DnsRapide) => dns_rapide::mesurer_et_proposer(),
+        Some(Commande::Optimiser { quoi }) => optimiser_en_ligne_de_commande(quoi.as_deref()).await,
         Some(Commande::WifiPublic { etat }) => reseau::wifi_public::commande(etat.as_deref()),
         Some(Commande::Appris) => apprentissage::menu(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
@@ -2462,5 +2518,241 @@ mod tests_menu {
         assert_eq!(touche_de(Action::Parametres).as_deref(), Some("4.12"));
         assert!(OUTILS.iter().any(|o| o.action == Action::Parametres && o.lettre == "s"));
         assert!(depanner::chemin("1").is_some());
+    }
+
+    /// Les outils du menu qui n'ont pas de sous-commande, et pourquoi.
+    const MENU_SEULEMENT: &[(Action, &str)] = &[
+        (Action::Rapport, "vanguard complet --html : le bilan puis son rapport"),
+        (
+            Action::ProtegerDonnees,
+            "la phrase se tape et se confirme à l'écran, sur l'ordinateur du propriétaire",
+        ),
+    ];
+
+    /// Les sous-commandes sans outil du menu, et pourquoi.
+    const LIGNE_DE_COMMANDE_SEULEMENT: &[(&str, &str)] = &[
+        (
+            "restaurer",
+            "le menu Données › Sauvegarder propose aussi la restauration",
+        ),
+        ("regles", "la liste des règles du bilan, pour un script ou un relecteur"),
+        ("demarrage", "dans le menu, l'écran de Pourquoi c'est lent ? le propose"),
+        ("verifier-moi", "pour comparer l'empreinte à la page de la version"),
+        ("plugin", "le menu Extensions les liste et les lance"),
+        ("labo", "le menu Extensions les liste et les lance"),
+        ("proche", "dans le menu, un parcours de Dépanner pas à pas"),
+        (
+            "traces",
+            "dans le menu, un parcours de Dépanner pas à pas (après une infection)",
+        ),
+    ];
+
+    /// Les sous-commandes visibles : (nom, alias visibles).
+    fn sous_commandes() -> Vec<(String, Vec<String>)> {
+        Args::command()
+            .get_subcommands()
+            .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+            .map(|s| {
+                let alias = s.get_visible_aliases().map(str::to_string).collect();
+                (s.get_name().to_string(), alias)
+            })
+            .collect()
+    }
+
+    fn lire(fichier: &str) -> String {
+        std::fs::read_to_string(format!("{}/{fichier}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    }
+
+    /// Une seule table d'outils : chaque outil du menu nomme la sous-commande qui fait la même chose, ou dit pourquoi
+    /// il n'en a pas ; chaque sous-commande a son outil, ou dit pourquoi. Un outil ajouté d'un côté seulement (les
+    /// cinq d'Optimiser n'avaient aucune commande, aucun script ne pouvait tout annuler) arrête ce test.
+    #[test]
+    fn menu_et_ligne_de_commande_ont_les_memes_outils() {
+        let commandes = sous_commandes();
+        let existe = |nom: &str| commandes.iter().any(|(n, _)| n == nom);
+        for o in OUTILS {
+            let sans = MENU_SEULEMENT.iter().any(|(a, _)| *a == o.action);
+            if o.commande.is_empty() {
+                assert!(
+                    sans,
+                    "« {} » : ni sous-commande, ni raison dans MENU_SEULEMENT",
+                    o.titre[0]
+                );
+            } else {
+                assert!(
+                    !sans,
+                    "« {} » : une sous-commande et une raison de ne pas en avoir",
+                    o.titre[0]
+                );
+                assert!(
+                    existe(o.commande),
+                    "« {} » : la sous-commande « {} » n'existe pas",
+                    o.titre[0],
+                    o.commande
+                );
+            }
+        }
+        for (nom, _) in &commandes {
+            let dans_le_menu = OUTILS.iter().any(|o| o.commande == nom);
+            let a_part = LIGNE_DE_COMMANDE_SEULEMENT.iter().any(|(n, _)| n == nom);
+            assert!(
+                dans_le_menu != a_part,
+                "vanguard {nom} : {}",
+                if a_part {
+                    "dans le menu et dans LIGNE_DE_COMMANDE_SEULEMENT"
+                } else {
+                    "ni outil du menu, ni raison dans LIGNE_DE_COMMANDE_SEULEMENT"
+                }
+            );
+        }
+        for (nom, _) in LIGNE_DE_COMMANDE_SEULEMENT {
+            assert!(existe(nom), "LIGNE_DE_COMMANDE_SEULEMENT : « {nom} » n'existe plus");
+        }
+    }
+
+    /// Chaque sous-commande visible a son aide française : un commentaire décollé de sa commande donnait à
+    /// `dernieres-failles` l'aide de trois commandes, et aucune au veilleur ni aux sites dangereux.
+    #[test]
+    fn chaque_commande_a_son_aide() {
+        for s in Args::command()
+            .get_subcommands()
+            .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+        {
+            let aide = s.get_about().map(ToString::to_string).unwrap_or_default();
+            assert!(!aide.trim().is_empty(), "vanguard {} : sans aide", s.get_name());
+        }
+        // Celle de « dernieres-failles » parle des failles, pas du veilleur ni des sites.
+        let commande = Args::command();
+        let failles = commande.find_subcommand("dernieres-failles").unwrap();
+        let aide = failles.get_about().unwrap().to_string();
+        assert!(aide.starts_with("Dernières failles exploitées"), "{aide}");
+    }
+
+    /// Le tableau des commandes du README (« | `vanguard nom …` | … ») a une ligne par sous-commande visible : le
+    /// nom français dans README.md, l'alias anglais (ou le nom, s'il n'en a pas) dans README.en.md.
+    #[test]
+    fn le_readme_liste_chaque_commande() {
+        let lignes_du_tableau = |texte: &str| -> Vec<String> {
+            texte
+                .lines()
+                .filter_map(|l| l.strip_prefix("| `vanguard "))
+                .filter_map(|l| l.split([' ', '`']).next().map(str::to_string))
+                .collect()
+        };
+        let (fr, en) = (
+            lignes_du_tableau(&lire("README.md")),
+            lignes_du_tableau(&lire("README.en.md")),
+        );
+        let mut manquantes = Vec::new();
+        for (nom, alias) in sous_commandes() {
+            if !fr.contains(&nom) {
+                manquantes.push(format!("README.md : {nom}"));
+            }
+            if !en.iter().any(|e| *e == nom || alias.contains(e)) {
+                manquantes.push(format!("README.en.md : {nom} ({})", alias.join(", ")));
+            }
+        }
+        // Les noms de l'autre langue, dans le paragraphe qui les liste : les alias anglais dans README.md, les noms
+        // français dans README.en.md.
+        let (readme, readme_en) = (lire("README.md"), lire("README.en.md"));
+        for (nom, alias) in sous_commandes() {
+            for a in &alias {
+                if !readme.contains(&format!("`{a}`")) {
+                    manquantes.push(format!("README.md, noms anglais : {a}"));
+                }
+            }
+            // Un nom sans alias est le même dans les deux langues (antivirus, yara…) : rien à traduire.
+            if !alias.is_empty() && !readme_en.contains(&format!("`{nom}`")) {
+                manquantes.push(format!("README.en.md, noms français : {nom}"));
+            }
+        }
+        assert_eq!(manquantes, Vec::<String>::new());
+    }
+
+    /// Le mode d'emploi de la clé (outils/LISEZMOI.txt, outils/README.txt) cite chaque outil du menu : par son titre
+    /// tel que le menu l'affiche, ou par sa commande (« vanguard memoire »).
+    #[test]
+    fn le_mode_d_emploi_de_la_cle_cite_chaque_outil() {
+        let (lisezmoi, readme) = (lire("outils/LISEZMOI.txt"), lire("outils/README.txt"));
+        let commandes = sous_commandes();
+        let mut manquants = Vec::new();
+        for o in OUTILS {
+            let alias = commandes
+                .iter()
+                .find(|(n, _)| n == o.commande)
+                .map(|(_, a)| a.clone())
+                .unwrap_or_default();
+            let cite_fr = lisezmoi.contains(o.titre[0])
+                || (!o.commande.is_empty() && lisezmoi.contains(&format!("vanguard {}", o.commande)));
+            let cite_en = readme.contains(o.titre[1])
+                || alias
+                    .iter()
+                    .chain(std::iter::once(&o.commande.to_string()))
+                    .any(|c| !c.is_empty() && readme.contains(&format!("vanguard {c}")));
+            if !cite_fr {
+                manquants.push(format!("LISEZMOI.txt : {}", o.titre[0]));
+            }
+            if !cite_en {
+                manquants.push(format!("README.txt : {}", o.titre[1]));
+            }
+        }
+        assert_eq!(manquants, Vec::<String>::new());
+    }
+
+    /// Le tableau Structure de CONTRIBUTING.md et CONTRIBUTING.en.md nomme chaque fichier de src/ : par son chemin,
+    /// son nom seul dans une ligne qui en groupe plusieurs (`dns.rs`, `wifi.rs`), ou un dossier qui le contient quand
+    /// la ligne vaut pour tout ce dossier (`src/machine/linux/`). Un module ajouté sans sa ligne arrête ce test.
+    #[test]
+    fn le_tableau_structure_nomme_chaque_module() {
+        let fichiers: Vec<String> = {
+            let mut tous = Vec::new();
+            let mut a_voir = vec![std::path::PathBuf::from(format!("{}/src", env!("CARGO_MANIFEST_DIR")))];
+            while let Some(d) = a_voir.pop() {
+                for e in std::fs::read_dir(&d).unwrap().flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        a_voir.push(p);
+                    } else if p.extension().is_some_and(|x| x == "rs") {
+                        let relatif = p.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap();
+                        tous.push(relatif.to_string_lossy().replace('\\', "/"));
+                    }
+                }
+            }
+            tous.sort();
+            tous
+        };
+        for (document, titre) in [("CONTRIBUTING.md", "## Structure"), ("CONTRIBUTING.en.md", "## Layout")] {
+            let texte = lire(document);
+            let debut = texte
+                .find(titre)
+                .unwrap_or_else(|| panic!("{document} : pas de « {titre} »"));
+            let section = &texte[debut..];
+            let section = &section[..section[titre.len()..]
+                .find("\n## ")
+                .map_or(section.len(), |f| f + titre.len())];
+            // Ce qui est entre accents graves, coupé aux virgules et aux espaces (« `a.rs`, `b.rs` »).
+            let cites: Vec<&str> = section
+                .split('`')
+                .skip(1)
+                .step_by(2)
+                .flat_map(|c| c.split([',', ' ', '(', ')']))
+                .filter(|c| !c.is_empty())
+                .collect();
+            let mut manquants = Vec::new();
+            for f in &fichiers {
+                let (dossier, nom) = f.rsplit_once('/').unwrap();
+                let dossier = format!("{dossier}/");
+                // mod.rs et tests.rs vont avec leur dossier ; `src/` seul ne vaut pas pour tout le programme.
+                let par_le_dossier = cites
+                    .iter()
+                    .any(|c| c.ends_with('/') && *c != "src/" && f.starts_with(*c));
+                let par_le_nom = matches!(nom, "mod.rs" | "tests.rs")
+                    && cites.iter().any(|c| c.starts_with(&dossier) || *c == f.as_str());
+                if !(cites.contains(&f.as_str()) || cites.contains(&nom) || par_le_dossier || par_le_nom) {
+                    manquants.push(f.clone());
+                }
+            }
+            assert_eq!(manquants, Vec::<String>::new(), "{document}, tableau « {titre} »");
+        }
     }
 }

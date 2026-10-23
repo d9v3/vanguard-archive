@@ -92,9 +92,15 @@ codegen-units = 1
 overflow-checks = true
 
 # Les bibliothèques en développement : seulement les numéros de ligne (les traces d'erreur restent lisibles). Avec toutes
-# leurs informations de débogage, YARA-X et wasmtime portaient le programme de test au-delà de 400 Mo, plus que ce que la
-# mise à jour depuis la clé accepte de lire (mise_a_jour.rs, TAILLE_MAX).
+# leurs informations de débogage, YARA-X et wasmtime portaient le programme de test bien au-delà de ce que la mise à
+# jour depuis la clé accepte de lire (mise_a_jour.rs, TAILLE_MAX, 512 Mio), que lit le test ce_programme_porte_sa_version.
 [profile.dev.package."*"]
+debug = "line-tables-only"
+
+# Les programmes de test eux aussi : avec les informations complètes de Vanguard lui-même, celui de Windows pesait
+# 520 Mo le 23 oct. 2026, à 97 % de TAILLE_MAX, et ce test aurait échoué sous Wine et dans la VM au premier module de
+# plus. `cargo run` et le programme de mise au point gardent tout pour le débogueur (profil dev).
+[profile.test]
 debug = "line-tables-only"
 
 # SHA-256 optimisé même en développement : sans cela, les empreintes des traces (programmes en marche, fichiers récents)
@@ -112,6 +118,12 @@ pedantic = { level = "warn", priority = -1 }
 doc_markdown = "allow"
 too_many_lines = "allow"
 wildcard_imports = "allow"
+
+# `fuzzing` : posé par cargo-fuzz pour le banc de fuzz/, qui inclut des modules de src/ par leur chemin (sqlite.rs
+# y ouvre sa lecture des colonnes, réservée à macOS ailleurs). Déclaré pour que la compilation de Vanguard ne le
+# prenne pas pour une faute de frappe.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [dev-dependencies]
 proptest = "1.12.0"

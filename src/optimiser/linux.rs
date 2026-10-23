@@ -1160,7 +1160,7 @@ mod tests {
         let Some(r) = crate::commande::lancer(Command::new("lsblk").args(["-dno", "NAME,ROTA,TYPE"]), 10)
             .filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("lsblk absent");
         };
         let attendu = r.sortie.lines().any(|l| {
             let c: Vec<&str> = l.split_whitespace().collect();

@@ -1712,10 +1712,10 @@ mod tests {
     #[test]
     fn findmnt_tranche_comme_l_unite_l_attend() {
         let Some(findmnt) = dans_le_path("findmnt") else {
-            return;
+            return crate::essais::saute("findmnt absent");
         };
         let Some(uuid) = crate::protection::manifeste::identifiant_volume(Path::new("/")) else {
-            return;
+            return crate::essais::saute("identifiant du volume de / illisible");
         };
         let code = |uuid: &str, point: &str| {
             std::process::Command::new(&findmnt)

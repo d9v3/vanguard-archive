@@ -199,10 +199,10 @@ mod tests {
             10,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("timedatectl absent");
         };
         let Some(e) = lire() else {
-            return;
+            return crate::essais::saute("état NTP illisible par D-Bus");
         };
         assert_eq!(r.sortie.contains("NTP=yes"), e.automatique, "{}", r.sortie);
         if let Some(s) = e.synchronisee {

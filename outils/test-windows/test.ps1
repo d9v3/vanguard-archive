@@ -29,6 +29,10 @@ $numero = if ($version -match '\d+\.\d+\.\d+') { $Matches[0] } else { 'inconnue'
 $res = Join-Path $resultats ((Get-Date -Format 'yyyy-MM-dd_HH-mm-ss') + "_v$numero")
 New-Item -ItemType Directory -Force $res | Out-Null
 $debutTest = Get-Date
+# L'empreinte du programme essayé (la copie locale, celle qui tourne), gardée avec la passe et dans l'historique :
+# outils/publier-version.sh ne publie un .exe que si une passe réussie a essayé celui-là, octet pour octet.
+$empreinteEssayee = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLower()
+Set-Content -LiteralPath (Join-Path $res 'programme.sha256') -Value $empreinteEssayee -Encoding ASCII
 
 # ── Suivi des résultats : chaque étape garde ses commandes et ses vérifications, pour l'écran et le rapport ──
 $script:etapes = New-Object System.Collections.ArrayList
@@ -1742,8 +1746,8 @@ if ($avant -and $nbOk -lt $avant) {
 }
 $suite = if ($details) { ' ; ' + ($details -join ' ; ') } else { '' }
 $bilan = if ($nbBug -eq 0 -and $nbEchec -eq 0) { "OK, tout est passé ($nbOk vérifications$suite)" } else { "$nbBug problème(s), $nbEchec commande(s) en échec, $nbOk réussies$suite" }
-Add-Content -Path (Join-Path $resultats 'historique.txt') -Encoding UTF8 -Value ('{0}  v{1,-8} {2}  ({3:N1} min, {4})  -> {5}' -f `
-    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $numero, $bilan, ((Get-Date) - $debutTest).TotalMinutes, $mode, (Split-Path -Leaf $res))
+Add-Content -Path (Join-Path $resultats 'historique.txt') -Encoding UTF8 -Value ('{0}  v{1,-8} {2}  ({3:N1} min, {4})  -> {5}  sha256 {6}' -f `
+    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $numero, $bilan, ((Get-Date) - $debutTest).TotalMinutes, $mode, (Split-Path -Leaf $res), $empreinteEssayee)
 Write-Host "  Rapport : $rapport" -ForegroundColor DarkGray
 if (-not $SansOuvrir) {
     Start-Process $rapport

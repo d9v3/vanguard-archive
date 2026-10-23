@@ -333,7 +333,7 @@ mod tests {
         let chemin = format!(r"Software\VanguardTest-{}\Uninstall", std::process::id());
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let Ok((cle, _)) = hkcu.create_subkey(&chemin) else {
-            return;
+            return crate::essais::saute("registre inaccessible");
         };
         let ecrire = |sous: &str, valeurs: &[(&str, &str)]| {
             let (k, _) = cle.create_subkey(sous).unwrap();

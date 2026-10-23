@@ -931,10 +931,10 @@ mod tests {
         let Some(r) = crate::commande::lancer(std::process::Command::new("ip").args(["-4", "neigh", "show"]), 5)
             .filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("ip absent");
         };
         let Some(natifs) = crate::reseau::scan::etats_voisins() else {
-            return;
+            return crate::essais::saute("voisins illisibles par netlink");
         };
         for ligne in r.sortie.lines().filter(|l| voisin_confirme(l)) {
             let Some(ip) = ligne.split_whitespace().next().and_then(|i| i.parse::<Ipv4Addr>().ok()) else {
@@ -1018,10 +1018,10 @@ mod tests {
             15,
         )
         .filter(|r| r.code == Some(0)) else {
-            return;
+            return crate::essais::saute("nmcli absent");
         };
         let (Some(nm), Some((_, natif))) = (signal_nmcli(&r.sortie), signal_natif()) else {
-            return;
+            return crate::essais::saute("signal Wi-Fi illisible (nmcli ou natif)");
         };
         assert_eq!((natif.canal, natif.bande), (nm.canal, nm.bande), "{}", r.sortie);
         assert!(natif.qualite.abs_diff(nm.qualite) <= 20, "{natif:?} / {nm:?}");

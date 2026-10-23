@@ -256,7 +256,7 @@ mod tests {
             .filter(|r| r.code == Some(0))
             .map(|r| r.sortie)
         else {
-            return;
+            return crate::essais::saute("id absent");
         };
         let trier = |t: &str| {
             let mut v: Vec<String> = t.split_whitespace().map(str::to_string).collect();

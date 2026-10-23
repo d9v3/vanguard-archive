@@ -755,7 +755,7 @@ mod tests {
         let Some(r) = crate::commande::lancer(std::process::Command::new("gsettings").arg("list-recursively"), 60)
             .filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("gsettings absent");
         };
         let l = Lieux::du_systeme();
         let (mut lus, mut laisses) = (0, 0);
@@ -781,7 +781,7 @@ mod tests {
     #[test]
     fn verrous_comme_gsettings() {
         if !super::super::natif::present("dconf") || !super::super::natif::present("gsettings") {
-            return;
+            return crate::essais::saute("dconf ou gsettings absent");
         }
         let r = jetable("comme-dconf");
         let cles = r.join("site.d");
@@ -798,7 +798,7 @@ mod tests {
             30,
         );
         if compile.is_none_or(|c| c.code != Some(0)) {
-            return;
+            return crate::essais::saute("dconf compile en échec");
         }
         let profil = r.join("profil");
         std::fs::write(&profil, format!("user-db:user\nfile-db:{}\n", base.display())).unwrap();
@@ -821,7 +821,7 @@ mod tests {
                 30,
             )
             .filter(|g| g.code == Some(0)) else {
-                return;
+                return crate::essais::saute("gsettings sans réponse");
             };
             assert_eq!(texte(&l, schema, c).as_deref(), Some(g.sortie.trim()), "{schema} {c}");
         }

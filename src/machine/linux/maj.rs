@@ -1466,7 +1466,7 @@ mod tests {
     #[test]
     fn base_sync_comme_pacman_sl() {
         let Ok(conf) = std::fs::read_to_string("/etc/pacman.conf") else {
-            return;
+            return crate::essais::saute("pas de /etc/pacman.conf");
         };
         for depot in depots_configures(&conf) {
             let Ok(octets) = std::fs::read(format!("/var/lib/pacman/sync/{depot}.db")) else {
@@ -1499,10 +1499,10 @@ mod tests {
     #[test]
     fn etrangers_comme_pacman_qm() {
         let Some(natifs) = etrangers_lus() else {
-            return;
+            return crate::essais::saute("paquets étrangers illisibles en Rust");
         };
         let Some(selon_pacman) = etrangers_selon_pacman() else {
-            return;
+            return crate::essais::saute("pacman absent");
         };
         assert_eq!(natifs, selon_pacman);
     }
@@ -1599,11 +1599,11 @@ mod tests {
     #[test]
     fn dkms_comme_dkms_status() {
         let Some(natif) = status_dkms_dans(Path::new(DKMS)) else {
-            return;
+            return crate::essais::saute("pas d'arbre dkms");
         };
         let Some(r) = crate::commande::lancer(Command::new("dkms").arg("status"), 60).filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("dkms absent");
         };
         let noyaux: Vec<String> = noyaux_installes()
             .iter()
@@ -1664,7 +1664,7 @@ mod tests {
         for (a, b) in paires {
             let Some(r) = crate::commande::lancer(Command::new("vercmp").args([a, b]), 5).filter(|r| r.code == Some(0))
             else {
-                return;
+                return crate::essais::saute("vercmp absent");
             };
             let attendu = r.sortie.trim().parse::<i32>().unwrap().cmp(&0);
             assert_eq!(vercmp(a, b), attendu, "{a} {b}");

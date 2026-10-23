@@ -1113,10 +1113,10 @@ mod tests {
         let Some(r) = crate::commande::lancer(std::process::Command::new("ip").args(["-4", "neigh", "show"]), 5)
             .filter(|r| r.code == Some(0))
         else {
-            return;
+            return crate::essais::saute("ip absent");
         };
         let Some(natifs) = etats_voisins() else {
-            return;
+            return crate::essais::saute("voisins illisibles par netlink");
         };
         let par_ip = lire_etats_voisins(&r.sortie);
         // Les états bougent d'un instant à l'autre ; les adresses, elles, sont les mêmes.

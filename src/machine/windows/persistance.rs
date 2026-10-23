@@ -1033,7 +1033,7 @@ mod tests {
         use winreg::enums::HKEY_CURRENT_USER;
         let chemin = format!(r"Software\VanguardTest-{}", std::process::id());
         let Ok((cle, _)) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(&chemin) else {
-            return;
+            return crate::essais::saute("registre inaccessible");
         };
         let nom = std::ffi::OsString::from_wide(&[0x61, 0xD800]);
         cle.set_value(&nom, &r"C:\Users\Public\x.exe".to_string()).unwrap();
