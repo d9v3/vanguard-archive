@@ -10,13 +10,20 @@ use std::net::IpAddr;
 /// D'où vient un bail.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Source {
+    // Chaque source n'est construite que sous son système.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     NetworkManager,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Networkd,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Dhcpcd,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Dhclient,
     /// Registre de Windows (Tcpip\Parameters\Interfaces).
+    #[cfg_attr(not(windows), allow(dead_code))]
     Registre,
     /// Baux du client DHCP de macOS.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     MacOs,
 }
 
@@ -304,7 +311,7 @@ fn nom_de_carte(index: &str) -> Option<String> {
 }
 
 /// Les fichiers d'un dossier, triés par nom ; vide si le dossier ne se lit pas.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn fichiers(dossier: &str) -> Vec<std::path::PathBuf> {
     let mut liste: Vec<std::path::PathBuf> = std::fs::read_dir(dossier)
         .into_iter()

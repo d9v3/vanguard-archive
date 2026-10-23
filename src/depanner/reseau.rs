@@ -121,7 +121,7 @@ fn box_repond(box_: Ipv4Addr) -> bool {
         return true;
     }
     let ip = box_.to_string();
-    let lancer = |cmd: &str, args: &[&str]| crate::commande::lancer(std::process::Command::new(cmd).args(args), 6);
+    let lancer = |cmd: &str, args: &[&str]| crate::commande::lancer(crate::commande::systeme(cmd).args(args), 6);
     // La table des voisins, demandée au noyau par netlink, comme `ip neigh` le fait, sans le lancer.
     #[cfg(target_os = "linux")]
     if box_confirmee(crate::reseau::scan::etats_voisins().as_ref(), box_) {
@@ -658,7 +658,7 @@ fn signal() -> Option<Signal> {
     #[cfg(windows)]
     {
         crate::commande::lancer(
-            std::process::Command::new("netsh").args(["wlan", "show", "interfaces"]),
+            crate::commande::systeme("netsh").args(["wlan", "show", "interfaces"]),
             15,
         )
         .and_then(|r| signal_netsh(&r.sortie))

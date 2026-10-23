@@ -222,6 +222,14 @@ pub(crate) fn refuse_en_premier(status: &str, port: u16) -> bool {
 /// ufw refuse-t-il ce port avant toute autorisation, sur cet ordinateur ? Lu par `ufw status` (root, ou sudo sans
 /// redemander le mot de passe, juste donné pour la règle). `None` : pas lisible.
 pub(crate) fn ufw_refuse_en_premier(port: u16) -> Option<bool> {
+    let r = crate::commande::lancer(&mut ufw_status()?, 15).filter(|r| r.code == Some(0))?;
+    Some(refuse_en_premier(&r.sortie, port))
+}
+
+/// `ufw status`, en root ou par sudo sans redemander le mot de passe.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_wraps)] // même signature que sous Windows, où il n'y a rien à lancer
+fn ufw_status() -> Option<std::process::Command> {
     let mut c = if super::gestes::administrateur() {
         std::process::Command::new("ufw")
     } else {
@@ -230,8 +238,13 @@ pub(crate) fn ufw_refuse_en_premier(port: u16) -> Option<bool> {
         c
     };
     c.arg("status").env("LC_ALL", "C");
-    let r = crate::commande::lancer(&mut c, 15).filter(|r| r.code == Some(0))?;
-    Some(refuse_en_premier(&r.sortie, port))
+    Some(c)
+}
+
+/// ufw n'existe pas sous Windows : rien n'est lancé, surtout pas un ufw.exe posé à côté de Vanguard.
+#[cfg(not(unix))]
+fn ufw_status() -> Option<std::process::Command> {
+    None
 }
 
 /// Le pare-feu par lequel bloquer ici ; `Err` : pourquoi il n'y en a pas (« non disponible »).

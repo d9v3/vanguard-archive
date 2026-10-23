@@ -68,14 +68,18 @@ pub fn winget_installer(id: &str) -> String {
 /// de son PSModulePath et chargerait des modules de la version 7, incompatibles : le lecteur Cert: manquait ainsi
 /// dans le test de la VM. Sans la variable, la 5.1 reprend ses chemins par défaut. Celui de System32 : par son seul nom,
 /// Windows chercherait d'abord un powershell.exe posé à côté de Vanguard (dossier du programme lancé, peut-être en
-/// administrateur) ; introuvable là (Wine), le nom seul.
+/// administrateur). Absent (Wine) : il ne démarre pas, et ce qu'il devait lire reste non vérifié.
 pub fn powershell() -> Command {
-    let systeme = std::env::var_os("SystemRoot")
-        .map(|r| std::path::PathBuf::from(r).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"))
-        .filter(|p| p.is_file());
-    let mut c = Command::new(systeme.unwrap_or_else(|| "powershell".into()));
+    let mut c = Command::new(crate::commande::systeme32(r"WindowsPowerShell\v1.0\powershell.exe"));
     c.env_remove("PSModulePath");
     c
+}
+
+/// winget par son chemin : celui du Store, sinon celui du PATH ou des liens de winget. Jamais par son seul nom, que
+/// Windows chercherait d'abord à côté de Vanguard.
+pub(crate) fn winget() -> Option<std::path::PathBuf> {
+    maj::winget_du_store(std::env::var_os("LOCALAPPDATA").as_deref())
+        .or_else(|| crate::protection::outil::trouver("winget"))
 }
 
 /// Exécute un script PowerShell et retourne sa sortie (UTF-8), ou `None` en cas d'échec.
@@ -1078,9 +1082,11 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
 
 /// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
 fn wifi() -> Vec<Constat> {
-    let Some(texte) =
-        crate::commande::lancer(Command::new("netsh").args(["wlan", "show", "interfaces"]), 15).map(|r| r.sortie)
-    else {
+    let Some(texte) = crate::commande::lancer(
+        crate::commande::systeme("netsh").args(["wlan", "show", "interfaces"]),
+        15,
+    )
+    .map(|r| r.sortie) else {
         return Vec::new();
     };
     let Some(connexion) = super::wifi::connexion_netsh(&texte) else {
@@ -1089,7 +1095,7 @@ fn wifi() -> Vec<Constat> {
     let mut constats = vec![super::wifi::securite(&connexion.ssid, &connexion.securite, &[])];
     // Windows 11 24H2 réserve la liste à l'autorisation de localisation : sans elle, netsh ne liste rien, et il n'y a
     // simplement pas de jumeau à chercher.
-    if let Some(r) = crate::commande::lancer(Command::new("netsh").args(["wlan", "show", "networks"]), 15) {
+    if let Some(r) = crate::commande::lancer(crate::commande::systeme("netsh").args(["wlan", "show", "networks"]), 15) {
         let mut visibles = super::wifi::lire_netsh(&r.sortie);
         visibles.push(connexion);
         constats.extend(super::wifi::jumeau(&visibles));

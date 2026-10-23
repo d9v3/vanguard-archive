@@ -9,6 +9,18 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Small safety fixes.** On Windows, system programs (netstat, netsh, powercfg, wevtutil, tasklist, schtasks,
+  ipconfig, cmd, PowerShell…) are started by their path in System32, asked from Windows itself: a fake program of the
+  same name placed next to Vanguard (Downloads) or in the current folder can no longer hide a port, a process or a
+  setting; cmd no longer searches its current folder, and a test refuses any new start by bare name. The vulnerable
+  drivers list (LOLDrivers) is only replaced by an answer that really is one: an error page no longer stops the check
+  for a week. On macOS, a download's hash is computed in Rust, without md5 or shasum, and the Privacy check
+  reads the permissions database with Vanguard's SQLite reader, without /usr/bin/sqlite3. Clean up: “Downloaded
+  packages” is no longer recommended without paccache, and says it erases what lets you roll back. The menu,
+  `--help` and the launcher use the showcase tagline (“Portable cyber defense for endpoints and networks”). Dead
+  code removed and lighter dependencies (one crate less on Windows, fewer features compiled for reqwest, tokio and
+  futures): 9 to 14 fewer libraries depending on the system.
+
 - **Spyware.** `vanguard spyware` (or `logiciels-espions`; Antivirus and protection menu, last) looks for signs of
   spyware planted by someone close: current connections and recently asked names going to known spyware servers and
   sites (list from the Échap association, CC-BY 4.0, downloaded when used and kept a day, never embedded), known

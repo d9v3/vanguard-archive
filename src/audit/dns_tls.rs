@@ -193,6 +193,7 @@ pub struct Entree {
 
 impl Entree {
     /// Une entrée vide : rien lu, rien mesuré (hors ligne complet).
+    #[cfg(test)]
     pub fn vide(hors_ligne: bool) -> Self {
         Entree {
             hors_ligne,

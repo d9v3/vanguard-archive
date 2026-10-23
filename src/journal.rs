@@ -128,7 +128,7 @@ pub(crate) fn systeme() -> &'static str {
         #[cfg(windows)]
         {
             // « Microsoft Windows [Version 10.0.26200.9711] »
-            crate::commande::lancer(std::process::Command::new("cmd").args(["/c", "ver"]), 5)
+            crate::commande::lancer(crate::commande::cmd().args(["/d", "/c", "ver"]), 5)
                 .and_then(|r| {
                     r.sortie
                         .split_once("Version ")

@@ -9,6 +9,19 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## Prochaine version
 
+- **Petits correctifs de sûreté.** Sous Windows, les programmes du système (netstat, netsh, powercfg, wevtutil,
+  tasklist, schtasks, ipconfig, cmd, PowerShell…) sont lancés par leur chemin dans System32, demandé à Windows
+  lui-même : un faux programme du même nom posé à côté de Vanguard (Téléchargements) ou dans le dossier courant ne
+  peut plus cacher un port, un processus ou un réglage ; cmd ne cherche plus dans son dossier courant, et un test
+  refuse tout nouveau lancement par le seul nom. La liste des pilotes vulnérables (LOLDrivers) n'est remplacée que
+  par une réponse qui en est bien une : une page d'erreur ne coupe plus la vérification une semaine. Sous macOS,
+  l'empreinte d'un téléchargement est calculée en Rust, sans md5 ni shasum, et le Bilan de confidentialité lit la
+  base des autorisations par le lecteur SQLite de Vanguard, sans /usr/bin/sqlite3. Nettoyer : « Paquets
+  téléchargés » n'est plus recommandé sans paccache, et dit qu'il efface de quoi revenir en arrière. Le menu,
+  `--help` et le lanceur reprennent l'accroche de la vitrine (« Cyberdéfense portable des postes et des réseaux »).
+  Du code mort retiré et des dépendances allégées (une crate de moins sous Windows, moins de fonctions compilées
+  pour reqwest, tokio et futures) : 9 à 14 bibliothèques de moins selon le système.
+
 - **Logiciels espions.** `vanguard logiciels-espions` (alias `spyware` ; menu Antivirus et protection, en dernier)
   cherche les signes d'un logiciel espion posé par un proche : connexions en cours et noms demandés récemment vers les
   serveurs et sites des logiciels espions connus (liste de l'association Échap, CC-BY 4.0, téléchargée à l'usage et

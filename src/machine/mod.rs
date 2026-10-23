@@ -1,6 +1,7 @@
 //! Audit de sécurité de cette machine : types communs, affichage et exécution des correctifs.
 //! Les vérifications elles-mêmes dépendent du système (linux/, windows/, macos/).
 
+#[cfg(unix)]
 use std::process::Command;
 
 use serde::Serialize;
@@ -886,7 +887,8 @@ pub fn ouvrir(cible: &str) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let _ = Command::new("cmd").raw_arg(ligne_ouvrir(cible)).spawn();
+        // Sans la variable de commande::cmd : elle passerait au navigateur ou à l'éditeur ouvert.
+        let _ = crate::commande::systeme("cmd").raw_arg(ligne_ouvrir(cible)).spawn();
     }
     #[cfg(target_os = "macos")]
     let _ = Command::new("open").arg(cible).spawn();

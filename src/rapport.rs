@@ -1066,7 +1066,11 @@ mod tests {
                         note: None,
                         verifies: 0,
                         non_verifies: 1,
-                        constats: vec![crate::audit::pas_encore_ecrit(d)],
+                        constats: vec![crate::audit::non_verifie(
+                            d.categorie(),
+                            "",
+                            "Non vérifié : rien n'a pu être lu pour ce domaine.",
+                        )],
                     }
                 }
             })

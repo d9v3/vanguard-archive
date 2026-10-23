@@ -350,7 +350,7 @@ fn ressources_windows() {
         res.set_ar_path("x86_64-w64-mingw32-ar");
     }
     res.set("ProductName", "Vanguard")
-        .set("FileDescription", "Vanguard - sécurise et optimise ta machine et ton réseau (bilan, antivirus, réglages)")
+        .set("FileDescription", "Vanguard - Cyberdéfense portable des postes et des réseaux (bilan, antivirus, réglages)")
         .set("CompanyName", "Projet personnel Vanguard")
         .set("LegalCopyright", "© 2026 d9v3, licence GPL-3.0-or-later")
         .set("OriginalFilename", "vanguard.exe")

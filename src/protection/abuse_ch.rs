@@ -122,7 +122,8 @@ impl Liste {
 /// retéléchargée ensuite. La télécharger ne dit à personne ce qu'on cherche (on prend la liste entière). Seule une
 /// réponse 200 que `valide` accepte remplace la copie d'avant (un 429, une panne ou une page qui n'est pas la liste
 /// la gardent, avec son âge : le lancement suivant redemande), par un fichier provisoire renommé : jamais à moitié
-/// écrite. Partagé entre MalwareBazaar, URLhaus, Feodo Tracker, ThreatFox, le catalogue de la CISA et Échap.
+/// écrite. Partagé entre MalwareBazaar, URLhaus, Feodo Tracker, ThreatFox, le catalogue de la CISA, Échap et la liste
+/// des pilotes vulnérables (LOLDrivers).
 pub(crate) fn liste(
     demande: crate::http::Demande,
     lieu: (&str, &str),

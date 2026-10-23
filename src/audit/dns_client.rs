@@ -13,9 +13,9 @@ use crate::reseau::nat::{hasard, recevoir};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Genre {
     A = 1,
-    Txt = 16,
-    Aaaa = 28,
     Svcb = 64,
+    /// Seulement dans les essais (questions fabriquées) ; l'audit demande A et SVCB.
+    #[cfg(test)]
     Https = 65,
 }
 
@@ -82,6 +82,7 @@ impl Reponse {
     }
 
     /// Le nom a bien été résolu : une réponse sans panne ni refus, avec au moins un enregistrement.
+    #[cfg(test)]
     pub fn resolu(&self) -> bool {
         self.rcode == 0 && !self.enregistrements.is_empty()
     }

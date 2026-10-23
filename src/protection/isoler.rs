@@ -311,8 +311,7 @@ fn lancer(source: &Path) {
 
 #[cfg(windows)]
 fn lancer(source: &Path) {
-    let sandbox = PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
-        .join("System32\\WindowsSandbox.exe");
+    let sandbox = crate::commande::systeme32("WindowsSandbox.exe");
     if !sandbox.is_file() {
         trp!(
             "  ✖ Windows Sandbox n'est pas activé. Il existe sur Windows 10/11 Pro, Entreprise et Éducation :\n    Paramètres > Applications > Fonctionnalités facultatives > Plus de fonctionnalités Windows > « Bac à sable Windows ».",

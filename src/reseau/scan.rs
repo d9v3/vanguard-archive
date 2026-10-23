@@ -5,7 +5,7 @@ use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use futures::stream::{self, StreamExt};
+use futures_util::stream::{self, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -137,7 +137,7 @@ fn choisir_reseau(candidats: &[(Ipv4Addr, Ipv4Addr)], gw: Option<u32>) -> Option
 
 #[cfg(not(target_os = "linux"))]
 fn commande(cmd: &str, args: &[&str]) -> String {
-    crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
+    crate::commande::lancer(crate::commande::systeme(cmd).args(args), 10)
         .map(|r| r.sortie)
         .unwrap_or_default()
 }
@@ -837,7 +837,7 @@ fn nom_wifi_ipconfig(sortie: &str) -> Option<String> {
 
 #[cfg(not(target_os = "linux"))]
 fn commande_sortie(cmd: &str, args: &[&str]) -> String {
-    crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
+    crate::commande::lancer(crate::commande::systeme(cmd).args(args), 10)
         .map(|r| r.sortie)
         .unwrap_or_default()
 }

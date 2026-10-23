@@ -715,7 +715,7 @@ pub fn apres(touches: &[&Reglage]) {
     // Windows relance le bureau tout seul ; sinon on le relance.
     std::thread::sleep(std::time::Duration::from_secs(3));
     if explorateur().is_empty() {
-        let _ = Command::new("explorer.exe").spawn();
+        let _ = Command::new(crate::commande::dossier_systeme().with_file_name("explorer.exe")).spawn();
     }
 }
 

@@ -64,6 +64,64 @@ pub fn lancer(commande: &mut Command, secondes: u64) -> Option<Resultat> {
     })
 }
 
+/// Le dossier System32 de ce Windows, demandé à Windows lui-même (GetSystemDirectoryW) : la variable SystemRoot
+/// se change d'un `set` avant de lancer Vanguard, la réponse de Windows non. Lu une fois.
+#[cfg(windows)]
+pub(crate) fn dossier_systeme() -> &'static std::path::Path {
+    use std::os::windows::ffi::OsStringExt;
+    static DOSSIER: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetSystemDirectoryW(tampon: *mut u16, taille: u32) -> u32;
+    }
+    DOSSIER.get_or_init(|| {
+        let mut tampon = [0u16; 1024];
+        // SAFETY : la taille passée est celle du tampon (1024 < u32::MAX) ; Windows y écrit au plus autant de
+        // caractères et rend leur nombre, ou la taille qu'il faudrait (plus grande que le tampon), ou 0.
+        let n = unsafe { GetSystemDirectoryW(tampon.as_mut_ptr(), 1024) } as usize;
+        match tampon.get(..n) {
+            Some(nom) if n > 0 => std::path::PathBuf::from(std::ffi::OsString::from_wide(nom)),
+            // Jamais vu : un chemin écrit plutôt qu'un nom nu, que Windows chercherait d'abord à côté de Vanguard.
+            _ => std::path::PathBuf::from(r"C:\Windows\System32"),
+        }
+    })
+}
+
+/// Un programme de Windows par son chemin complet dans System32 (« .exe » ajouté s'il manque). Par son seul nom,
+/// Windows le chercherait d'abord dans le dossier de Vanguard puis dans le dossier courant (Téléchargements, une clé
+/// écrite ailleurs) : un faux netstat.exe ou tasklist.exe posé là cacherait un port ou un processus.
+#[cfg(windows)]
+pub(crate) fn systeme32(nom: &str) -> std::path::PathBuf {
+    let fichier = if std::path::Path::new(nom).extension().is_some() {
+        nom.to_string()
+    } else {
+        format!("{nom}.exe")
+    };
+    dossier_systeme().join(fichier)
+}
+
+/// Un programme du système : sous Windows, par son chemin dans System32 (voir `systeme32`) ; ailleurs, par son nom,
+/// cherché dans le PATH comme avant.
+pub(crate) fn systeme(nom: &str) -> Command {
+    #[cfg(windows)]
+    let programme = systeme32(nom);
+    #[cfg(not(windows))]
+    let programme = nom;
+    Command::new(programme)
+}
+
+/// cmd.exe par son chemin, pour une ligne dont les programmes sont écrits par leur chemin (voir `systeme32`).
+/// NoDefaultCurrentDirectoryInExePath en garde-fou : un nom laissé nu sur la ligne n'est plus cherché dans le dossier
+/// courant (Téléchargements, une clé), seulement dans le PATH, qui lui aussi se change d'un `set` ; la protection
+/// reste donc le chemin écrit. La variable passe aux programmes de la ligne : pour ouvrir un fichier ou une page,
+/// où elle ne servirait à rien, passer plutôt par `systeme("cmd")`.
+#[cfg(windows)]
+pub(crate) fn cmd() -> Command {
+    let mut c = Command::new(systeme32("cmd.exe"));
+    c.env("NoDefaultCurrentDirectoryInExePath", "1");
+    c
+}
+
 /// Ce que `lancer_borne` a lu.
 pub struct Borne {
     /// Code de retour (`None` : arrêté par la borne, le délai ou un signal).
@@ -842,7 +900,7 @@ mod tests_sh_chaine {
         ),
     ];
 
-    fn sources(dossier: &Path, base: &Path, sortie: &mut Vec<(String, String)>) {
+    pub(super) fn sources(dossier: &Path, base: &Path, sortie: &mut Vec<(String, String)>) {
         for e in std::fs::read_dir(dossier).unwrap().flatten() {
             let p = e.path();
             if p.is_dir() {
@@ -1262,5 +1320,220 @@ mod tests_lancer_borne {
         assert_eq!((r.code, r.sortie.as_str()), (Some(0), "parti\n"));
         std::thread::sleep(Duration::from_secs(3));
         assert!(!temoin.exists(), "le petit-enfant a survécu");
+    }
+}
+
+/// Sous Windows, aucun programme lancé par son seul nom : la liste de ceux qui restent, lue dans les sources
+/// compilées pour Windows (les `cfg` des modules et des blocs sont suivis, les tests mis à part).
+#[cfg(all(test, unix))]
+mod tests_noms_nus {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    /// Le prédicat d'un `#[cfg(…)]` est-il vrai pour le programme Windows (hors tests) ? Ce qui n'est ni un système
+    /// ni `test` (fonction, `debug_assertions`) compte pour vrai : mieux vaut lire un bloc de trop qu'en oublier un.
+    fn vrai_sous_windows(p: &str) -> bool {
+        let p = p.trim();
+        let interieur = |prefixe: &str| p.strip_prefix(prefixe).and_then(|r| r.strip_suffix(')'));
+        if let Some(r) = interieur("not(") {
+            return !vrai_sous_windows(r);
+        }
+        for (prefixe, tous) in [("any(", false), ("all(", true)] {
+            if let Some(r) = interieur(prefixe) {
+                let mut parties = Vec::new();
+                let (mut profondeur, mut debut) = (0, 0);
+                for (i, c) in r.char_indices() {
+                    match c {
+                        '(' => profondeur += 1,
+                        ')' => profondeur -= 1,
+                        ',' if profondeur == 0 => {
+                            parties.push(&r[debut..i]);
+                            debut = i + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                parties.push(&r[debut..]);
+                let parties = parties.into_iter().filter(|x| !x.trim().is_empty());
+                return if tous {
+                    parties.into_iter().all(vrai_sous_windows)
+                } else {
+                    parties.into_iter().any(vrai_sous_windows)
+                };
+            }
+        }
+        match p {
+            "windows" => true,
+            "unix" | "test" => false,
+            _ if p.starts_with("target_os") || p.starts_with("target_family") => p.contains("\"windows\""),
+            _ => true,
+        }
+    }
+
+    fn retrait(l: &str) -> usize {
+        l.len() - l.trim_start().len()
+    }
+
+    /// Les `#[cfg(…)]` posés juste au-dessus de la ligne `n` sont-ils tous vrais sous Windows ?
+    fn attributs_vrais(lignes: &[&str], n: usize) -> bool {
+        for l in lignes[..n].iter().rev().map(|l| l.trim()) {
+            if let Some(p) = l.strip_prefix("#[cfg(").and_then(|r| r.strip_suffix(")]")) {
+                if !vrai_sous_windows(p) {
+                    return false;
+                }
+            } else if !(l.starts_with("#[") || l.starts_with("//")) {
+                break;
+            }
+        }
+        true
+    }
+
+    /// La ligne `n` est-elle compilée sous Windows ? Ses attributs, puis ceux de chaque ligne qui l'englobe (moins
+    /// en retrait : fonction, bloc, instruction coupée sur plusieurs lignes), jusqu'au haut du fichier.
+    fn ligne_sous_windows(lignes: &[&str], n: usize) -> bool {
+        if !attributs_vrais(lignes, n) {
+            return false;
+        }
+        let mut niveau = retrait(lignes[n]);
+        for j in (0..n).rev() {
+            let l = lignes[j];
+            let t = l.trim_start();
+            if t.is_empty() || niveau == 0 || retrait(l) >= niveau {
+                continue;
+            }
+            if ["//", "#[", "}", ")", "]"].iter().any(|d| t.starts_with(d)) {
+                continue;
+            }
+            niveau = retrait(l);
+            if !attributs_vrais(lignes, j) {
+                return false;
+            }
+        }
+        // Le fichier entier sous `#![cfg(…)]`.
+        lignes
+            .iter()
+            .filter_map(|l| l.trim().strip_prefix("#![cfg(").and_then(|r| r.strip_suffix(")]")))
+            .all(vrai_sous_windows)
+    }
+
+    /// Le fichier `nom` (relatif à src/) est-il compilé sous Windows ? Sa déclaration `mod` chez son parent, puis
+    /// celle du parent, jusqu'à main.rs.
+    fn fichier_sous_windows(fichiers: &HashMap<&str, &str>, nom: &str) -> bool {
+        if nom == "main.rs" {
+            return true;
+        }
+        let chemin = Path::new(nom);
+        let (module, dossier) = if chemin.file_stem().is_some_and(|s| s == "mod") {
+            let d = chemin.parent().unwrap();
+            (d.file_name().unwrap().to_string_lossy(), d.parent().unwrap())
+        } else {
+            (chemin.file_stem().unwrap().to_string_lossy(), chemin.parent().unwrap())
+        };
+        let dossier = dossier.to_string_lossy();
+        let parents = if dossier.is_empty() {
+            vec!["main.rs".to_string()]
+        } else {
+            vec![format!("{dossier}/mod.rs"), format!("{dossier}.rs")]
+        };
+        let Some((parent, src)) = parents.iter().find_map(|p| fichiers.get(p.as_str()).map(|s| (p, *s))) else {
+            return true;
+        };
+        let lignes: Vec<&str> = src.lines().collect();
+        let declaration = format!("mod {module};");
+        let Some(n) = lignes.iter().position(|l| l.trim().ends_with(&declaration)) else {
+            return true;
+        };
+        ligne_sous_windows(&lignes, n) && fichier_sous_windows(fichiers, parent)
+    }
+
+    /// Les `Command::new("nom")` compilés sous Windows dont le littéral n'est pas un chemin : (fichier:ligne, texte).
+    fn noms_nus(fichiers: &[(String, String)]) -> Vec<String> {
+        let index: HashMap<&str, &str> = fichiers.iter().map(|(n, s)| (n.as_str(), s.as_str())).collect();
+        let mut trouves = Vec::new();
+        for (nom, src) in fichiers {
+            if !fichier_sous_windows(&index, nom) {
+                continue;
+            }
+            // Les tests des modules lancent leurs propres commandes, et pas sous Windows.
+            let code = src.find("#[cfg(test)]\nmod ").map_or(src.as_str(), |t| &src[..t]);
+            let lignes: Vec<&str> = code.lines().collect();
+            for (n, l) in lignes.iter().enumerate() {
+                for (i, _) in l.match_indices("Command::new(") {
+                    let mut apres = l[i + "Command::new(".len()..].trim_start();
+                    // rustfmt coupe un appel trop long : le littéral passe alors à la ligne suivante.
+                    if apres.is_empty() {
+                        apres = lignes.get(n + 1).map_or("", |s| s.trim_start());
+                    }
+                    let Some(texte) = apres.strip_prefix('"').and_then(|r| r.split('"').next()) else {
+                        continue;
+                    };
+                    if !texte.contains(['\\', '/']) && ligne_sous_windows(&lignes, n) {
+                        trouves.push(format!("{nom}:{} : {texte}", n + 1));
+                    }
+                }
+            }
+        }
+        trouves
+    }
+
+    #[test]
+    fn aucun_programme_lance_par_son_seul_nom_sous_windows() {
+        let base = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut fichiers = Vec::new();
+        super::tests_sh_chaine::sources(base, base, &mut fichiers);
+        let restes = noms_nus(&fichiers);
+        assert!(
+            restes.is_empty(),
+            "programme lancé par son seul nom sous Windows : passe-le par commande::systeme, systeme32 ou cmd \
+             (sinon Windows le cherche d'abord à côté de Vanguard) :\n{}",
+            restes.join("\n")
+        );
+    }
+
+    #[test]
+    fn le_lecteur_suit_les_cfg() {
+        assert!(vrai_sous_windows("windows") && vrai_sous_windows("any(windows, test)"));
+        assert!(!vrai_sous_windows("unix") && !vrai_sous_windows("target_os = \"linux\""));
+        assert!(vrai_sous_windows("not(target_os = \"linux\")") && !vrai_sous_windows("all(test, windows)"));
+        let src = "fn a() {\n    #[cfg(unix)]\n    let x = lancer(\n        Command::new(\"sh\"),\n    );\n    \
+                   #[cfg(windows)]\n    {\n        Command::new(\"netstat\");\n    }\n}\n";
+        let fichiers = vec![("main.rs".to_string(), src.to_string())];
+        assert_eq!(noms_nus(&fichiers), ["main.rs:8 : netstat"]);
+        // Un module déclaré sous cfg(unix) n'est pas lu.
+        let fichiers = vec![
+            ("main.rs".to_string(), "#[cfg(unix)]\nmod b;\nmod c;\n".to_string()),
+            ("b.rs".to_string(), "fn f() { Command::new(\"bash\"); }\n".to_string()),
+            (
+                "c.rs".to_string(),
+                "fn f() { Command::new(\"cmd\"); Command::new(r\"C:\\x.exe\"); }\n".to_string(),
+            ),
+        ];
+        assert_eq!(noms_nus(&fichiers), ["c.rs:1 : cmd"]);
+    }
+
+    /// Un appel coupé par rustfmt, le nom seul sur la ligne suivante, est vu aussi (à la ligne de l'appel).
+    #[test]
+    fn le_lecteur_voit_un_appel_coupe() {
+        let src = "fn f() {\n    let sortie = lancer(\n        Command::new(\n            \"wevtutil\",\n        )\n        \
+                   .args([\"qe\", \"System\"]),\n    );\n}\n";
+        let fichiers = vec![("main.rs".to_string(), src.to_string())];
+        assert_eq!(noms_nus(&fichiers), ["main.rs:3 : wevtutil"]);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests_systeme32 {
+    /// Le chemin donné par Windows, complet, « .exe » ajouté seulement s'il manque ; cmd.exe y est (Wine compris).
+    #[test]
+    fn programmes_du_systeme_par_leur_chemin() {
+        let dossier = super::dossier_systeme();
+        assert!(dossier.is_absolute(), "{}", dossier.display());
+        assert_eq!(super::systeme32("netstat"), dossier.join("netstat.exe"));
+        assert_eq!(super::systeme32("chcp.com"), dossier.join("chcp.com"));
+        assert!(super::systeme32("cmd").is_file());
+        assert_eq!(
+            super::systeme("netstat").get_program(),
+            dossier.join("netstat.exe").as_os_str()
+        );
     }
 }

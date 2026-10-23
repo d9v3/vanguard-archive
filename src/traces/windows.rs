@@ -17,11 +17,32 @@ use crate::commande::section;
 const SEP: char = '\u{1f}';
 
 /// Une commande de la console, lancée en UTF-8 : sans « chcp 65001 », ipconfig, schtasks ou netstat écrivent dans
-/// l'ancienne page de code de la console, et les accents d'un Windows français deviennent illisibles.
+/// l'ancienne page de code de la console, et les accents d'un Windows français deviennent illisibles. chcp et le
+/// programme de la ligne sont écrits par leur chemin dans System32 : par leur seul nom, cmd les chercherait dans le
+/// PATH, qui se change d'un `set` avant de lancer Vanguard (voir commande::cmd).
 fn console(ligne: &str) -> Command {
-    let mut c = Command::new("cmd");
-    c.args(["/d", "/s", "/c", &format!("chcp 65001 >nul & {ligne}")]);
+    use std::os::windows::process::CommandExt;
+    let mut c = crate::commande::cmd();
+    // Écrite telle quelle : Rust mettrait « \" » devant les guillemets des chemins, que cmd ne comprend pas.
+    c.args(["/d", "/s", "/c"])
+        .raw_arg(ligne_console(ligne, crate::commande::systeme32));
     c
+}
+
+/// La ligne passée à cmd, chcp et le premier mot de `ligne` remplacés par leur chemin (`chemin`) entre guillemets,
+/// le tout entre guillemets : avec /s, cmd retire seulement le premier et le dernier.
+fn ligne_console(ligne: &str, chemin: impl Fn(&str) -> PathBuf) -> String {
+    let (programme, reste) = ligne.split_once(' ').unwrap_or((ligne, ""));
+    let reste = if reste.is_empty() {
+        String::new()
+    } else {
+        format!(" {reste}")
+    };
+    format!(
+        "\"\"{}\" 65001 >nul & \"{}\"{reste}\"",
+        chemin("chcp.com").display(),
+        chemin(programme).display()
+    )
 }
 
 /// Lancé en administrateur (fenêtre élevée) ? Lu sur le jeton du processus, sans whoami.
@@ -719,7 +740,7 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
         let destination = dossier.join(nom);
         let debut = std::time::Instant::now();
         let r = crate::commande::lancer(
-            Command::new("wevtutil")
+            crate::commande::systeme("wevtutil")
                 .args(["epl", journal])
                 .arg(&destination)
                 .arg(SEPT_JOURS),
@@ -955,7 +976,7 @@ pub(super) fn place_des_journaux() -> u64 {
     JOURNAUX
         .iter()
         .map(|(journal, ..)| {
-            crate::commande::lancer(Command::new("wevtutil").args(["gli", journal]), 15)
+            crate::commande::lancer(crate::commande::systeme("wevtutil").args(["gli", journal]), 15)
                 .and_then(|r| taille_gli(&r.sortie))
                 .unwrap_or(20 << 20)
         })
@@ -978,6 +999,19 @@ pub(super) fn endroits_temporaires() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn console_par_chemins_complets() {
+        let chemin = |nom: &str| PathBuf::from(format!(r"C:\Windows\System32\{nom}"));
+        assert_eq!(
+            ligne_console("tasklist /v /fo csv", chemin),
+            r#"""C:\Windows\System32\chcp.com" 65001 >nul & "C:\Windows\System32\tasklist" /v /fo csv""#
+        );
+        assert_eq!(
+            ligne_console("arp", chemin),
+            r#"""C:\Windows\System32\chcp.com" 65001 >nul & "C:\Windows\System32\arp"""#
+        );
+    }
 
     #[test]
     fn abonnement_sur_une_ligne() {

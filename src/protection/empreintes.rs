@@ -117,31 +117,11 @@ fn dossier() -> PathBuf {
     crate::reseau::dossier_local().join("malwarebazaar")
 }
 
-pub(crate) fn age(chemin: &Path) -> Option<Duration> {
+fn age(chemin: &Path) -> Option<Duration> {
     std::fs::metadata(chemin)
         .and_then(|m| m.modified())
         .ok()
         .map(|t| t.elapsed().unwrap_or_default())
-}
-
-/// Télécharge `adresse` dans `chemin` quand la copie a plus de `apres` (écrite à côté puis renommée : une coupure ne
-/// laisse jamais un fichier à moitié). Rien hors ligne, ni pendant les tests. Pour la liste publique de LOLDrivers ;
-/// celles de MalwareBazaar passent par `abuse_ch::export`, avec la clé.
-#[cfg(windows)]
-pub(crate) fn rafraichir(adresse: &str, chemin: &Path, apres: Duration, max: u64, secondes: u64) {
-    if cfg!(test) || crate::parametres::hors_ligne() || age(chemin).is_some_and(|a| a < apres) {
-        return;
-    }
-    let reponse = crate::http::envoyer(crate::http::Demande {
-        taille_max: max,
-        ..crate::http::Demande::get(adresse, Duration::from_secs(secondes))
-    });
-    if let Some(r) = reponse.filter(|r| r.code == 200 && !r.corps.is_empty()) {
-        let provisoire = chemin.with_extension("nouveau");
-        if std::fs::write(&provisoire, &r.corps).is_ok() {
-            let _ = std::fs::rename(&provisoire, chemin);
-        }
-    }
 }
 
 /// Les empreintes chargées, ou pourquoi il n'y en a pas.

@@ -326,6 +326,13 @@ pub(super) fn relever(r: &mut super::Releve, ind: Option<&Indicateurs>) {
 /// vide l'accompagne (changements récents peut-être absents). `None` : illisible (accès complet au disque absent).
 #[cfg(target_os = "macos")]
 fn lire_base(base: &std::path::Path) -> Option<(Vec<Autorisation>, bool)> {
+    lire_base_avec(base, autorisations)
+}
+
+/// Comme `lire_base`, avec la lecture des lignes choisie par l'appelant : la même pour les autorisations d'épier et
+/// pour celles de la caméra, du micro et des contacts (protection/acces.rs).
+#[cfg(target_os = "macos")]
+pub(crate) fn lire_base_avec<T>(base: &std::path::Path, lecture: impl Fn(&[u8]) -> Option<T>) -> Option<(T, bool)> {
     // Une vraie TCC.db fait quelques centaines de Ko : au-delà, un fichier fabriqué, jamais chargé en mémoire.
     const TAILLE_MAX: u64 = 32 << 20;
     let lire = || {
@@ -340,7 +347,7 @@ fn lire_base(base: &std::path::Path) -> Option<(Vec<Autorisation>, bool)> {
         if u64::try_from(octets.len()).unwrap_or(u64::MAX) > TAILLE_MAX {
             return None;
         }
-        Some((crate::sqlite::compteur(&octets), autorisations(&octets)?))
+        Some((crate::sqlite::compteur(&octets), lecture(&octets)?))
     };
     let (compteur, mut autorisations) = lire()?;
     if let Some((encore, nouvelles)) = lire()

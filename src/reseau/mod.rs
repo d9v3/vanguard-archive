@@ -19,7 +19,7 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use futures::future::join_all;
+use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
 
 use crate::risk::{Niveau, PORTS_COURANTS, PORTS_UDP, identifier, info_port, info_udp, note};

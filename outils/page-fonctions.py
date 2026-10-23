@@ -203,8 +203,9 @@ def main():
     valeurs = {
         "VERSION": v,
         "VERSION_COURTE": courte,
-        # Dans la boîte du terminal (76 colonnes), le numéro garde la place d'origine.
-        "VERSION_COURTE_TERMINAL": courte.ljust(16),
+        # Dans la boîte du terminal (76 colonnes), le numéro garde la place d'origine : la ligne garde sa largeur
+        # avec l'accroche, plus longue de deux caractères que l'ancienne.
+        "VERSION_COURTE_TERMINAL": courte.ljust(14),
         "DATE": f"{jour.day} {MOIS[jour.month - 1]} {jour.year}",
         "LIGNES": lignes_de_rust(),
         "COMMANDES": commandes_du_guide(args.programme),

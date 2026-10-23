@@ -89,8 +89,8 @@ fn bureau_linux(exe: &str) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName=Vanguard\nComment={}\nExec={exe}\nTerminal=true\nIcon=vanguard\nCategories=System;Security;\n{MARQUE}\n",
         tr!(
-            "Sécurise et optimise ta machine et ton réseau",
-            "Secures and optimizes your machine and network"
+            "Cyberdéfense portable des postes et des réseaux",
+            "Portable cyber defense for endpoints and networks"
         )
     )
 }

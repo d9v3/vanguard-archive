@@ -104,9 +104,13 @@ pub(crate) fn proposer(e: &Externe) -> Option<PathBuf> {
     #[cfg(unix)]
     let fait = Command::new("bash").arg("-c").arg(&commande).status();
     #[cfg(windows)]
-    let fait = std::process::Command::new("winget")
-        .args(commande.split_whitespace().skip(1))
-        .status();
+    let fait = crate::machine::windows::winget()
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+        .and_then(|w| {
+            std::process::Command::new(w)
+                .args(commande.split_whitespace().skip(1))
+                .status()
+        });
     if !fait.is_ok_and(|s| s.success()) {
         println!(
             "  {}",

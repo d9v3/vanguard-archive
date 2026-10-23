@@ -116,20 +116,11 @@ fn lire_etat() -> Option<Etat> {
             r"Software\Microsoft\DirectX\UserGpuPreferences",
             "DirectXUserGlobalSettings",
         ),
-        alimentation: powercfg(std::env::var_os("SystemRoot").as_deref())
-            .and_then(|p| crate::commande::lancer(std::process::Command::new(p).arg("/getactivescheme"), 15))
+        alimentation: crate::commande::lancer(crate::commande::systeme("powercfg").arg("/getactivescheme"), 15)
             .filter(|r| r.code == Some(0))
             .map(|r| r.sortie.trim().to_string())
             .unwrap_or_default(),
     })
-}
-
-/// powercfg par son chemin dans System32 : par son seul nom, Windows chercherait d'abord dans le dossier de Vanguard,
-/// où un powercfg.exe posé là dirait le mode d'alimentation de son choix. Introuvable (SystemRoot absent ou relatif,
-/// Wine) : rien n'est lancé, le mode reste inconnu et il est dit comme tel.
-fn powercfg(racine: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
-    let chemin = std::path::Path::new(racine?).join(r"System32\powercfg.exe");
-    (chemin.is_absolute() && chemin.is_file()).then_some(chemin)
 }
 
 /// Les cartes que Win32_VideoController filtré ignorait : affichage de base, bureau à distance, écrans virtuels.
@@ -801,20 +792,6 @@ mod tests {
         assert_eq!(notes.reglages.len(), 6);
         let remis = super::super::annulation::retirer_remis(&mut notes, |id, _| valeurs(&e, id));
         assert_eq!(remis.len(), 6);
-    }
-
-    /// powercfg n'est lancé que depuis System32, jamais par son nom.
-    #[test]
-    fn powercfg_par_son_chemin_complet() {
-        let racine = std::env::temp_dir().join(format!("vanguard-powercfg-{}", std::process::id()));
-        let systeme = racine.join("System32");
-        std::fs::create_dir_all(&systeme).unwrap();
-        assert_eq!(powercfg(Some(racine.as_os_str())), None);
-        std::fs::write(systeme.join("powercfg.exe"), b"").unwrap();
-        assert_eq!(powercfg(Some(racine.as_os_str())), Some(systeme.join("powercfg.exe")));
-        assert_eq!(powercfg(Some(std::ffi::OsStr::new("Windows"))), None);
-        assert_eq!(powercfg(None), None);
-        let _ = std::fs::remove_dir_all(&racine);
     }
 
     #[test]

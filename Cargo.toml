@@ -12,15 +12,18 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 clap = { version = "4.6.7", features = ["derive"] }
 crossterm = { version = "0.29.0", default-features = false, features = ["events", "windows"] }
 dns-lookup = "4.0.2"
-futures = "0.3.34"
+# join_all et buffer_unordered seulement : la partie « util », déjà amenée par hyper-util, sans l'exécuteur ni les
+# macros (un proc-macro compilé avec syn) de la crate complète.
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 getrandom = "0.4.3"
 if-addrs = "0.15.0"
 inventory = "0.3.25"
 miniz_oxide = "0.9.1"
 quick-xml = { version = "0.42.0", features = ["serialize"] }
-# HTTPS en Rust : les fonctions par défaut (HTTP/2, proxy du système, jeux de caractères) avec rustls, mais ring pour
-# le chiffrement au lieu d'aws-lc, qui compile du C impossible à construire ici pour macOS et pèse le double.
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "charset", "http2", "system-proxy", "rustls-no-provider"] }
+# HTTPS en Rust : HTTP/2 et le proxy du système avec rustls, mais ring pour le chiffrement au lieu d'aws-lc, qui
+# compile du C impossible à construire ici pour macOS et pèse le double. Ni « json » ni « charset » : le corps est lu
+# en octets (http.rs) puis décodé par Vanguard.
+reqwest = { version = "0.13.5", default-features = false, features = ["http2", "system-proxy", "rustls-no-provider"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 notify = { version = "8.2.0", default-features = false }
 rpassword = "7.5.4"
@@ -30,7 +33,9 @@ sha1_smol = "1.0.1"
 # SHA-256 : l'empreinte du script lancé en administrateur sous Windows, vérifiée par la fenêtre élevée avant de
 # l'exécuter ; celle des programmes et des fichiers des traces collectées, à chercher sur VirusTotal.
 sha2 = { version = "0.11.1", default-features = false }
-tokio = { version = "1.53.3", features = ["full"] }
+# Seulement ce qui sert : le moteur (un ou plusieurs fils), le réseau, les délais, la lecture et l'écriture des
+# connexions, #[tokio::main] et #[tokio::test]. Ni fichiers, ni processus, ni signaux.
+tokio = { version = "1.53.3", features = ["rt", "rt-multi-thread", "net", "time", "io-util", "macros"] }
 # Le moteur YARA en Rust (VirusTotal) : seulement les modules dont les règles intégrées ont besoin (pe, elf).
 # YARA-X 1.22.0 demande wasmtime 48.0.6 ou plus ; Cargo.lock retient 48.0.7, la première de la série 48 qui corrige
 # aussi RUSTSEC-2026-0379 (Cranelift, saut mal calculé sur aarch64 : les Mac Apple Silicon). Ce n'est donc pas
@@ -40,7 +45,6 @@ yara-x = { version = "1.22.0", default-features = false, features = ["pe-module"
 ed25519-dalek = { version = "3.0.0", default-features = false }
 
 [target."cfg(windows)".dependencies]
-enable-ansi-support = "0.3.1"
 winreg = "0.56.0"
 # WMI et COM sans PowerShell (Microsoft) : seulement les fonctions lues par Vanguard, jamais l'interface graphique
 # (Win32_UI_WindowsAndMessaging seulement pour la taille et la place de la fenêtre de la console, voir fenetre.rs) ; Win32_UI_Shell_PropertiesSystem n'en est pas : les propriétés d'un volume (BitLocker). Win32_Security : les SID et les droits des comptes ; TaskScheduler : les tâches planifiées ; UpdateAgent : Windows Update.

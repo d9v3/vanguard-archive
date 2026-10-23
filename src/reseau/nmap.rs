@@ -67,9 +67,16 @@ struct Service {
 
 /// nmap est-il installé ?
 pub fn disponible() -> bool {
-    let noms: &[&str] = if cfg!(windows) { &["nmap.exe"] } else { &["nmap"] };
-    std::env::var_os("PATH")
-        .is_some_and(|chemins| std::env::split_paths(&chemins).any(|d| noms.iter().any(|n| d.join(n).is_file())))
+    chemin().is_some()
+}
+
+/// nmap trouvé dans le PATH, lancé par ce chemin : par son seul nom, Windows chercherait d'abord un nmap.exe posé à
+/// côté de Vanguard ou dans le dossier courant.
+fn chemin() -> Option<std::path::PathBuf> {
+    let nom = if cfg!(windows) { "nmap.exe" } else { "nmap" };
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|d| d.join(nom))
+        .find(|p| p.is_absolute() && p.is_file())
 }
 
 /// Une adresse du réseau local (privée, lien local ou cette machine) : nmap n'est jamais lancé vers Internet.
@@ -111,14 +118,14 @@ pub fn lire(xml: &str, ip: Ipv4Addr) -> BTreeMap<u16, String> {
 /// n'y a rien à interroger ou si nmap échoue : Vanguard garde alors ce qu'il a lu lui-même. Les arguments ne passent
 /// par aucun shell ; « -- » termine les options avant l'adresse, et l'adresse est une vraie adresse IPv4.
 pub fn versions(ip: Ipv4Addr, ports: &[u16]) -> BTreeMap<u16, String> {
-    if ports.is_empty() || !locale(ip) || !disponible() {
+    let Some(nmap) = chemin().filter(|_| !ports.is_empty() && locale(ip)) else {
         return BTreeMap::new();
-    }
+    };
     let liste = ports.iter().map(u16::to_string).collect::<Vec<_>>().join(",");
     // Une minute, plus cinq secondes par port : -sV attend la réponse de chaque service.
     let delai = 60 + 5 * u64::try_from(ports.len()).unwrap_or(u64::MAX).min(48);
     crate::commande::lancer(
-        Command::new("nmap").args([
+        Command::new(nmap).args([
             "-sV",
             "-T4",
             "-Pn",

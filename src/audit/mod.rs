@@ -24,14 +24,8 @@ use crate::ui::*;
 
 pub mod appareils;
 pub mod arp;
-// Des variantes et des aides ne servent que sous Windows ou macOS, ou dans les tests du lot.
-#[allow(dead_code)]
 pub mod bail;
-// Des variantes et des aides ne servent que sous Windows ou macOS, ou dans les tests du lot.
-#[allow(dead_code)]
 pub mod dns_client;
-// Des variantes et des aides ne servent que sous Windows ou macOS, ou dans les tests du lot.
-#[allow(dead_code)]
 pub mod dns_tls;
 pub mod exposition;
 pub mod fiches;
@@ -221,20 +215,6 @@ pub(crate) fn non_verifie(categorie: &'static str, regle: &'static str, message:
 pub(crate) fn avec_regle(mut c: Constat, regle: &'static str) -> Constat {
     c.regle = regle;
     c
-}
-
-/// Ce que répond un domaine dont les règles ne sont pas encore écrites : non vérifié, jamais un faux sain.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn pas_encore_ecrit(d: Domaine) -> Constat {
-    non_verifie(
-        d.categorie(),
-        "",
-        trf!(
-            "Non vérifié : les règles du domaine « {} » ne sont pas encore écrites dans cette version de Vanguard.",
-            "Not checked: the rules of the “{}” domain are not written yet in this version of Vanguard.",
-            d.titre()
-        ),
-    )
 }
 
 /// Les règles du bilan de cette machine qui parlent du réseau : pare-feu, ports en écoute, SSH, découverte,
@@ -819,7 +799,5 @@ mod tests {
         );
         let vide = DomaineAudite::de(Domaine::Postes, Vec::new());
         assert!(vide.score.is_none() && vide.constats.is_empty());
-        let stub = pas_encore_ecrit(Domaine::WiFi);
-        assert!(!stub.verifie && stub.categorie == "Wi-Fi" && stub.message.contains("pas encore écrites"));
     }
 }
