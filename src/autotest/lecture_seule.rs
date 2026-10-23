@@ -426,8 +426,8 @@ mod tests {
             ),
             (
                 "machine/linux/veilleur.rs",
-                7,
-                "veilleur : son état, hors bilan (lecture seule pendant le bilan)",
+                10,
+                "veilleur : son état et le « chiffrement voulu » de l'anti-rançongiciel, hors bilan",
             ),
         ];
         const ECRITURES: &[&str] = &[
