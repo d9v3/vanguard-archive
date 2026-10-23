@@ -38,7 +38,8 @@ struct ProduitBrut {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BrancheBrute {
-    name: Souple<String>,
+    #[serde(default)]
+    name: Option<Souple<String>>,
     #[serde(default)]
     is_eol: Option<Souple<bool>>,
     #[serde(default)]
@@ -51,10 +52,14 @@ struct BrancheBrute {
 
 #[derive(Deserialize)]
 struct Derniere {
-    name: String,
+    #[serde(default)]
+    name: Option<Souple<String>>,
     #[serde(default)]
     date: Option<Souple<String>>,
 }
+
+// Lues en flux par `Souple` : tous leurs champs sont facultatifs, une branche sans nom est écartée plus bas.
+super::forme_objet!(BrancheBrute, Derniere);
 
 /// Un produit gardé et ses branches.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,12 +100,16 @@ pub(crate) fn lire(octets: &[u8]) -> Option<Vec<ProduitEol>> {
                     .unwrap_or_default()
                     .into_iter()
                     .filter_map(|b| {
+                        // Sans nom lisible, la dernière version ne dit rien, sa date non plus.
                         let (derniere, depuis) = match b.latest.and_then(Souple::bon) {
-                            Some(d) => (Some(d.name), date(d.date)),
+                            Some(d) => match d.name.and_then(Souple::bon) {
+                                Some(nom) => (Some(nom), date(d.date)),
+                                None => (None, None),
+                            },
                             None => (None, None),
                         };
                         Some(BrancheEol {
-                            nom: b.name.bon()?,
+                            nom: b.name.and_then(Souple::bon)?,
                             // endoflife.date met isEol à la fin du support de base (Oracle 8, 11, 17), alors
                             // que la branche reçoit encore des correctifs : isMaintained fait foi.
                             finie: match b.is_maintained.and_then(Souple::bon) {

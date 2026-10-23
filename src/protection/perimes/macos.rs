@@ -1,8 +1,9 @@
-//! L'inventaire sous macOS : les applications de `/Applications` et `~/Applications` (en root, celles de chaque
-//! compte, `/Users/*/Applications`), reconnues à leur identifiant exact (`CFBundleIdentifier`) ; les Java de
-//! `/Library/Java/JavaVirtualMachines`. Le parcours ne suit aucun lien, ne descend que d'un dossier ordinaire sous
-//! la racine (Utilities, « Adobe Acrobat DC »), jamais dans une application, et ne touche ni Téléchargements, ni
-//! Bureau, ni Documents (protégés par TCC). Une application lancée depuis une image disque passe inaperçue.
+//! L'inventaire sous macOS : les applications de `/Applications` et `~/Applications` (en root, celles de chaque compte,
+//! `/Users/*/Applications`), reconnues à leur identifiant exact (`CFBundleIdentifier`) ; les Java de
+//! `/Library/Java/JavaVirtualMachines` ; 7-Zip et PuTTY, sans application, dans le `Cellar` de Homebrew. Le parcours ne
+//! suit aucun lien, ne descend que d'un dossier ordinaire sous la racine (Utilities, « Adobe Acrobat DC »), jamais dans
+//! une application, et ne touche ni Téléchargements, ni Bureau, ni Documents (protégés par TCC). Une application lancée
+//! depuis une image disque passe inaperçue.
 //!
 //! Compilé aussi pour les tests sous Linux (arbre jetable).
 
@@ -181,9 +182,10 @@ fn normaliser(produit: Produit, cle: CleMac, texte: &str) -> Option<Version> {
         (Produit::Firefox, _) => version::firefox(texte),
         (Produit::Brave, _) => version::brave(texte),
         (Produit::Acrobat | Produit::Reader, _) => version::adobe(texte),
+        (Produit::Slack, _) => Version::lire(texte).filter(|v| v.longueur() == 3),
         // « 16.114.26102031 », comparé à « Update Version » de Microsoft AutoUpdate.
         (Produit::Office, CleMac::Build) => Version::lire(texte).filter(|v| v.longueur() == 3),
-        (Produit::Office, CleMac::Courte) | (Produit::Java(_), _) => None,
+        (Produit::Office, CleMac::Courte) | (Produit::Java(_) | Produit::SevenZip | Produit::PuTTY, _) => None,
     }
 }
 
@@ -233,9 +235,56 @@ fn application(app: &Path) -> Result<Option<Installe>, ()> {
     Ok(Some(i))
 }
 
-/// L'inventaire de ces racines, et des Java installés sous `jvm` (fichier `release` du dossier `Contents/Home` de
-/// chaque `*.jdk`).
-pub(crate) fn inventaire_dans(racines: &[Racine], jvm: &Path) -> Inventaire {
+/// Les préfixes de Homebrew : Apple Silicon, puis Intel.
+#[cfg(target_os = "macos")]
+const HOMEBREW: [&str; 2] = ["/opt/homebrew", "/usr/local"];
+
+/// La version d'un dossier du `Cellar` (« 26.05 », « 0.85_1 » : la révision de la formule, après « _ », n'est pas
+/// celle du logiciel).
+fn version_cellar(nom: &str) -> Option<Version> {
+    let base = match nom.rsplit_once('_') {
+        Some((base, revision)) if !revision.is_empty() && revision.bytes().all(|o| o.is_ascii_digit()) => base,
+        _ => nom,
+    };
+    Version::lire(base)
+}
+
+/// Les logiciels installés par une formule de Homebrew sous `prefixe` : la version liée (`opt/<formule>`, un lien
+/// relatif lu sans être suivi, vers `../Cellar/<formule>/<version>`), sinon la plus haute du `Cellar` (une vieille
+/// version reste tant que Homebrew ne fait pas le ménage).
+fn homebrew_dans(prefixe: &Path, inv: &mut Inventaire) {
+    for fiche in produits::FICHES {
+        for formule in fiche.homebrew {
+            let cellar = prefixe.join("Cellar").join(formule);
+            let version_liee = std::fs::read_link(prefixe.join("opt").join(formule))
+                .ok()
+                .and_then(|cible| Some(cible.file_name()?.to_str()?.to_string()))
+                .filter(|n| std::fs::symlink_metadata(cellar.join(n)).is_ok_and(|m| m.is_dir()));
+            let nom = version_liee.or_else(|| {
+                entrees(&cellar)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|(_, d)| *d)
+                    .filter_map(|(c, _)| {
+                        let n = c.file_name()?.to_str()?.to_string();
+                        Some((version_cellar(&n)?, n))
+                    })
+                    .max_by_key(|(v, _)| *v)
+                    .map(|(_, n)| n)
+            });
+            let Some(nom) = nom else { continue };
+            let lieu = cellar.join(&nom);
+            let brute = nom.rsplit_once('_').map_or(nom.as_str(), |(b, _)| b);
+            let mut i = Installe::nouveau(fiche.produit, brute, version_cellar(&nom), &lieu);
+            i.branche = Branche::Release;
+            inv.ajouter(i);
+        }
+    }
+}
+
+/// L'inventaire de ces racines, des Java installés sous `jvm` (fichier `release` du dossier `Contents/Home` de
+/// chaque `*.jdk`) et des formules suivies sous chaque préfixe de Homebrew.
+pub(crate) fn inventaire_dans(racines: &[Racine], jvm: &Path, homebrew: &[&Path]) -> Inventaire {
     let mut inv = Inventaire::default();
     let mut apps = 0;
     for racine in racines {
@@ -259,6 +308,9 @@ pub(crate) fn inventaire_dans(racines: &[Racine], jvm: &Path) -> Inventaire {
             }
         }
     }
+    for prefixe in homebrew {
+        homebrew_dans(prefixe, &mut inv);
+    }
     inv
 }
 
@@ -278,7 +330,8 @@ pub(crate) fn inventaire() -> Inventaire {
     let maison = crate::nettoyer::maison();
     let utilisateurs = Path::new("/Users");
     let racines = racines(&maison, root.then_some(utilisateurs));
-    let mut inv = inventaire_dans(&racines, Path::new("/Library/Java/JavaVirtualMachines"));
+    let homebrew = HOMEBREW.map(Path::new);
+    let mut inv = inventaire_dans(&racines, Path::new("/Library/Java/JavaVirtualMachines"), &homebrew);
     if !root {
         // Sans root, les ~/Applications des autres comptes ne sont pas lues : le dire, jamais le taire.
         let autres = comptes_non_lus(&maison, utilisateurs);
@@ -431,7 +484,7 @@ mod tests {
             dossier: apps.clone(),
             compte: Some("alice".into()),
         }];
-        let inv = inventaire_dans(&racines, &jvm);
+        let inv = inventaire_dans(&racines, &jvm, &[]);
         let trouve = |p: Produit| {
             inv.installes
                 .iter()
@@ -479,6 +532,62 @@ mod tests {
         assert!(inv.installes.iter().all(|i| i.produit != Produit::Edge), "{inv:?}");
         assert_eq!(inv.installes.len(), 7, "{inv:?}");
         assert_eq!(inv.non_lus, vec![NonLu::Illisible(apps.join("Abime.app"))]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Slack par son application ; 7-Zip et PuTTY par le Cellar de Homebrew : la version liée, sinon la plus haute,
+    /// révision de la formule retirée.
+    #[test]
+    fn slack_et_formules_de_homebrew() {
+        let d = jetable("homebrew");
+        let apps = d.join("Applications");
+        app(
+            &apps.join("Slack.app"),
+            "com.tinyspeck.slackmacgap",
+            "4.52.182",
+            "452182",
+            b"",
+        );
+        let brew = d.join("homebrew");
+        for v in ["26.04", "26.05_1"] {
+            std::fs::create_dir_all(brew.join("Cellar").join("sevenzip").join(v).join("bin")).unwrap();
+        }
+        for v in ["0.84", "0.85"] {
+            std::fs::create_dir_all(brew.join("Cellar").join("putty").join(v)).unwrap();
+        }
+        std::fs::create_dir_all(brew.join("opt")).unwrap();
+        // Liée à la 0.84 (pas encore relancée après la mise à jour) : c'est celle qui tourne.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../Cellar/putty/0.84", brew.join("opt").join("putty")).unwrap();
+        std::fs::create_dir_all(brew.join("Cellar").join("p7zip").join("17.06")).unwrap();
+        let racines = [Racine {
+            dossier: apps.clone(),
+            compte: None,
+        }];
+        let inv = inventaire_dans(&racines, &d.join("jvm"), &[&brew, &d.join("absent")]);
+        let trouve = |p: Produit| {
+            inv.installes
+                .iter()
+                .find(|i| i.produit == p)
+                .unwrap_or_else(|| panic!("{p:?} : {inv:?}"))
+        };
+        let slack = trouve(Produit::Slack);
+        assert_eq!(
+            (slack.version.map(|v| v.to_string()), slack.branche.clone()),
+            (Some("4.52.182".into()), Branche::Release)
+        );
+        let sept = trouve(Produit::SevenZip);
+        assert_eq!(
+            (sept.brute.as_str(), sept.version.map(|v| v.to_string())),
+            ("26.05", Some("26.5".into()))
+        );
+        assert_eq!(sept.lieu, brew.join("Cellar").join("sevenzip").join("26.05_1"));
+        #[cfg(unix)]
+        assert_eq!(trouve(Produit::PuTTY).brute, "0.84");
+        assert_eq!(inv.installes.len(), 3, "{inv:?}");
+        assert_eq!(version_cellar("0.85_12"), Version::lire("0.85"));
+        assert_eq!(version_cellar("0.85_"), None);
+        assert_eq!(version_cellar("HEAD-1a2b3c"), None);
         let _ = std::fs::remove_dir_all(&d);
     }
 

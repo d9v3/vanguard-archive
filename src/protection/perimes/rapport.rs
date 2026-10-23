@@ -1,12 +1,13 @@
 //! L'écran et le bilan des logiciels pas à jour : chaque logiciel trouvé, jugé (`verdicts`), avec ce qui l'expose.
-//! Firefox l'est faille par faille (avis de Mozilla) ; pour les autres, le catalogue de la CISA dit combien de failles
-//! exploitées leur produit compte, sans conclure pour la version installée. Un navigateur qui ne se compare pas
-//! reprend l'âge de son fichier (plus de 60 jours : sa mise à jour automatique ne se fait plus), comme le faisait la
-//! fin de support, qui ne le juge plus : un seul constat par navigateur.
+//! Firefox l'est faille par faille (avis de Mozilla), Edge aussi (les CVE que Microsoft dit corrigées par chaque
+//! version Stable) ; pour les autres, le catalogue de la CISA dit combien de failles exploitées leur produit compte,
+//! sans conclure pour la version installée. Un navigateur qui ne se compare pas reprend l'âge de son fichier (plus de
+//! 60 jours : sa mise à jour automatique ne se fait plus), comme le faisait la fin de support, qui ne le juge plus :
+//! un seul constat par navigateur.
 //!
 //! Au bilan : un seul constat pour tous les logiciels dépassés (la note additionne les pénalités, un par logiciel la
-//! ferait chuter), un constat critique à part pour Firefox antérieur au correctif d'une faille exploitée, et un seul
-//! « impossible » qui donne tout ce qui n'a pas pu être vérifié, jamais compté comme sain.
+//! ferait chuter), un constat critique à part pour Firefox ou Edge antérieur au correctif d'une faille exploitée, et un
+//! seul « impossible » qui donne tout ce qui n'a pas pu être vérifié, jamais compté comme sain.
 
 use std::time::Duration;
 
@@ -29,9 +30,10 @@ pub(crate) struct Juge {
     pub verdict: Verdict,
     /// Non vérifié, mais pas mis à jour depuis tant de jours (un navigateur, au-delà de 60).
     pub vieux: Option<u64>,
-    /// Firefox : les failles exploitées corrigées dans une version plus récente que la sienne (CVE, correctif).
+    /// Firefox et Edge : les failles exploitées corrigées dans une version plus récente que la sienne (CVE,
+    /// correctif).
     pub failles: Vec<(String, Version)>,
-    /// Firefox : pourquoi des failles exploitées n'ont pas été jugées une à une.
+    /// Firefox et Edge : pourquoi des failles exploitées n'ont pas été jugées une à une.
     pub failles_non_jugees: Option<String>,
 }
 
@@ -120,6 +122,33 @@ fn failles_firefox(
     (failles, non_jugees)
 }
 
+/// Les failles exploitées d'Edge (catalogue de la CISA) jugées une à une, d'après les CVE que Microsoft dit corrigées
+/// par chaque version Stable de sa plateforme.
+fn failles_edge(
+    i: &Installe,
+    faits: &Faits,
+    kev: &Result<Vec<Exploitee>, String>,
+) -> (Vec<(String, Version)>, Option<String>) {
+    let Some(v) = i.version else {
+        return (Vec::new(), None);
+    };
+    let kev = match kev {
+        Ok(k) => k,
+        Err(r) => {
+            return (
+                Vec::new(),
+                Some(trf!("catalogue de la CISA : {r}", "CISA catalog: {r}")),
+            );
+        }
+    };
+    let exploitees: std::collections::HashSet<&str> = kev.iter().map(|e| e.cve.as_str()).collect();
+    match verdicts::failles_edge(i, v, faits, &|c| exploitees.contains(c)) {
+        Ok(failles) => (failles, None),
+        Err(r) if r.is_empty() => (Vec::new(), None),
+        Err(r) => (Vec::new(), Some(r)),
+    }
+}
+
 /// Chaque logiciel de l'inventaire jugé ; `age_fichier` donne l'âge du fichier d'un navigateur, en jours.
 pub(crate) fn juger_tout(
     installes: Vec<Installe>,
@@ -135,10 +164,10 @@ pub(crate) fn juger_tout(
                 .then(|| age_fichier(&i))
                 .flatten()
                 .filter(|j| *j > crate::machine::fin_de_support::NAVIGATEUR_JOURS);
-            let (failles, failles_non_jugees) = if i.produit == Produit::Firefox {
-                failles_firefox(&i, faits, kev)
-            } else {
-                (Vec::new(), None)
+            let (failles, failles_non_jugees) = match i.produit {
+                Produit::Firefox => failles_firefox(&i, faits, kev),
+                Produit::Edge => failles_edge(&i, faits, kev),
+                _ => (Vec::new(), None),
             };
             Juge {
                 installe: i,
@@ -191,9 +220,13 @@ fn ligne(j: &Juge) -> String {
     let i = &j.installe;
     let nom = nomme(i);
     if let Some((cve, z)) = j.failles.first() {
+        let court = match i.produit {
+            Produit::Edge => "Edge",
+            _ => "Firefox",
+        };
         let mut t = trf!(
-            "{nom} : la faille exploitée {cve} (catalogue de la CISA) est corrigée dans Firefox {z}, et ta version est antérieure.",
-            "{nom}: the exploited flaw {cve} (CISA catalog) is fixed in Firefox {z}, and your version is older."
+            "{nom} : la faille exploitée {cve} (catalogue de la CISA) est corrigée dans {court} {z}, et ta version est antérieure.",
+            "{nom}: the exploited flaw {cve} (CISA catalog) is fixed in {court} {z}, and your version is older."
         );
         if j.failles.len() > 1 {
             let autres: Vec<&str> = j.failles[1..].iter().map(|(c, _)| c.as_str()).collect();
@@ -257,6 +290,9 @@ fn nom_kev(produit: Produit) -> &'static str {
         Produit::Acrobat | Produit::Reader => tr!("Acrobat et Reader", "Acrobat and Reader"),
         Produit::Java(_) => "Java",
         Produit::Brave => "Brave",
+        Produit::SevenZip => "7-Zip",
+        Produit::PuTTY => "PuTTY",
+        Produit::Slack => "Slack",
     }
 }
 
@@ -302,16 +338,16 @@ pub(crate) fn mention(age: Option<Duration>) -> String {
         trf!(" ; copies de {}", "; copies {} old", age_montre(a))
     });
     trf!(
-        "Versions : sites des éditeurs, endoflife.date (MIT) ; avis de Mozilla (MPL-2.0) ; failles exploitées : CISA KEV (CC0). Fichiers publics téléchargés en entier, les mêmes pour tous : rien de cet ordinateur n'est envoyé{copies}. Couper : vanguard parametres versions-logiciels non.",
-        "Versions: publishers' sites, endoflife.date (MIT); Mozilla advisories (MPL-2.0); exploited flaws: CISA KEV (CC0). Public files downloaded in full, the same for everyone: nothing about this computer is sent{copies}. Turn off: vanguard settings software-versions no."
+        "Versions : sites des éditeurs, endoflife.date (MIT), formules de Homebrew (BSD-2-Clause) pour 7-Zip et PuTTY ; avis de Mozilla (MPL-2.0) ; failles exploitées : CISA KEV (CC0). Fichiers publics téléchargés en entier, les mêmes pour tous : rien de cet ordinateur n'est envoyé{copies}. Couper : vanguard parametres versions-logiciels non.",
+        "Versions: publishers' sites, endoflife.date (MIT), Homebrew formulae (BSD-2-Clause) for 7-Zip and PuTTY; Mozilla advisories (MPL-2.0); exploited flaws: CISA KEV (CC0). Public files downloaded in full, the same for everyone: nothing about this computer is sent{copies}. Turn off: vanguard settings software-versions no."
     )
 }
 
 /// La mention, courte, reprise au bilan.
 fn mention_bilan() -> &'static str {
     tr!(
-        "Versions : sites des éditeurs et endoflife.date ; failles : catalogue de la CISA. Détail : vanguard logiciels-perimes",
-        "Versions: publishers' sites and endoflife.date; flaws: CISA's catalog. Details: vanguard outdated-software"
+        "Versions : sites des éditeurs, endoflife.date et Homebrew ; failles : catalogue de la CISA. Détail : vanguard logiciels-perimes",
+        "Versions: publishers' sites, endoflife.date and Homebrew; flaws: CISA's catalog. Details: vanguard outdated-software"
     )
 }
 
@@ -330,17 +366,39 @@ fn non_verifies(b: &Bilan) -> Vec<String> {
 /// Les constats du bilan, d'après un relevé.
 pub(crate) fn constats_de(b: &Bilan) -> Vec<Constat> {
     let mut constats = Vec::new();
-    let touches: Vec<String> = b.juges.iter().filter(|j| j.touche()).map(ligne).collect();
-    if !touches.is_empty() {
-        constats.push(
-            alerte(CAT, Niveau::Critique, format!("{} {}", touches.join(" "), mention_bilan())).manuel(
-                tr!(
-                    "Mettre Firefox à jour : Menu › Aide › À propos de Firefox ; sinon le réinstaller depuis mozilla.org",
-                    "Update Firefox: Menu › Help › About Firefox; otherwise reinstall it from mozilla.org"
-                ),
-                &[],
+    // Un constat critique par produit, chacun avec sa façon de se mettre à jour.
+    for (produit, manuel) in [
+        (
+            Produit::Firefox,
+            tr!(
+                "Mettre Firefox à jour : Menu › Aide › À propos de Firefox ; sinon le réinstaller depuis mozilla.org",
+                "Update Firefox: Menu › Help › About Firefox; otherwise reinstall it from mozilla.org"
             ),
-        );
+        ),
+        (
+            Produit::Edge,
+            tr!(
+                "Mettre Edge à jour : Menu › Aide et commentaires › À propos de Microsoft Edge ; sinon le réinstaller depuis microsoft.com/edge",
+                "Update Edge: Menu › Help and feedback › About Microsoft Edge; otherwise reinstall it from microsoft.com/edge"
+            ),
+        ),
+    ] {
+        let touches: Vec<String> = b
+            .juges
+            .iter()
+            .filter(|j| j.touche() && j.installe.produit == produit)
+            .map(ligne)
+            .collect();
+        if !touches.is_empty() {
+            constats.push(
+                alerte(
+                    CAT,
+                    Niveau::Critique,
+                    format!("{} {}", touches.join(" "), mention_bilan()),
+                )
+                .manuel(manuel, &[]),
+            );
+        }
     }
     let depasses: Vec<&Juge> = b.juges.iter().filter(|j| j.depasse()).collect();
     if !depasses.is_empty() {
@@ -416,8 +474,8 @@ pub(crate) fn constats_de(b: &Bilan) -> Vec<Constat> {
 
 fn aucun() -> &'static str {
     tr!(
-        "Aucun des logiciels suivis (navigateurs, Office, Acrobat, Java) aux emplacements connus ; un logiciel portable ou installé ailleurs n'est pas vu.",
-        "None of the followed programs (browsers, Office, Acrobat, Java) in the usual places; a portable program or one installed elsewhere is not seen."
+        "Aucun des logiciels suivis (navigateurs, Office, Acrobat, Java, 7-Zip, PuTTY, Slack) aux emplacements connus ; un logiciel portable ou installé ailleurs n'est pas vu.",
+        "None of the followed programs (browsers, Office, Acrobat, Java, 7-Zip, PuTTY, Slack) in the usual places; a portable program or one installed elsewhere is not seen."
     )
 }
 
@@ -435,8 +493,8 @@ fn entete() {
     titre(tr!("Logiciels pas à jour", "Outdated software"));
     for l in envelopper(
         tr!(
-            "La version installée des navigateurs, d'Office, d'Acrobat et de Java, comparée à la dernière publiée. Lecture seule : rien n'est mis à jour ici.",
-            "The installed version of browsers, Office, Acrobat and Java, compared with the latest published. Read-only: nothing is updated here."
+            "La version installée des navigateurs, d'Office, d'Acrobat, de Java, de 7-Zip, de PuTTY et de Slack, comparée à la dernière publiée. Lecture seule : rien n'est mis à jour ici.",
+            "The installed version of browsers, Office, Acrobat, Java, 7-Zip, PuTTY and Slack, compared with the latest published. Read-only: nothing is updated here."
         ),
         LARGEUR - 2,
     ) {
@@ -656,6 +714,11 @@ mod tests {
         assert_eq!(n(Produit::Acrobat), 2);
         assert_eq!(n(Produit::Java(super::super::produits::Distribution::Temurin)), 2);
         assert_eq!(n(Produit::Brave), 0);
+        assert_eq!(n(Produit::SevenZip), 1);
+        assert_eq!(n(Produit::PuTTY), 0);
+        // Slack embarque Chromium, mais les failles de Chromium ne se reportent pas sur lui.
+        assert_eq!(n(Produit::Slack), 0);
+        assert!(ligne_kev(Produit::SevenZip, &kev).is_some_and(|t| t.starts_with("7-Zip compte 1")));
         assert_eq!(
             exposition(Produit::Chrome, &kev).1,
             chrono::NaiveDate::from_ymd_opt(2026, 9, 9)
@@ -727,6 +790,75 @@ mod tests {
                 .failles_non_jugees
                 .as_deref()
                 .is_some_and(|t| t.contains("Mozilla"))
+        );
+    }
+
+    /// Edge faille par faille, sur une liste de Microsoft inventée qui dit corrigée dans la 156 une faille de
+    /// Chromium de la copie réduite du catalogue : antérieure au correctif, critique, à part de Firefox et avec sa
+    /// propre façon de se mettre à jour ; l'Extended Stable n'est jamais jugé ainsi.
+    #[test]
+    fn edge_faille_par_faille() {
+        use crate::protection::perimes::sources::editeurs::CorrectifEdge;
+        let mut f = faits_avec_avis();
+        if let Ok(lu) = &mut f.edge {
+            lu.valeur[0].correctifs = vec![CorrectifEdge {
+                version: Version::lire("156.0.4314.42").unwrap(),
+                cves: Some(vec!["CVE-2099-0001".into(), "CVE-2026-87491".into()]),
+            }];
+        }
+        let kev = Ok(kev());
+        let jugés = juger_tout(
+            vec![
+                installe(Produit::Edge, "153.0.1.2", Branche::Inconnue),
+                installe(Produit::Edge, "153.0.1.2", Branche::Canal("extended".into())),
+                installe(Produit::Firefox, "131.0.1", Branche::Release),
+                installe(Produit::Edge, "156.0.4314.42", Branche::Inconnue),
+            ],
+            &f,
+            &kev,
+            &|_| None,
+        );
+        assert_eq!(
+            jugés[0].failles,
+            [("CVE-2026-87491".to_string(), Version::lire("156.0.4314.42").unwrap())]
+        );
+        assert!(jugés[1].failles.is_empty() && jugés[1].failles_non_jugees.is_none());
+        assert!(jugés[3].failles.is_empty() && jugés[3].a_jour());
+        let t = ligne(&jugés[0]);
+        assert!(
+            t.contains("CVE-2026-87491") && t.contains("Edge 156.0.4314.42") && t.contains("antérieure"),
+            "{t}"
+        );
+        let b = Bilan {
+            juges: jugés,
+            non_lus: vec![],
+            kev,
+            age: None,
+            manques: vec![],
+        };
+        let c = constats_de(&b);
+        let critiques: Vec<&Constat> = c.iter().filter(|c| c.probleme == Some(Niveau::Critique)).collect();
+        assert_eq!(
+            critiques.len(),
+            2,
+            "{:?}",
+            c.iter().map(|c| &c.message).collect::<Vec<_>>()
+        );
+        assert!(critiques[0].message.contains("Firefox") && !critiques[0].message.contains("Edge 1"));
+        assert!(critiques[1].message.contains("Microsoft Edge 153.0.1.2"));
+        // Sans le catalogue : pas faille par faille, et pourquoi.
+        let sans = juger_tout(
+            vec![installe(Produit::Edge, "153.0.1.2", Branche::Inconnue)],
+            &f,
+            &Err("pas d'Internet ?".into()),
+            &|_| None,
+        );
+        assert!(sans[0].failles.is_empty() && sans[0].depasse());
+        assert!(
+            sans[0]
+                .failles_non_jugees
+                .as_deref()
+                .is_some_and(|t| t.contains("CISA"))
         );
     }
 
@@ -817,7 +949,8 @@ mod tests {
 
     /// Sur de vraies copies, gardées à la main hors du dépôt (jamais versionnées : sources sans licence publiée ou
     /// MPL-2.0), si `VANGUARD_ESSAI_PERIMES` donne leur dossier : `firefox_versions.json`, `products` (Edge),
-    /// `OfficeReleases`, `chrome-win-stable.json`, `foundation-security-advisories.tar.gz`, `kev.json`. Sans lui, rien.
+    /// `OfficeReleases`, `chrome-win-stable.json`, `foundation-security-advisories.tar.gz`, `kev.json`, et s'ils y
+    /// sont `slack-windows.json` et `slack-macos.json`. Sans lui, rien.
     #[test]
     fn vraies_copies_si_presentes() {
         use crate::protection::perimes::sources::editeurs;
@@ -833,9 +966,24 @@ mod tests {
                 .iter()
                 .any(|e| e.plateforme == "Windows")
         );
+        // Chaque Edge Stable de Windows a sa liste de CVE corrigées, à leur forme.
+        let edge = editeurs::edge(&lire("products")).unwrap();
+        for e in edge.iter().filter(|e| e.plateforme == "Windows") {
+            assert!(
+                e.correctifs
+                    .iter()
+                    .all(|c| c.cves.as_ref().is_some_and(|l| !l.is_empty())),
+                "{e:?}"
+            );
+        }
         let office = editeurs::office(&lire("OfficeReleases")).unwrap();
         assert!(office.iter().all(|c| !c.guids.is_empty()), "chaque canal a son GUID");
         assert!(editeurs::chrome(&lire("chrome-win-stable.json"), "win", "stable").is_some());
+        for (nom, plateforme) in [("slack-windows.json", "win32"), ("slack-macos.json", "darwin")] {
+            if let Ok(o) = std::fs::read(dossier.join(nom)) {
+                assert!(editeurs::slack(&o, plateforme).is_some(), "{nom}");
+            }
+        }
         let tar =
             crate::archives::gzip::degzip_controle(&lire("foundation-security-advisories.tar.gz"), 64 << 20).unwrap();
         let index = super::super::avis_de_l_archive(&tar).unwrap();
@@ -886,6 +1034,7 @@ mod tests {
         let m = mention(Some(Duration::from_hours(3)));
         for attendu in [
             "endoflife.date (MIT)",
+            "Homebrew (BSD-2-Clause)",
             "MPL-2.0",
             "CC0",
             "rien de cet ordinateur",

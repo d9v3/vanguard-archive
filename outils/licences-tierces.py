@@ -44,6 +44,12 @@ LISTES_TELECHARGEES = [
         "https://github.com/endoflife-date/endoflife.date",
     ),
     (
+        "Formules de Homebrew / Homebrew formulae (formula.json : versions de 7-Zip et PuTTY / 7-Zip and PuTTY "
+        "versions)",
+        "BSD-2-Clause",
+        "https://github.com/Homebrew/homebrew-core",
+    ),
+    (
         "Avis de sécurité de Mozilla / Mozilla security advisories (lus, non redistribués / read, not redistributed)",
         "MPL-2.0",
         "https://github.com/mozilla/foundation-security-advisories",
@@ -54,7 +60,7 @@ LISTES_TELECHARGEES = [
         "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
     ),
     (
-        "Versions publiées par les éditeurs (Mozilla, Google, Microsoft, Adobe, Brave), des faits / Versions "
+        "Versions publiées par les éditeurs (Mozilla, Google, Microsoft, Adobe, Brave, Slack), des faits / Versions "
         "published by the publishers, facts",
         "sans licence / no licence",
         "leurs sites / their sites",

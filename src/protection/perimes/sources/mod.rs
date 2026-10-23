@@ -15,7 +15,11 @@ pub(crate) mod homebrew;
 
 use std::time::Duration;
 
+use std::fmt;
+use std::marker::PhantomData;
+
 use serde::Deserialize;
+use serde::de::{self, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 use crate::{tr, trf};
 
@@ -63,6 +67,10 @@ pub(crate) enum Lecteur {
     Brave,
     Eol,
     Cask,
+    /// `formula.json` de Homebrew : 7-Zip et PuTTY, dont les formules suivent l'amont.
+    Formules,
+    /// La plateforme que la réponse de Slack doit nommer (« win32 », « darwin »).
+    Slack(&'static str),
     /// L'archive des avis de sécurité de Mozilla (tar en gzip).
     Mfsa,
 }
@@ -142,7 +150,7 @@ macro_rules! texte {
     };
 }
 
-/// La table : 15 fichiers sous Windows, 19 sous macOS (adresses finales, mesurées le 23 oct. 2026 : aucune
+/// La table : 17 fichiers sous Windows, 21 sous macOS (adresses finales, mesurées le 23 oct. 2026 : aucune
 /// redirection, qu'un en-tête interdirait de suivre vers un autre hôte, voir `http::envoyer`). Le catalogue de la
 /// CISA s'y ajoute, par `kev::catalogue`.
 pub(crate) const SOURCES: &[Source] = &[
@@ -246,6 +254,39 @@ pub(crate) const SOURCES: &[Source] = &[
         gzip: Some(64 << 20),
         delai: 60,
     },
+    // Slack : une adresse fixe par système, la même pour tous (API non documentée, mesurée le 23 oct. 2026 :
+    // « variant=msi » est l'installation par machine, sans mise à jour automatique ; « universal » sert les deux
+    // architectures du Mac). « redirect=false » : la réponse est le JSON, pas un renvoi vers le fichier à installer.
+    Source {
+        id: "slack-windows",
+        adresse: "https://slack.com/api/desktop.latestRelease?arch=x64&variant=msi&redirect=false",
+        lecteur: Lecteur::Slack("win32"),
+        systemes: W,
+        taille_max: 4 << 10,
+        gzip: None,
+        delai: 30,
+    },
+    Source {
+        id: "slack-macos",
+        adresse: "https://slack.com/api/desktop.latestRelease?arch=universal&variant=dmg&redirect=false",
+        lecteur: Lecteur::Slack("darwin"),
+        systemes: M,
+        taille_max: 4 << 10,
+        gzip: None,
+        delai: 30,
+    },
+    // Les formules de Homebrew, prises sous Windows aussi : 7-Zip et PuTTY y suivent l'amont, et n'ont aucun autre
+    // fichier fixe. 5 Mio en gzip, 32 Mio une fois décompressé le 23 oct. 2026 ; pris par tous ou par personne,
+    // jamais selon que Homebrew est installé.
+    Source {
+        id: "formules",
+        adresse: "https://formulae.brew.sh/api/formula.json",
+        lecteur: Lecteur::Formules,
+        systemes: WM,
+        taille_max: 24 << 20,
+        gzip: Some(96 << 20),
+        delai: 60,
+    },
     // HTTPS seulement, sans vérifier la signature (cask.jws.json) : décision de l'auteur, pour ne pas prendre ring
     // en direct.
     Source {
@@ -290,21 +331,168 @@ pub(crate) fn coupure() -> Option<String> {
     }
 }
 
-/// Une valeur JSON dont le type peut changer sans tout rendre illisible : gardée si elle a le type attendu, ignorée
-/// sinon (un champ d'un autre produit qui change de forme ne fait pas tomber la lecture des autres).
-#[derive(Deserialize)]
-#[serde(untagged)]
+/// Une valeur JSON dont le type peut changer sans tout rendre illisible : gardée si elle a la forme attendue
+/// (`Forme`), ignorée sinon (un champ d'un autre produit qui change de forme ne fait pas tomber la lecture des
+/// autres). Lue en flux : une valeur d'une autre forme est parcourue puis oubliée, jamais copiée en mémoire. Un
+/// `#[serde(untagged)]` la copierait en entier avant de l'essayer, soit des centaines de Mo pour un tableau démesuré
+/// qui pèse quelques centaines de Kio en gzip.
 pub(crate) enum Souple<T> {
     Bon(T),
-    Autre(serde::de::IgnoredAny),
+    Autre,
 }
 
 impl<T> Souple<T> {
     pub(crate) fn bon(self) -> Option<T> {
         match self {
             Souple::Bon(v) => Some(v),
-            Souple::Autre(_) => None,
+            Souple::Autre => None,
         }
+    }
+
+    fn de(valeur: Option<T>) -> Self {
+        valeur.map_or(Souple::Autre, Souple::Bon)
+    }
+}
+
+/// Les formes qu'une valeur JSON peut prendre pour un type lu par `Souple` : `None` quand ce n'est pas la sienne.
+/// Par défaut, aucune ; un tableau ou un objet refusé est parcouru jusqu'au bout sans rien garder.
+pub(crate) trait Forme: Sized {
+    fn texte(_: &str) -> Option<Self> {
+        None
+    }
+
+    fn booleen(_: bool) -> Option<Self> {
+        None
+    }
+
+    /// Un nombre ou `null`.
+    fn autre() -> Option<Self> {
+        None
+    }
+
+    fn suite<'de, A: SeqAccess<'de>>(mut suite: A) -> Result<Option<Self>, A::Error> {
+        while suite.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(None)
+    }
+
+    fn table<'de, A: MapAccess<'de>>(mut table: A) -> Result<Option<Self>, A::Error> {
+        while table.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(None)
+    }
+}
+
+impl Forme for String {
+    fn texte(t: &str) -> Option<Self> {
+        Some(t.to_owned())
+    }
+}
+
+impl Forme for bool {
+    fn booleen(b: bool) -> Option<Self> {
+        Some(b)
+    }
+}
+
+/// Un élément souple d'un tableau : toujours accepté, gardé ou non selon sa propre forme.
+impl<E: Forme> Forme for Souple<E> {
+    fn texte(t: &str) -> Option<Self> {
+        Some(Souple::de(E::texte(t)))
+    }
+
+    fn booleen(b: bool) -> Option<Self> {
+        Some(Souple::de(E::booleen(b)))
+    }
+
+    fn autre() -> Option<Self> {
+        Some(Souple::de(E::autre()))
+    }
+
+    fn suite<'de, A: SeqAccess<'de>>(suite: A) -> Result<Option<Self>, A::Error> {
+        E::suite(suite).map(|e| Some(Souple::de(e)))
+    }
+
+    fn table<'de, A: MapAccess<'de>>(table: A) -> Result<Option<Self>, A::Error> {
+        E::table(table).map(|e| Some(Souple::de(e)))
+    }
+}
+
+/// Un tableau dont un seul élément n'a pas la forme attendue est refusé en entier ; la suite est parcourue sans
+/// rien garder.
+impl<E: Forme> Forme for Vec<E> {
+    fn suite<'de, A: SeqAccess<'de>>(mut suite: A) -> Result<Option<Self>, A::Error> {
+        let mut garde = Some(Vec::new());
+        while let Some(e) = suite.next_element::<Souple<E>>()? {
+            match (e.bon(), garde.as_mut()) {
+                (Some(e), Some(v)) => v.push(e),
+                _ => garde = None,
+            }
+        }
+        Ok(garde)
+    }
+}
+
+/// Une structure lue par `serde` à partir d'un objet JSON. Ses champs doivent tous être facultatifs et souples : un
+/// champ manquant ou d'une autre forme ne doit pas être une erreur, qui rendrait tout le fichier illisible.
+macro_rules! forme_objet {
+    ($($t:ty),+ $(,)?) => {
+        $(impl $crate::protection::perimes::sources::Forme for $t {
+            fn table<'de, A: serde::de::MapAccess<'de>>(table: A) -> Result<Option<Self>, A::Error> {
+                <$t as serde::Deserialize>::deserialize(serde::de::value::MapAccessDeserializer::new(table)).map(Some)
+            }
+        })+
+    };
+}
+pub(crate) use forme_objet;
+
+impl<'de, T: Forme> Deserialize<'de> for Souple<T> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(VisiteurSouple(PhantomData))
+    }
+}
+
+struct VisiteurSouple<T>(PhantomData<T>);
+
+impl<'de, T: Forme> Visitor<'de> for VisiteurSouple<T> {
+    type Value = Souple<T>;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("une valeur JSON")
+    }
+
+    fn visit_str<E: de::Error>(self, t: &str) -> Result<Self::Value, E> {
+        Ok(Souple::de(T::texte(t)))
+    }
+
+    fn visit_bool<E: de::Error>(self, b: bool) -> Result<Self::Value, E> {
+        Ok(Souple::de(T::booleen(b)))
+    }
+
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+        Ok(Souple::de(T::autre()))
+    }
+
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+        Ok(Souple::de(T::autre()))
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(Souple::de(T::autre()))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Souple::de(T::autre()))
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Souple::de(T::autre()))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, suite: A) -> Result<Self::Value, A::Error> {
+        T::suite(suite).map(Souple::de)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, table: A) -> Result<Self::Value, A::Error> {
+        T::table(table).map(Souple::de)
     }
 }
 
@@ -438,6 +626,8 @@ fn lisible(lecteur: Lecteur, octets: &[u8]) -> bool {
         Lecteur::Brave => editeurs::brave(octets).is_some(),
         Lecteur::Eol => eol::lire(octets).is_some(),
         Lecteur::Cask => homebrew::casks(octets).is_some(),
+        Lecteur::Formules => homebrew::formules(octets).is_some(),
+        Lecteur::Slack(plateforme) => editeurs::slack(octets, plateforme).is_some(),
         Lecteur::Mfsa => super::avis_de_l_archive(octets).is_some(),
     }
 }
@@ -455,7 +645,47 @@ fn raison(echec: crate::protection::abuse_ch::Echec) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
     use std::io::{Read, Write};
+
+    /// L'allocateur des essais : celui du système, qui compte les octets alloués par chaque fil. Il sert à vérifier
+    /// qu'une lecture ne copie pas en mémoire ce qu'elle ignore (`allocations`).
+    struct Compteur;
+
+    thread_local! {
+        static ALLOUE: Cell<usize> = const { Cell::new(0) };
+    }
+
+    // SAFETY : tout est délégué à l'allocateur du système ; le compte (un `Cell` sans destructeur, initialisé à la
+    // compilation) n'alloue rien lui-même.
+    unsafe impl GlobalAlloc for Compteur {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+            let _ = ALLOUE.try_with(|c| c.set(c.get().saturating_add(l.size())));
+            unsafe { System.alloc(l) }
+        }
+        unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+            unsafe { System.dealloc(p, l) }
+        }
+        unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+            let _ = ALLOUE.try_with(|c| c.set(c.get().saturating_add(l.size())));
+            unsafe { System.alloc_zeroed(l) }
+        }
+        unsafe fn realloc(&self, p: *mut u8, l: Layout, taille: usize) -> *mut u8 {
+            let _ = ALLOUE.try_with(|c| c.set(c.get().saturating_add(taille)));
+            unsafe { System.realloc(p, l, taille) }
+        }
+    }
+
+    #[global_allocator]
+    static COMPTEUR: Compteur = Compteur;
+
+    /// Ce que rend `f`, et les octets alloués par ce fil pendant qu'il tournait.
+    pub(crate) fn allocations<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        let avant = ALLOUE.with(Cell::get);
+        let r = f();
+        (r, ALLOUE.with(Cell::get) - avant)
+    }
 
     /// Un serveur HTTP local qui répond `reponse` à une demande et rend les en-têtes reçus.
     fn serveur(reponse: Vec<u8>) -> (String, std::thread::JoinHandle<String>) {
@@ -522,8 +752,8 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), SOURCES.len(), "identifiants en double");
-        assert_eq!(du_systeme(Systeme::Windows).count(), 15);
-        assert_eq!(du_systeme(Systeme::MacOs).count(), 19);
+        assert_eq!(du_systeme(Systeme::Windows).count(), 17);
+        assert_eq!(du_systeme(Systeme::MacOs).count(), 21);
         // Toutes servent, sauf celles qu'aucun logiciel jugé n'utilise encore (Microsoft AutoUpdate lui-même, la
         // longue traîne de macOS par cask.json) : pas téléchargées pour rien.
         let inutiles: Vec<&str> = SOURCES.iter().filter(|s| !sert(s)).map(|s| s.id).collect();
@@ -536,10 +766,29 @@ mod tests {
                 s.adresse
             );
             assert!(
-                !s.adresse.contains("winget") && !s.adresse.contains("version="),
+                !s.adresse.contains("winget") && !s.adresse.contains("version=") && !s.adresse.contains("api/formula/"),
                 "{}",
                 s.adresse
             );
+            // Un paramètre d'adresse est une constante de la table, jamais ce qui est installé : aucun n'est fait
+            // au moment de demander (l'adresse est `&'static str`), et seuls ceux-ci existent.
+            if let Some((_, requete)) = s.adresse.split_once('?') {
+                for p in requete.split('&') {
+                    assert!(
+                        [
+                            "filter=endtime=none",
+                            "arch=x64",
+                            "arch=universal",
+                            "variant=msi",
+                            "variant=dmg",
+                            "redirect=false"
+                        ]
+                        .contains(&p),
+                        "{} : {p}",
+                        s.adresse
+                    );
+                }
+            }
             assert!(!s.systemes.is_empty() && s.taille_max > 0 && (5..=60).contains(&s.delai));
             assert!(
                 s.id.bytes()
@@ -554,6 +803,18 @@ mod tests {
                     s.adresse
                 );
             }
+        }
+        // formula.json pour tous, sous les deux systèmes (jamais selon que Homebrew est là) ; Slack, une adresse par
+        // système.
+        for systeme in [Systeme::Windows, Systeme::MacOs] {
+            assert!(du_systeme(systeme).any(|s| s.id == "formules"), "{systeme:?}");
+            assert_eq!(
+                du_systeme(systeme)
+                    .filter(|s| matches!(s.lecteur, Lecteur::Slack(_)))
+                    .count(),
+                1,
+                "{systeme:?}"
+            );
         }
         // Chaque plateforme de Chrome a ses deux canaux (sans extended, un Chrome d'entreprise serait dit dépassé).
         for p in ["win", "win64", "win_arm64", "mac", "mac_arm64"] {
