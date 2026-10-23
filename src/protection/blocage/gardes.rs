@@ -136,6 +136,39 @@ pub(crate) fn processus_intouchable(
     None
 }
 
+/// Pourquoi ce processus ne doit jamais être GELÉ, ou `None`. Mêmes garde-fous que l'arrêt, sauf la règle « programme
+/// du système » : geler python3 ou un outil du système est permis (c'est réversible et rien n'est effacé), l'arrêter
+/// non. Jamais le noyau, init/systemd, le compositeur, la session, un terminal ou un shell (PID et noms critiques), ni
+/// Vanguard et ce qu'il fait tourner : un bureau gelé ne pourrait plus cliquer « Reprendre ». Sans chemin lisible,
+/// on ne gèle pas à l'aveugle.
+#[cfg(target_os = "linux")]
+pub(crate) fn processus_gelable(
+    pid: u32,
+    nom: &str,
+    chemin: Option<&str>,
+    intouchables: &HashSet<u32>,
+) -> Option<&'static str> {
+    if PID_CRITIQUES.contains(&pid) || NOMS_CRITIQUES.contains(&nom_simple(nom).as_str()) {
+        return Some(tr!(
+            "processus critique du système : jamais gelé",
+            "critical system process: never frozen"
+        ));
+    }
+    if intouchables.contains(&pid) || pid == std::process::id() {
+        return Some(tr!(
+            "Vanguard lui-même, ce qu'il a lancé ou ce qui le fait tourner (terminal, session)",
+            "Vanguard itself, what it started or what runs it (terminal, session)"
+        ));
+    }
+    if chemin.is_none() {
+        return Some(tr!(
+            "chemin du programme illisible : rien n'est gelé à l'aveugle",
+            "program path unreadable: nothing is frozen blindly"
+        ));
+    }
+    None
+}
+
 /// Pourquoi ce fichier ne doit jamais être mis en quarantaine, ou `None` : un fichier du système, ou Vanguard.
 pub(crate) fn fichier_intouchable(chemin: &str, os: Os, mon_programme: Option<&str>) -> Option<&'static str> {
     let meme = |m: &str| {

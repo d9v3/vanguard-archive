@@ -101,6 +101,56 @@ pub(crate) fn protection_active() -> bool {
     parametres::charger().is_ok_and(|p| p.actif())
 }
 
+/// Le garde-fou du gel, exposé au veilleur anti-rançongiciel (Linux) : `None` si le processus peut être gelé.
+#[cfg(target_os = "linux")]
+pub(crate) use gardes::processus_gelable;
+
+/// L'arrêt automatique d'un programme est-il permis en ce moment ? La catégorie Programmes réglée en automatique avec
+/// l'accord (menace certaine), Vanguard non administrateur, protection en temps réel non coupée (plan §2.5).
+#[cfg(target_os = "linux")]
+pub(crate) fn arret_automatique_programmes_permis() -> bool {
+    if gestes::administrateur_ou_inconnu() || crate::protection::temps_reel::coupure().is_some() {
+        return false;
+    }
+    let Ok(p) = parametres::charger() else {
+        return false;
+    };
+    decider(&p, Categorie::Programmes, true) == Decision::Auto
+}
+
+/// Arrête puis met en quarantaine un programme, tout seul (protection active), avec TOUS les garde-fous du blocage
+/// (processus critique, Vanguard, session à distance, programme du système, interpréteur jamais mis en quarantaine) ;
+/// la preuve est relevée avant le geste, reliée à l'alerte par `cle`. Utilisé par le veilleur anti-rançongiciel après
+/// avoir gelé la lignée, avec les intouchables du blocage (`chasse::en_marche`). `Err` dit pourquoi rien n'a été
+/// fait : le programme reste alors gelé.
+#[cfg(target_os = "linux")]
+pub(crate) fn arreter_programme_automatique(
+    intouchables: &std::collections::HashSet<u32>,
+    pid: u32,
+    nom: &str,
+    chemin: Option<std::path::PathBuf>,
+    fichier: Option<std::path::PathBuf>,
+    detection: &str,
+    cle: &str,
+) -> Result<String, crate::modele::Echec> {
+    let menace = Menace {
+        categorie: Categorie::Programmes,
+        certaine: false,
+        quoi: detection.to_string(),
+        cle: cle.to_string(),
+        geste: menaces::Geste::Programme {
+            pid: Some(pid),
+            nom: nom.to_string(),
+            chemin,
+            fichier,
+            detection: detection.to_string(),
+        },
+    };
+    let ctx = Contexte::lire(intouchables.clone(), false);
+    let pret = gestes::preparer(&menace, &ctx, true)?;
+    gestes::faire(&menace, pret, true)
+}
+
 /// Ce que la protection active devient en administrateur, dit là où elle tournerait.
 fn dire_administrateur() {
     afficher_aligne(

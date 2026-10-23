@@ -40,3 +40,7 @@ pub(crate) mod sources;
 pub mod telechargement;
 pub(crate) mod temps_reel;
 pub mod yara;
+// Palier 1 Linux (inotify, /proc) ; le veilleur anti-rançongiciel Windows (ReadDirectoryChangesW, Toolhelp32) viendra
+// après une mesure en VM (voir conception-rancongiciel.md).
+#[cfg(target_os = "linux")]
+pub(crate) mod rancongiciel;

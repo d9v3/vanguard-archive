@@ -118,6 +118,9 @@ pub(crate) const INVENTAIRE: &[FichierEtat] = &[
     local("veilleur-etat.json", "machine::linux::veilleur"),
     local("veilleur-voulu", "machine::linux::veilleur"),
     local("veilleur-oublier-le-choix", "machine::linux::veilleur"),
+    local("rancongiciel-voulu", "machine::linux::veilleur"),
+    // Réglages du veilleur anti-rançongiciel (dossiers en plus, exclusions), scellés ; écrit par le palier 1 Linux.
+    scelle("rancongiciel-reglages.json", "protection::rancongiciel"),
     // Protection.
     local("blocage.json", "protection::blocage"),
     local("blocage", "protection::blocage::gestes"),

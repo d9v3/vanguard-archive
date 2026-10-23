@@ -20,7 +20,7 @@ pub(crate) const PREFIXES: &[(&str, (&str, &str))] = &[
         ("outils de protection lancés seuls", "protection tools run on their own"),
     ),
     ("SUR", ("surveillance horaire", "hourly monitoring")),
-    ("VEI", ("veilleur (Linux)", "watcher (Linux)")),
+    ("VEI", ("veilleur", "watcher")),
 ];
 
 /// Un identifiant hors des règles : un outil de protection lancé seul, ou ce que la surveillance et le veilleur
@@ -59,4 +59,8 @@ pub(crate) const OUTILS: &[Outil] = &[
     Outil { id: "SUR-BLO-001", module: "protection::blocage", sujet: ("menace bloquée ou non bloquée", "threat blocked or not blocked") },
     Outil { id: "VEI-PRG-001", module: "machine::linux::veilleur", sujet: ("programme bref vu par le veilleur", "short-lived program seen by the watcher") },
     Outil { id: "VEI-CNX-001", module: "machine::linux::veilleur", sujet: ("connexion brève vue par le veilleur", "short connection seen by the watcher") },
+    Outil { id: "VEI-RAN-001", module: "protection::rancongiciel", sujet: ("rafale de chiffrement vue par le veilleur", "encryption burst seen by the watcher") },
+    Outil { id: "VEI-RAN-002", module: "protection::rancongiciel", sujet: ("copies de secours effacées", "backup copies deleted") },
+    Outil { id: "VEI-RAN-003", module: "protection::rancongiciel", sujet: ("fichier-piège touché en direct", "decoy file touched live") },
+    Outil { id: "VEI-EXF-001", module: "protection::rancongiciel", sujet: ("exfiltration de fichiers personnels", "exfiltration of personal files") },
 ];

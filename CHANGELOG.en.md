@@ -9,6 +9,17 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Ransomware watcher.** The watcher can now watch your personal folders live: an encryption burst (dozens of files
+  rewritten in seconds, their content no longer matching their format, a ransom note, a decoy file touched) alerts you
+  within seconds instead of waiting for the hourly check. Without administrator rights and without a new dependency
+  (inotify through the crate already present; "who" through the processes' write counters). With active protection and
+  an almost-certain case (a decoy touched and a burst attributed to one program without ambiguity), Vanguard freezes
+  the program and its descendants, records the evidence, then stops and quarantines it, with all the blocking
+  safeguards; otherwise it only alerts. Offered in the same consent as "vanguard watcher on" (or "vanguard watcher
+  ransomware on"), off by default; a malicious program in your account can switch it off, your backup remains the real
+  protection. Watched: Documents, Pictures, Desktop, Music, Videos and Downloads. Removing the decoys does not raise
+  "possible ransomware", and an alert from an encryption tool you use can be declared normal. Stated limit: a program
+  writing through a hard link placed outside these folders escapes the live watch (decoys are still checked hourly).
 - **Public Wi-Fi mode: four weaknesses closed.** On Linux, the mode's table also closes transit coming from the Wi-Fi
   adapter: a published container port (Docker, podman, k3s), which goes through DNAT then `forward` and never `input`,
   can no longer be reached from the public network (tried in namespaces of its own). On Windows, the Public category

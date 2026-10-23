@@ -51,6 +51,48 @@ fn charger() -> Result<Vec<Piege>, ()> {
     charger_de(&fichier())
 }
 
+/// Les chemins des fichiers-pièges posés, pour que le veilleur anti-rançongiciel les surveille en direct et juge R6
+/// avec la même liste que le bilan. Vide si la liste est absente ou illisible (« non vérifié = dit » : sans pièges,
+/// R6 ne se déclenche jamais, au lieu d'un faux).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn chemins_poses() -> Vec<PathBuf> {
+    charger().unwrap_or_default().into_iter().map(|p| p.chemin).collect()
+}
+
+/// Les dossiers que le veilleur anti-rançongiciel surveille en direct : ceux des pièges (Documents, Images, Bureau),
+/// plus Musique, Vidéos et Téléchargements. L'accord promet « tes dossiers personnels » : les trois premiers seuls
+/// laissaient chiffrer le reste sans un mot. Les pièges, eux, restent dans les trois premiers. Un disque monté ou un
+/// dossier de projets s'ajoute à la main (réglages), pas d'office.
+#[cfg(target_os = "linux")]
+pub(crate) fn dossiers_a_veiller() -> Vec<PathBuf> {
+    let maison = crate::socle::maison();
+    let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
+    let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
+    let mut liste = dossiers();
+    liste.extend(dossiers_en_plus(&declares, &maison).into_iter().filter(|d| d.is_dir()));
+    liste.sort();
+    liste.dedup();
+    liste
+}
+
+/// Musique, Vidéos et Téléchargements d'après user-dirs.dirs (dans la langue du bureau), sinon leurs noms courants
+/// en français et en anglais. Sans regarder le disque : l'appelant garde ceux qui existent.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn dossiers_en_plus(declares: &str, maison: &Path) -> Vec<PathBuf> {
+    let mut liste = Vec::new();
+    for (cle, noms) in [
+        ("XDG_MUSIC_DIR", ["Musique", "Music"]),
+        ("XDG_VIDEOS_DIR", ["Vidéos", "Videos"]),
+        ("XDG_DOWNLOAD_DIR", ["Téléchargements", "Downloads"]),
+    ] {
+        match dossier_declare(declares, cle, maison) {
+            Some(d) => liste.push(d),
+            None => liste.extend(noms.iter().map(|n| maison.join(n))),
+        }
+    }
+    liste
+}
+
 fn charger_de(liste: &Path) -> Result<Vec<Piege>, ()> {
     match std::fs::read_to_string(liste) {
         Ok(texte) => serde_json::from_str(&texte).map_err(|_| ()),
@@ -695,6 +737,20 @@ pub fn commande(retirer_seulement: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn veille_aussi_musique_videos_telechargements() {
+        let maison = Path::new("/home/alice");
+        let declares = "XDG_MUSIC_DIR=\"$HOME/Musique\"\nXDG_VIDEOS_DIR=\"$HOME/Vidéos\"\nXDG_DOWNLOAD_DIR=\"$HOME/Téléchargements\"\n";
+        let liste = dossiers_en_plus(declares, maison);
+        for d in ["Musique", "Vidéos", "Téléchargements"] {
+            assert!(liste.contains(&maison.join(d)), "{d} : {liste:?}");
+        }
+        // Sans user-dirs.dirs : les noms courants.
+        let repli = dossiers_en_plus("", maison);
+        assert!(repli.contains(&maison.join("Downloads")));
+        assert!(repli.contains(&maison.join("Musique")));
+    }
 
     fn dossier_jetable(nom: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("vanguard-pieges-{nom}-{}", std::process::id()));
