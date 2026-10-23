@@ -8,9 +8,9 @@ use std::fmt::Write;
 
 use serde::Deserialize;
 
-use super::annulation::Valeur;
 use super::{Element, element, proposer};
 use crate::machine;
+use crate::optimiser::Geste;
 use crate::trw;
 use crate::ui::*;
 
@@ -198,13 +198,13 @@ fn dword(cle: &str, nom: &str, valeur: u32) -> String {
 /// Où vit une valeur notée : dans le compte de la personne (sa ruche, même depuis la fenêtre d'un autre
 /// administrateur), ou dans la machine.
 #[derive(Clone, Copy, PartialEq)]
-enum Ruche {
+pub(crate) enum Ruche {
     Compte,
     Machine,
 }
 
 /// Les valeurs du registre que chaque réglage change : (réglage, ruche, clé, nom, DWORD plutôt que texte).
-const VALEURS: &[(&str, Ruche, &str, &str, bool)] = &[
+pub(crate) const VALEURS: &[(&str, Ruche, &str, &str, bool)] = &[
     (
         "mode_jeu",
         Ruche::Compte,
@@ -258,7 +258,7 @@ const VALEURS: &[(&str, Ruche, &str, &str, bool)] = &[
 ];
 
 /// Le mode d'alimentation actif, dans la sortie de « powercfg /getactivescheme » (son GUID, dans toutes les langues).
-fn guid_alimentation(sortie: &str) -> Option<String> {
+pub(crate) fn guid_alimentation(sortie: &str) -> Option<String> {
     sortie
         .split(|c: char| !(c.is_ascii_hexdigit() || c == '-'))
         .find_map(|m| {
@@ -267,69 +267,38 @@ fn guid_alimentation(sortie: &str) -> Option<String> {
         })
 }
 
-/// Une valeur lue dans l'état, par son nom dans le registre.
-fn lue(e: &Etat, nom: &str) -> Option<String> {
-    match nom {
-        "AutoGameModeEnabled" => e.mode_jeu.map(|v| v.to_string()),
-        "HwSchMode" => e.hags.map(|v| v.to_string()),
-        "GameDVR_Enabled" => e.dvr.map(|v| v.to_string()),
-        "AppCaptureEnabled" => e.capture.map(|v| v.to_string()),
-        "MouseSpeed" => e.souris.clone(),
-        "MouseThreshold1" => e.seuil1.clone(),
-        "MouseThreshold2" => e.seuil2.clone(),
-        "DirectXUserGlobalSettings" => e.fenetres.clone(),
-        _ => None,
-    }
-}
-
-/// Les valeurs d'un réglage dans l'état lu : notées avant de l'appliquer, relues après l'avoir remis.
-fn valeurs(e: &Etat, id: &str) -> Vec<Valeur> {
+/// Ce que change un réglage, en gestes d'Optimiser : ses valeurs du registre (`VALEURS`), ou le mode
+/// d'alimentation. Leurs valeurs d'avant sont relevées et notées avant de l'appliquer.
+fn gestes(id: &str) -> Vec<Geste> {
     if id == "alimentation" {
-        return vec![("powercfg".into(), guid_alimentation(&e.alimentation))];
+        return vec![Geste::alimentation()];
     }
     VALEURS
         .iter()
         .filter(|v| v.0 == id)
-        .map(|&(_, _, cle, nom, _)| (format!(r"{cle}\{nom}"), lue(e, nom)))
+        .map(|&(_, ruche, cle, nom, _)| Geste::registre(ruche == Ruche::Machine, cle, nom))
         .collect()
 }
 
-/// Les commandes qui remettent les valeurs notées : la valeur d'avant réécrite, ou retirée si elle n'existait pas ;
-/// le mode d'alimentation d'avant réactivé. `sid` : la personne, dont le compte reçoit ses valeurs.
-fn remettre_commandes(sid: Option<&str>, id: &str, avant: &[Valeur]) -> Vec<String> {
-    let mut l = Vec::new();
-    for (nom_note, v) in avant {
-        if nom_note == "powercfg" {
-            l.extend(
-                v.as_deref()
-                    .and_then(guid_alimentation)
-                    .map(|g| format!("powercfg /setactive {g}")),
-            );
-            continue;
-        }
-        let Some(&(_, ruche, cle, nom, dw)) = VALEURS
-            .iter()
-            .find(|x| x.0 == id && format!(r"{}\{}", x.2, x.3) == *nom_note)
-        else {
-            continue;
+/// Une valeur notée par jeux.json (« clé\nom », ou « powercfg »), dans la forme d'Optimiser : son geste et sa
+/// valeur (« dword:1 », « sz:texte », un GUID). `None` : un nom ou une valeur que Vanguard n'a jamais notés.
+pub(super) fn convertir(id: &str, nom_note: &str, v: Option<&str>) -> Option<(Geste, Option<String>)> {
+    if nom_note == "powercfg" {
+        let guid = match v {
+            Some(t) => Some(guid_alimentation(t)?),
+            None => None,
         };
-        let chemin = match ruche {
-            Ruche::Machine => format!(r"HKLM:\{cle}"),
-            Ruche::Compte => crate::reparer::hkcu_de_la_personne(sid, cle),
-        };
-        l.extend(match v {
-            None => Some(format!(
-                "Remove-ItemProperty '{chemin}' -Name {nom} -ErrorAction SilentlyContinue"
-            )),
-            Some(n) if dw => n.parse::<u32>().ok().map(|n| dword(&chemin, nom, n)),
-            Some(t) => Some(format!(
-                "if (-not (Test-Path '{chemin}')) {{ New-Item '{chemin}' -Force | Out-Null }}; \
-                 Set-ItemProperty '{chemin}' -Name {nom} -Value '{}' -Type String",
-                crate::commande::ps_texte(t)
-            )),
-        });
+        return Some((Geste::alimentation(), guid));
     }
-    l
+    let &(_, ruche, cle, nom, dw) = VALEURS
+        .iter()
+        .find(|x| x.0 == id && format!(r"{}\{}", x.2, x.3) == nom_note)?;
+    let valeur = match v {
+        None => None,
+        Some(n) if dw => Some(format!("dword:{}", n.trim().parse::<u32>().ok()?)),
+        Some(t) => Some(format!("sz:{t}")),
+    };
+    Some((Geste::registre(ruche == Ruche::Machine, cle, nom), valeur))
 }
 
 fn a_programme(e: &Etat, motif: &str) -> bool {
@@ -491,7 +460,7 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
             Some(e.mode_jeu != Some(0)),
             vec![dword(&compte(r"Software\Microsoft\GameBar"), "AutoGameModeEnabled", 1)],
         )
-        .annulable("mode_jeu", valeurs(e, "mode_jeu")),
+        .annulable("mode_jeu", gestes("mode_jeu")),
         element(
             tr!(
                 "Planification GPU matérielle (HAGS)",
@@ -508,7 +477,7 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
                 2,
             )],
         )
-        .annulable("hags", valeurs(e, "hags")),
+        .annulable("hags", gestes("hags")),
         element(
             tr!("Capture Xbox en arrière-plan coupée", "Xbox background recording off"),
             tr!(
@@ -525,7 +494,7 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
                 ),
             ],
         )
-        .annulable("capture", valeurs(e, "capture")),
+        .annulable("capture", gestes("capture")),
         element(
             tr!("Accélération de la souris coupée", "Mouse acceleration off"),
             tr!(
@@ -537,7 +506,7 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
                 .map(|nom| format!("Set-ItemProperty '{souris}' -Name {nom} -Value '0'"))
                 .into(),
         )
-        .annulable("souris", valeurs(e, "souris")),
+        .annulable("souris", gestes("souris")),
     ];
     if e.windows11 {
         // La valeur regroupe plusieurs réglages (« VRROptimizeEnable=0;SwapEffectUpgradeEnable=1; ») : on ne
@@ -552,7 +521,7 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
                  Set-ItemProperty $k -Name DirectXUserGlobalSettings -Value (($v -replace 'SwapEffectUpgradeEnable=[0-9];?', '') + 'SwapEffectUpgradeEnable=1;')"
             )],
         )
-        .annulable("fenetres", valeurs(e, "fenetres")));
+        .annulable("fenetres", gestes("fenetres")));
     }
     let mut alimentation = element(
         tr!("Alimentation « Performances élevées »", "“High performance” power plan"),
@@ -566,7 +535,7 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
             "powercfg /getactivescheme".into(),
         ],
     )
-    .annulable("alimentation", valeurs(e, "alimentation"));
+    .annulable("alimentation", gestes("alimentation"));
     if e.portable {
         alimentation.deconseille = Some(tr!(
             "PC portable : la batterie fondrait et il chaufferait",
@@ -616,20 +585,7 @@ pub(super) fn menu() {
             &reglages(&etat, crate::reparer::sid_de_la_personne().as_deref()),
             true,
         ),
-        Some("3") => {
-            let sid = crate::reparer::sid_de_la_personne();
-            // L'état relu une seule fois, après la remise (un appel PowerShell pour tous les réglages).
-            let relu = std::cell::OnceCell::new();
-            super::remettre(
-                |id, avant| remettre_commandes(sid.as_deref(), id, avant),
-                |id, _| {
-                    relu.get_or_init(lire_etat)
-                        .as_ref()
-                        .map(|e| valeurs(e, id))
-                        .unwrap_or_default()
-                },
-            );
-        }
+        Some("3") => super::remettre(),
         _ => {}
     }
 }
@@ -717,81 +673,74 @@ mod tests {
         super::super::tests::tient_dans_la_liste(&composants(&e));
     }
 
-    // Chaque valeur est notée telle qu'elle était, puis remise : réécrite si elle existait (DWORD ou texte), retirée
-    // sinon, dans le compte de la personne ou dans la machine ; le mode d'alimentation d'avant est réactivé.
+    /// Chaque réglage désigne ses valeurs par des gestes d'Optimiser (relevées et notées avant de l'appliquer), et
+    /// une note de jeux.json d'avant se convertit dans cette forme : DWORD et texte du registre, GUID du mode
+    /// d'alimentation ; un nom ou une valeur que Vanguard n'a jamais notés ne se convertit pas.
     #[test]
-    fn valeurs_notees_puis_remises() {
-        let e = Etat {
-            hags: Some(1),
-            dvr: Some(1),
-            souris: Some("1".into()),
-            seuil1: Some("6".into()),
-            seuil2: Some("10".into()),
-            fenetres: Some("VRROptimizeEnable=0;".into()),
-            alimentation: "Power Scheme GUID: 381B4222-F694-41F0-9685-FF5BB260DF2E  (Balanced)".into(),
-            windows11: true,
-            ..Etat::default()
-        };
-        let sid = Some("S-1-5-21-1-2-3-1001");
-        let remettre = |id: &str| remettre_commandes(sid, id, &valeurs(&e, id));
+    fn gestes_et_notes_d_avant() {
         assert_eq!(
-            valeurs(&e, "hags"),
-            [(
-                r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\HwSchMode".to_string(),
-                Some("1".to_string())
+            gestes("hags"),
+            [Geste::registre(
+                true,
+                r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
+                "HwSchMode"
             )]
         );
-        assert_eq!(
-            remettre("hags"),
-            [dword(
-                r"HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
-                "HwSchMode",
-                1
-            )]
-        );
-        // Absente avant (Mode Jeu jamais réglé) : retirée, dans la ruche de la personne.
-        let mode_jeu = remettre("mode_jeu");
-        assert_eq!(mode_jeu.len(), 1);
-        assert!(
-            mode_jeu[0].starts_with(
-                r"Remove-ItemProperty 'Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Microsoft\GameBar'"
-            ) && mode_jeu[0].contains("-Name AutoGameModeEnabled"),
-            "{mode_jeu:?}"
-        );
-        let capture = remettre("capture");
-        assert!(
-            capture[0].ends_with("-Name GameDVR_Enabled -Value 1 -Type DWord"),
-            "{capture:?}"
-        );
-        assert!(capture[1].starts_with("Remove-ItemProperty") && capture[1].contains("AppCaptureEnabled"));
-        let souris = remettre("souris");
-        assert_eq!(souris.len(), 3);
-        assert!(
-            souris[1].ends_with("-Name MouseThreshold1 -Value '6' -Type String"),
-            "{souris:?}"
-        );
-        assert_eq!(
-            remettre("alimentation"),
-            ["powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e"]
-        );
-        // Une valeur piégée reste du texte pour PowerShell.
-        let piege = Etat {
-            fenetres: Some("x';Remove-Item C:\\Windows;'".into()),
-            ..Etat::default()
-        };
-        let c = remettre_commandes(sid, "fenetres", &valeurs(&piege, "fenetres"));
-        assert!(c[0].contains("-Value 'x'';Remove-Item C:\\Windows;'''"), "{c:?}");
-        // Relue en place après la remise : la note peut partir.
-        let mut notes = super::super::annulation::Notes::default();
-        let reglages_lus = reglages(&e, sid);
-        for el in &reglages_lus {
-            if let Some(a) = &el.annulable {
-                notes.noter(a, &el.titre);
-            }
+        assert_eq!(gestes("souris").len(), 3);
+        assert_eq!(gestes("alimentation"), [Geste::alimentation()]);
+        for el in reglages(&etat_vide(), None) {
+            assert!(
+                el.annulable.as_ref().is_some_and(|(_, g)| !g.is_empty()),
+                "{}",
+                el.titre
+            );
         }
-        assert_eq!(notes.reglages.len(), 6);
-        let remis = super::super::annulation::retirer_remis(&mut notes, |id, _| valeurs(&e, id));
-        assert_eq!(remis.len(), 6);
+        assert_eq!(
+            convertir(
+                "hags",
+                r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\HwSchMode",
+                Some("1")
+            ),
+            Some((
+                Geste::registre(true, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "HwSchMode"),
+                Some("dword:1".into())
+            ))
+        );
+        assert_eq!(
+            convertir("souris", r"Control Panel\Mouse\MouseThreshold1", Some("6")),
+            Some((
+                Geste::registre(false, r"Control Panel\Mouse", "MouseThreshold1"),
+                Some("sz:6".into())
+            ))
+        );
+        assert_eq!(
+            convertir("mode_jeu", r"Software\Microsoft\GameBar\AutoGameModeEnabled", None),
+            Some((
+                Geste::registre(false, r"Software\Microsoft\GameBar", "AutoGameModeEnabled"),
+                None
+            ))
+        );
+        assert_eq!(
+            convertir(
+                "alimentation",
+                "powercfg",
+                Some("Power Scheme GUID: 381B4222-F694-41F0-9685-FF5BB260DF2E  (Balanced)")
+            ),
+            Some((
+                Geste::alimentation(),
+                Some("381b4222-f694-41f0-9685-ff5bb260df2e".into())
+            ))
+        );
+        assert_eq!(convertir("alimentation", "powercfg", Some("pas un mode")), None);
+        assert_eq!(
+            convertir(
+                "hags",
+                r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\HwSchMode",
+                Some("x")
+            ),
+            None
+        );
+        assert_eq!(convertir("hags", r"SYSTEM\Ailleurs\Valeur", Some("1")), None);
     }
 
     #[test]

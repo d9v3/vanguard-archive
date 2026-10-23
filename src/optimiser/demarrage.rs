@@ -583,6 +583,7 @@ mod tests {
             Avant {
                 date: String::new(),
                 valeurs: vec![Some("enabled".to_string())],
+                ..Avant::default()
             },
         );
         let l = lignes(

@@ -55,6 +55,188 @@ pub enum Changement {
     /// d'autostart du compte (« - » : absent), ou l'état du service pour systemd (enabled, disabled). `cible` :
     /// `None` quand le réglage n'est rebâti que pour être annulé.
     Demarrage { entree: Entree, cible: Option<String> },
+    /// Réglage du noyau (/proc/sys) qu'une correction du bilan ou un réglage pour jouer change, remis par
+    /// `sysctl -w`. La clé s'écrit en chemin (« kernel/kptr_restrict ») : un nom d'interface peut contenir un point.
+    Sysctl { cle: String },
+    /// Fichier que Vanguard pose dans /etc (liste fermée `POSES`), noté en entier : remis tel quel, ou retiré s'il
+    /// n'existait pas, puis sa commande `apres` le fait prendre. `chemin` : son nom d'aujourd'hui ou d'avant le
+    /// changement de nom (`passage`), celui que la note désigne.
+    Pose {
+        chemin: String,
+        fichier: &'static FichierPose,
+    },
+    /// Module du noyau (liste fermée `MODULES`) : « charge », ou absent.
+    Module { nom: &'static str },
+    /// Droits d'un fichier du dossier personnel (« 0644 »), remis par chmod, sans sudo.
+    Droits { chemin: PathBuf },
+    /// Heure réglée par le réseau (`timedatectl`) : « yes » ou « no ».
+    Ntp,
+}
+
+/// Ce qu'un fichier posé par Vanguard peut contenir pour qu'une valeur notée y soit remise avec sudo.
+#[derive(Clone, Copy)]
+pub enum Forme {
+    /// Lignes « clé = nombre » de sysctl.d (ou commentaires) : jamais un texte, que le noyau lirait comme une
+    /// commande (kernel.core_pattern).
+    Sysctl,
+    /// Lignes « Directive valeur » de sshd, parmi les directives que Vanguard écrit (`DIRECTIVES_SSHD`).
+    Sshd,
+    /// Exactement ce que Vanguard y écrit.
+    Exact(&'static str),
+}
+
+/// Un fichier que Vanguard pose dans /etc : ce qu'il peut contenir, et ce qui le fait prendre une fois remis.
+pub struct FichierPose {
+    pub chemin: &'static str,
+    pub forme: Forme,
+    pub apres: &'static str,
+}
+
+/// Le contenu que la correction d'Ollama pose (écoute en local seulement).
+pub(crate) const OLLAMA_CONTENU: &str = "[Service]\nEnvironment=OLLAMA_HOST=127.0.0.1\n";
+pub(crate) const OLLAMA_VANGUARD: &str = "/etc/systemd/system/ollama.service.d/vanguard.conf";
+
+/// La liste fermée des fichiers que Vanguard pose et sait remettre : une note ne peut en désigner aucun autre.
+static POSES: [FichierPose; 5] = [
+    FichierPose {
+        chemin: crate::machine::linux::SYSCTL_VANGUARD,
+        forme: Forme::Sysctl,
+        apres: "",
+    },
+    FichierPose {
+        chemin: crate::machine::linux::SSHD_VANGUARD,
+        forme: Forme::Sshd,
+        apres: crate::machine::linux::RECHARGER_SSHD,
+    },
+    FichierPose {
+        chemin: OLLAMA_VANGUARD,
+        forme: Forme::Exact(OLLAMA_CONTENU),
+        apres: "sudo systemctl daemon-reload && sudo systemctl try-restart ollama",
+    },
+    FichierPose {
+        chemin: crate::gaming::linux::SYSCTL_JEUX,
+        forme: Forme::Sysctl,
+        apres: "",
+    },
+    FichierPose {
+        chemin: crate::gaming::linux::NTSYNC_CONF,
+        forme: Forme::Exact("ntsync\n"),
+        apres: "",
+    },
+];
+
+/// Les services que les corrections du bilan arrêtent ou lancent, et qu'une note peut faire remettre.
+const UNITES: [&str; 2] = ["cups-browsed", "auditd"];
+
+/// Les modules du noyau qu'un réglage pour jouer charge.
+const MODULES: [&str; 1] = ["ntsync"];
+
+/// Les directives que Vanguard écrit dans son fichier de sshd : une note n'y remet que celles-là.
+const DIRECTIVES_SSHD: [&str; 16] = [
+    "PermitEmptyPasswords",
+    "PermitRootLogin",
+    "PasswordAuthentication",
+    "KbdInteractiveAuthentication",
+    "ChallengeResponseAuthentication",
+    "GatewayPorts",
+    "X11Forwarding",
+    "MaxAuthTries",
+    "Ciphers",
+    "MACs",
+    "KexAlgorithms",
+    "HostKeyAlgorithms",
+    "PubkeyAcceptedAlgorithms",
+    "PubkeyAcceptedKeyTypes",
+    "CASignatureAlgorithms",
+    "HostbasedAcceptedAlgorithms",
+];
+
+/// Un contenu noté pour un fichier posé : une forme que ce fichier peut avoir, sans rien que sudo écrirait d'autre.
+fn contenu_admis(forme: Forme, t: &str) -> bool {
+    let lignes_admises = |ligne: &dyn Fn(&str) -> bool| {
+        t.len() <= 8 << 10
+            && !t.contains('\0')
+            && t.lines()
+                .map(str::trim)
+                .all(|l| l.is_empty() || l.starts_with('#') || ligne(l))
+    };
+    match forme {
+        Forme::Exact(c) => t == c,
+        Forme::Sysctl => lignes_admises(&|l| {
+            l.split_once('=').is_some_and(|(k, v)| {
+                let (k, v) = (k.trim(), v.trim());
+                !k.is_empty()
+                    && k.chars().all(|c| c.is_ascii_alphanumeric() || "._-/*".contains(c))
+                    && !v.is_empty()
+                    && v.chars().all(|c| c.is_ascii_digit() || " \t-".contains(c))
+                    && ligne_sysctl_posee(&k.replace('.', "/"), v)
+            })
+        }),
+        Forme::Sshd => lignes_admises(&|l| {
+            l.split_once(' ').is_some_and(|(d, v)| {
+                !v.is_empty()
+                    && v.len() <= 2048
+                    && v.chars().all(|c| c.is_ascii_alphanumeric() || "@._+-=/*?,".contains(c))
+                    && directive_sshd_posee(d, v.trim())
+            })
+        }),
+    }
+}
+
+/// Une ligne de sysctl que Vanguard écrit dans ses fichiers : la limite de mémoire des jeux, ou une clé du
+/// durcissement à sa valeur sûre. Ces fichiers sont lus en root à chaque démarrage : une clé libre ou une valeur
+/// affaiblie viendrait d'ailleurs que de Vanguard.
+fn ligne_sysctl_posee(cle: &str, v: &str) -> bool {
+    match cle {
+        "vm/max_map_count" => v.parse::<u64>().is_ok(),
+        _ => v
+            .parse::<i64>()
+            .is_ok_and(|n| crate::machine::linux::valeur_durcie(cle, n)),
+    }
+}
+
+/// Une directive de sshd à une valeur que Vanguard écrit : celles qui ferment (« no »), la connexion root sans mot
+/// de passe au plus, peu d'essais, des algorithmes sans faible. sshd relit ce fichier en premier : « yes » ouvrirait
+/// ce que les corrections ont fermé.
+fn directive_sshd_posee(d: &str, v: &str) -> bool {
+    match d {
+        "PermitRootLogin" => matches!(v, "no" | "prohibit-password"),
+        "MaxAuthTries" => v.parse::<u8>().is_ok_and(|n| (1..=6).contains(&n)),
+        "Ciphers"
+        | "MACs"
+        | "KexAlgorithms"
+        | "HostKeyAlgorithms"
+        | "PubkeyAcceptedAlgorithms"
+        | "PubkeyAcceptedKeyTypes"
+        | "CASignatureAlgorithms"
+        | "HostbasedAcceptedAlgorithms" => crate::machine::linux::liste_sure(v),
+        _ => DIRECTIVES_SSHD.contains(&d) && v == "no",
+    }
+}
+
+/// Une clé de sysctl qu'une correction ou un réglage pour jouer change : celles du durcissement, la limite de mémoire
+/// des jeux, et les redirections IPv6 de chaque interface.
+fn cle_sysctl_connue(cle: &str) -> bool {
+    if cle == "vm/max_map_count" || crate::machine::linux::cle_durcie(cle) {
+        return true;
+    }
+    cle.strip_prefix("net/ipv6/conf/")
+        .and_then(|r| r.strip_suffix("/accept_redirects"))
+        .is_some_and(|i| {
+            !i.is_empty() && i.len() <= 15 && i.chars().all(|c| c.is_ascii_alphanumeric() || "._-@".contains(c))
+        })
+}
+
+/// La valeur d'une clé de sysctl, espaces normalisés (« 4096 87380 6291456 ») ; `None` : illisible.
+fn sysctl_lu(cle: &str) -> Option<String> {
+    let t = std::fs::read_to_string(Path::new("/proc/sys").join(cle)).ok()?;
+    Some(t.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// L'heure réglée par le réseau, d'après timedatectl : « yes » ou « no ».
+fn ntp_lu() -> Option<String> {
+    let v = sortie("timedatectl", &["show", "-p", "NTP", "--value"])?;
+    matches!(v.as_str(), "yes" | "no").then_some(v)
 }
 
 /// Un nom de service de systemd : il entre tel quel dans la commande.
@@ -251,6 +433,16 @@ pub fn dns_principal(v4: &[&str], v6: &[&str]) -> Result<Changement, String> {
     })
 }
 
+/// Le mode de démarrage d'un service s'accorde-t-il avec sa marche ? Seulement alors « enable/disable --now »
+/// ramène l'état d'avant tout entier.
+fn releve_fidele(etat: &str, actif: bool) -> bool {
+    match etat {
+        "enabled" => actif,
+        "disabled" | "masked" => !actif,
+        _ => true,
+    }
+}
+
 fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
     let r = crate::commande::lancer(Command::new(cmd).args(args), 10)?;
     Some(r.sortie.trim().to_string())
@@ -293,6 +485,69 @@ impl Changement {
                 },
                 Entree::Service(u) => etat_unite_lu(u, true),
             },
+            Changement::Sysctl { .. }
+            | Changement::Pose { .. }
+            | Changement::Module { .. }
+            | Changement::Droits { .. }
+            | Changement::Ntp => self.relever().flatten(),
+        }
+    }
+
+    /// La valeur d'avant, relevée avant une correction : `None` si elle ne se lit pas (droits, outil absent), ce
+    /// qui n'est pas la même chose qu'une valeur absente (`Some(None)` : fichier, ligne, module qui n'existe pas).
+    pub fn relever(&self) -> Option<Valeur> {
+        match self {
+            Changement::Sysctl { cle } => sysctl_lu(cle).map(Some),
+            Changement::Pose { chemin, .. } => match std::fs::read_to_string(chemin) {
+                Ok(t) => Some(Some(t)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(None),
+                Err(_) => None,
+            },
+            Changement::Module { nom } => Some(
+                Path::new("/sys/module")
+                    .join(nom)
+                    .exists()
+                    .then(|| "charge".to_string()),
+            ),
+            Changement::Droits { chemin } => super::annulables::droits_lus(chemin).map(Some),
+            Changement::Ntp => ntp_lu().map(Some),
+            // Remis par « enable/disable --now », qui lance ou arrête aussi le service ; relu, seul le mode de
+            // démarrage compte. Activé mais arrêté (ou l'inverse), l'état d'avant ne reviendrait pas et la relecture
+            // le dirait revenu : non noté, la correction est dite non annulable avant d'être appliquée.
+            Changement::Unite { nom, .. } => etat_unite_lu(nom, false)
+                .filter(|e| releve_fidele(e, sortie("systemctl", &["is-active", nom]).as_deref() == Some("active")))
+                .map(Some),
+            _ => Some(self.lire()),
+        }
+    }
+
+    /// Le changement que désigne un geste noté (`annulables::Geste`), s'il vise une cible de la liste fermée :
+    /// une note ne fait jamais écrire ailleurs.
+    pub fn depuis_geste(geste: &str) -> Option<Changement> {
+        let (genre, cible) = geste.split_once('|').unwrap_or((geste, ""));
+        match genre {
+            "unite" => UNITES.iter().find(|u| **u == cible).map(|nom| Changement::Unite {
+                nom,
+                cible: "?",
+                defaut: "?",
+            }),
+            "sysctl" => cle_sysctl_connue(cible).then(|| Changement::Sysctl { cle: cible.to_string() }),
+            "fichier" => POSES
+                .iter()
+                .find(|f| crate::passage::les_deux(f.chemin).iter().any(|n| n == cible))
+                .map(|fichier| Changement::Pose {
+                    chemin: cible.to_string(),
+                    fichier,
+                }),
+            "module" => MODULES
+                .iter()
+                .find(|m| **m == cible)
+                .map(|nom| Changement::Module { nom }),
+            "droits" => super::annulables::dans_la_maison(Path::new(cible)).then(|| Changement::Droits {
+                chemin: PathBuf::from(cible),
+            }),
+            "ntp" if cible.is_empty() => Some(Changement::Ntp),
+            _ => None,
         }
     }
 
@@ -307,6 +562,12 @@ impl Changement {
             // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
             Changement::Dns { connexion, cible } => format!("{connexion}\n{}", cible.as_deref().unwrap_or("?")),
             Changement::Demarrage { cible, .. } => cible.clone().unwrap_or_else(|| "?".to_string()),
+            // Rebâtis pour être annulés seulement : une cible qu'aucune lecture ne donne.
+            Changement::Sysctl { .. }
+            | Changement::Pose { .. }
+            | Changement::Module { .. }
+            | Changement::Droits { .. }
+            | Changement::Ntp => "?".to_string(),
         })
     }
 
@@ -327,6 +588,12 @@ impl Changement {
                 },
                 Entree::Service(_) => "enabled".to_string(),
             }),
+            // Pas de « système neuf » pour une correction : sans note admise, rien ne se remet (« ? » ne s'écrit pas).
+            Changement::Sysctl { .. }
+            | Changement::Pose { .. }
+            | Changement::Module { .. }
+            | Changement::Droits { .. }
+            | Changement::Ntp => Some("?".to_string()),
         }
     }
 
@@ -407,8 +674,11 @@ impl Changement {
     /// du compte peut réécrire.
     pub fn valeur_admise(&self, v: Option<&str>) -> bool {
         let Some(v) = v else {
-            // Absente (ligne, préférence, fichier) : se remet en retirant, rien d'autre.
-            return !matches!(self, Changement::Dns { .. });
+            // Absente (ligne, préférence, fichier, module) : se remet en retirant, rien d'autre.
+            return !matches!(
+                self,
+                Changement::Dns { .. } | Changement::Sysctl { .. } | Changement::Droits { .. } | Changement::Ntp
+            );
         };
         match self {
             Changement::Unite { .. } => ETATS_UNITE.contains(&v),
@@ -421,6 +691,13 @@ impl Changement {
                 Entree::Autostart(_) => v == "-" || (v.starts_with('+') && v.len() <= 64 << 10 && !v.contains('\0')),
                 Entree::Service(_) => ETATS_UNITE.contains(&v),
             },
+            Changement::Sysctl { .. } => {
+                v.len() <= 64 && !v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || " -".contains(c))
+            }
+            Changement::Pose { fichier, .. } => contenu_admis(fichier.forme, v),
+            Changement::Module { .. } => v == "charge",
+            Changement::Droits { .. } => super::annulables::droits_admis(v),
+            Changement::Ntp => matches!(v, "yes" | "no"),
         }
     }
 
@@ -490,11 +767,44 @@ impl Changement {
                     }
                 ),
             },
+            Changement::Sysctl { cle } => format!("sysctl {} = {}", cle.replace('/', "."), v.unwrap_or("?")),
+            // Le contenu est montré avant d'être écrit en root : « remis comme avant » seul cacherait ce qui revient.
+            Changement::Pose { chemin, .. } => match v {
+                Some(t) => {
+                    let lignes: Vec<&str> = t
+                        .lines()
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                        .collect();
+                    if lignes.is_empty() {
+                        trf!(
+                            "{chemin} : remis comme avant (vide)",
+                            "{chemin}: put back as before (empty)"
+                        )
+                    } else {
+                        trf!(
+                            "{chemin} : remis comme avant ({})",
+                            "{chemin}: put back as before ({})",
+                            lignes.join(" ; ")
+                        )
+                    }
+                }
+                None => trf!("{chemin} : retiré", "{chemin}: removed"),
+            },
+            Changement::Module { nom } => match v {
+                Some(_) => format!("modprobe {nom}"),
+                None => format!("modprobe -r {nom}"),
+            },
+            Changement::Droits { chemin } => format!("chmod {} {}", v.unwrap_or("?"), court(chemin)),
+            Changement::Ntp => format!(
+                "timedatectl set-ntp {}",
+                if v == Some("yes") { "true" } else { "false" }
+            ),
         }
     }
 
     /// La commande qui met la valeur `v`.
-    fn commande(&self, v: Option<&str>) -> Option<String> {
+    pub(super) fn commande(&self, v: Option<&str>) -> Option<String> {
         Some(match self {
             Changement::Unite { nom, .. } => match v? {
                 e @ ("enabled" | "disabled" | "masked") => format!("sudo systemctl {} --now {nom}", etat_unite(e)),
@@ -567,12 +877,53 @@ impl Changement {
                     _ => return None,
                 },
             },
+            // Chaque valeur repasse par `valeur_admise` avant d'entrer dans une commande : « ? » (aucune note) n'en
+            // donne aucune.
+            Changement::Sysctl { cle } => {
+                let v = v.filter(|v| self.valeur_admise(Some(v)))?;
+                format!("sudo sysctl -w {} >/dev/null", sh_chaine(&format!("{cle}={v}")))
+            }
+            Changement::Pose { chemin, fichier } => {
+                if !self.valeur_admise(v) {
+                    return None;
+                }
+                let suite = if fichier.apres.is_empty() {
+                    String::new()
+                } else {
+                    format!(" && {}", fichier.apres)
+                };
+                match v {
+                    Some(t) => format!(
+                        "printf '%s' {} | sudo tee {} >/dev/null{suite}",
+                        sh_chaine(t),
+                        sh_chaine(chemin)
+                    ),
+                    None => format!("sudo rm -f {}{suite}", sh_chaine(chemin)),
+                }
+            }
+            Changement::Module { nom } => match v {
+                Some("charge") => format!("sudo modprobe {nom}"),
+                None => format!("sudo modprobe -r {nom}"),
+                Some(_) => return None,
+            },
+            Changement::Droits { chemin } => {
+                let v = v.filter(|v| super::annulables::droits_admis(v))?;
+                format!("chmod {v} {}", sh_chaine(&chemin.display().to_string()))
+            }
+            Changement::Ntp => match v? {
+                "yes" => "sudo timedatectl set-ntp true".to_string(),
+                "no" => "sudo timedatectl set-ntp false".to_string(),
+                _ => return None,
+            },
         })
     }
 
     /// Demande sudo, et un point de restauration avant (tout sauf ce qui est propre au compte).
     fn admin(&self) -> bool {
-        !matches!(self, Changement::Gnome { .. } | Changement::Demarrage { .. })
+        !matches!(
+            self,
+            Changement::Gnome { .. } | Changement::Demarrage { .. } | Changement::Droits { .. }
+        )
     }
 }
 
@@ -618,9 +969,11 @@ fn etat_unite(v: &str) -> &str {
     }
 }
 
-/// Applique des lots de changements (un lot par réglage), point de restauration d'abord si le système est touché.
-pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
-    if lots.iter().flatten().any(|(c, _)| c.admin())
+/// Applique des lots de changements (un lot par réglage), point de restauration d'abord si le système est touché ;
+/// `en_plus`, des commandes d'autres annulations lancées dans le même passage. Rend la réussite de chaque lot, puis
+/// de chaque groupe en plus.
+pub fn ecrire_avec(lots: &[Vec<(&Changement, Valeur)>], en_plus: &[Vec<String>]) -> (Vec<bool>, Vec<bool>) {
+    if (!en_plus.is_empty() || lots.iter().flatten().any(|(c, _)| c.admin()))
         && let Some((outil, point)) = crate::reparer::point_restauration(tr!("réglages", "settings"))
     {
         trp!(
@@ -634,14 +987,16 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
             ))
             .oui()
         {
-            return vec![false; lots.len()];
+            return (vec![false; lots.len()], vec![false; en_plus.len()]);
         }
     }
-    let commandes: Vec<Vec<String>> = lots
+    let mut commandes: Vec<Vec<String>> = lots
         .iter()
         .map(|lot| lot.iter().filter_map(|(c, v)| c.commande(v.as_deref())).collect())
         .collect();
+    commandes.extend(en_plus.iter().cloned());
     let mut resultats = crate::machine::appliquer_chacune(&commandes);
+    let plus = resultats.split_off(lots.len().min(resultats.len()));
     // Ce qui est propre au compte et s'écrit sans commande (fichiers d'autostart), montré comme une commande.
     for (lot, ok) in lots.iter().zip(resultats.iter_mut()) {
         for (c, v) in lot {
@@ -651,7 +1006,7 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
             }
         }
     }
-    resultats
+    (resultats, plus)
 }
 
 /// Les programmes lancés à l'ouverture de session de ce compte : entrées d'autostart (celles du compte, et celles
@@ -1043,6 +1398,18 @@ pub fn catalogue() -> Vec<Reglage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un service activé mais arrêté (ou désactivé mais en marche) ne se note pas : « enable/disable --now » ne
+    /// ramènerait pas son état d'avant, et la relecture le dirait revenu.
+    #[test]
+    fn service_releve_seulement_si_mode_et_marche_s_accordent() {
+        assert!(releve_fidele("enabled", true));
+        assert!(releve_fidele("disabled", false));
+        assert!(!releve_fidele("enabled", false));
+        assert!(!releve_fidele("disabled", true));
+        assert!(!releve_fidele("masked", true));
+        assert!(releve_fidele("static", false));
+    }
 
     #[test]
     fn commandes_du_shell() {

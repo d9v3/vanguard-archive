@@ -12,7 +12,7 @@
 //! ou un programme du système, jamais une connexion à distance en cours ; sans les droits, rien n'est fait à moitié.
 
 mod gardes;
-mod gestes;
+pub(crate) mod gestes;
 mod menaces;
 mod parametres;
 mod pare_feu;

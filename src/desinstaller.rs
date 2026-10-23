@@ -985,6 +985,8 @@ fn effacer(
 /// la main.
 struct Annulables {
     optimiser: usize,
+    /// Les corrections du bilan qui se défont (leur valeur d'avant notée).
+    bilan: usize,
     blocages: usize,
     jeux: usize,
     quarantaine: usize,
@@ -993,7 +995,7 @@ struct Annulables {
 
 impl Annulables {
     fn menu_vide(&self) -> bool {
-        self.optimiser + self.blocages + self.jeux + self.quarantaine == 0
+        self.optimiser + self.bilan + self.blocages + self.jeux + self.quarantaine == 0
     }
 
     fn vide(&self) -> bool {
@@ -1002,13 +1004,14 @@ impl Annulables {
 
     /// Ce qui se défait exactement grâce au dossier de données.
     fn a_defaire(&self) -> usize {
-        self.optimiser + self.blocages + self.jeux
+        self.optimiser + self.bilan + self.blocages + self.jeux
     }
 }
 
 fn annulables() -> Annulables {
     Annulables {
         optimiser: crate::optimiser::reglages_notes(),
+        bilan: crate::optimiser::annulables::nombre(crate::optimiser::annulables::Origine::Bilan),
         blocages: crate::changements::blocages_en_place().len(),
         jeux: crate::gaming::reglages_notes(),
         quarantaine: crate::protection::quarantaine::nombre(),
@@ -1107,6 +1110,12 @@ fn entrees_annulables(a: &Annulables) -> Vec<(String, String)> {
             trf!("{} réglage(s), annulables", "{} setting(s), undoable", a.optimiser),
         ));
     }
+    if a.bilan > 0 {
+        e.push((
+            tr!("Corrections du bilan", "Check-up fixes").to_string(),
+            trf!("{}, annulables une à une", "{}, undoable one by one", a.bilan),
+        ));
+    }
     if a.blocages > 0 {
         e.push((
             tr!("Blocages en place", "Blocks in place").to_string(),
@@ -1133,6 +1142,10 @@ fn outils_annulables(a: &Annulables) -> Vec<fn()> {
     let mut o: Vec<fn()> = Vec::new();
     if a.optimiser > 0 {
         o.push(crate::optimiser::tout_annuler);
+    }
+    if a.bilan > 0 {
+        // « Ce que Vanguard a changé » : la liste, puis chaque correction à annuler.
+        o.push(crate::changements::afficher);
     }
     if a.blocages > 0 {
         o.push(crate::protection::blocage::annuler);
@@ -2407,6 +2420,7 @@ mod tests {
         let e = dossier_de_donnees(&d, Genre::DonneesAvant, "", &mut pas_a_lui);
         let a = Annulables {
             optimiser: 0,
+            bilan: 0,
             blocages: 0,
             jeux: 0,
             quarantaine: 0,
@@ -2456,6 +2470,7 @@ mod tests {
     fn corrections_redites_quand_leur_releve_part() {
         let a = Annulables {
             optimiser: 0,
+            bilan: 0,
             blocages: 0,
             jeux: 0,
             quarantaine: 0,
@@ -2545,6 +2560,7 @@ mod tests {
         }
         for (texte, precision) in entrees_annulables(&Annulables {
             optimiser: 120,
+            bilan: 120,
             blocages: 120,
             jeux: 120,
             quarantaine: 120,

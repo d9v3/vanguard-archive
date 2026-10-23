@@ -115,6 +115,20 @@ fn faiblesse_entree(entree: &str) -> Option<bool> {
         .max()
 }
 
+/// Une liste d'algorithmes que la correction peut écrire dans le fichier de Vanguard : des faibles retirés
+/// (« -… »), ou une liste écrite sans aucun faible. Jamais d'ajout (« +… », « ^… ») : Vanguard n'en écrit pas, et
+/// une note qui en remettrait un rouvrirait ce que la correction a fermé.
+pub(crate) fn liste_sure(valeur: &str) -> bool {
+    if valeur.starts_with('-') {
+        return true;
+    }
+    !valeur.starts_with(['+', '^'])
+        && valeur
+            .split(',')
+            .map(str::trim)
+            .all(|e| !e.is_empty() && faiblesse_entree(e).is_none())
+}
+
 /// La première valeur d'un réglage dans la configuration lue dans l'ordre de sshd : (fichier lu, mot écrit, valeur
 /// telle qu'écrite). La casse est gardée : les noms GSSAPI finissent par du base64.
 fn premiere_valeur<'a>(segments: &'a [(String, String)], noms: &[&str]) -> Option<(usize, &'a str, &'a str)> {
@@ -285,6 +299,7 @@ pub(super) fn juger_algorithmes(
             ),
             &commandes_ajout(&lignes),
         )
+        .annulable(vec![crate::optimiser::Geste::fichier(SSHD_VANGUARD)])
     } else {
         let ou: Vec<String> = trouvailles
             .iter()

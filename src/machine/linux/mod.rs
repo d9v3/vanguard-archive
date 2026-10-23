@@ -7,6 +7,7 @@ use std::process::Command;
 
 use super::unix::{configuration_sshd, mots_de_passe_sshd, mots_de_passe_vides_sshd, valeur_sshd};
 use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
+use crate::optimiser::Geste;
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
@@ -29,8 +30,10 @@ mod regles;
 pub(crate) mod veilleur;
 pub(crate) mod zstd;
 
+pub(crate) use algorithmes_ssh::liste_sure;
 use docker::*;
 use durcissement::*;
+pub(crate) use durcissement::{SYSCTL_VANGUARD, cle_durcie, valeur_durcie};
 pub use maj::mises_a_jour_completes;
 
 /// Les CVE qui touchent les paquets de cet ordinateur (Arch) : pour marquer les dernières failles exploitées.
@@ -42,7 +45,7 @@ use persistance::*;
 use privileges::*;
 
 /// Ajouts de Vanguard à la configuration de sshd (lu en premier : sshd garde la première valeur trouvée).
-const SSHD_VANGUARD: &str = "/etc/ssh/sshd_config.d/00-vanguard.conf";
+pub(crate) const SSHD_VANGUARD: &str = "/etc/ssh/sshd_config.d/00-vanguard.conf";
 pub const NOM: &str = "Linux";
 
 /// Omarchy installé : ses outils de mise à jour et d'installation passent avant pacman (instantané, migrations,
@@ -416,7 +419,8 @@ fn pare_feu() -> Constat {
                     "Block incoming connections by default"
                 ),
                 &["sudo ufw default deny incoming"],
-            ),
+            )
+            .protection(),
             Some(p) => ok(
                 "Pare-feu",
                 trf!(
@@ -443,7 +447,8 @@ fn pare_feu() -> Constat {
                     "Set the default zone to “public”"
                 ),
                 &["sudo firewall-cmd --set-default-zone=public"],
-            ),
+            )
+            .protection(),
             Some(z) => ok(
                 "Pare-feu",
                 trf!(
@@ -493,6 +498,7 @@ fn pare_feu() -> Constat {
                 "sudo systemctl enable --now ufw",
             ],
         )
+        .protection()
     }
 }
 
@@ -553,6 +559,7 @@ fn cups_browsed_expose() -> Constat {
         ),
         &["sudo systemctl disable --now cups-browsed"],
     )
+    .annulable(vec![Geste::unite("cups-browsed")])
 }
 
 /// Services qui écoutent sur le réseau (pas seulement en local), en TCP et en UDP.
@@ -615,7 +622,8 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                         "sudo systemctl daemon-reload",
                         "sudo systemctl restart ollama",
                     ],
-                ),
+                )
+                .annulable(vec![Geste::fichier(crate::optimiser::OLLAMA_VANGUARD)]),
                 // Un seul conseil par programme, même s'il ouvre un port TCP et un port UDP.
                 "steam" if !deja_conseille.insert("steam") => constat,
                 "steam" => match remote_play_steam() {
@@ -673,7 +681,7 @@ fn enable_streaming(vdf: &str) -> Option<bool> {
 
 /// Vérifie puis recharge sshd. « try-reload-or-restart » : sur Ubuntu, ssh.socket ne démarre sshd qu'à la première
 /// connexion, et « reload » d'un service arrêté échouait alors que la configuration était écrite.
-const RECHARGER_SSHD: &str = "sudo sshd -t && sudo systemctl try-reload-or-restart sshd";
+pub(crate) const RECHARGER_SSHD: &str = "sudo sshd -t && sudo systemctl try-reload-or-restart sshd";
 
 /// Le serveur SSH tourne-t-il ? « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint. Ubuntu (22.10+) le
 /// lance à la demande par ssh.socket : le service paraît arrêté alors que le port 22 accepte les connexions.
@@ -717,7 +725,8 @@ fn ssh_serveur() -> Constat {
                 &format!("echo 'PermitEmptyPasswords no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
                 RECHARGER_SSHD,
             ],
-        );
+        )
+        .annulable(vec![Geste::fichier(SSHD_VANGUARD)]);
     }
     if valeur_sshd(&conf, "PermitRootLogin").as_deref() == Some("yes") {
         return alerte(
@@ -731,7 +740,8 @@ fn ssh_serveur() -> Constat {
                 &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
                 RECHARGER_SSHD,
             ],
-        );
+        )
+        .annulable(vec![Geste::fichier(SSHD_VANGUARD)]);
     }
     if mots_de_passe_sshd(&conf) {
         let a_des_cles = std::fs::metadata(format!("{}/.ssh/authorized_keys", home())).is_ok_and(|m| m.len() > 0);
@@ -751,6 +761,7 @@ fn ssh_serveur() -> Constat {
                     RECHARGER_SSHD,
                 ],
             )
+            .annulable(vec![Geste::fichier(SSHD_VANGUARD)])
         } else {
             // Sans clé autorisée, couper les mots de passe t'enfermerait dehors.
             c.manuel(
@@ -793,6 +804,7 @@ fn juger_ports_ssh(conf: &str) -> Option<Constat> {
                 RECHARGER_SSHD,
             ],
         )
+        .annulable(vec![Geste::fichier(SSHD_VANGUARD)])
     })
 }
 
@@ -842,7 +854,8 @@ fn juger_ssh_secondaire(conf: &str) -> Option<Constat> {
         .corriger(
             tr!("Les resserrer (le réglage de sshd)", "Tighten them (sshd's setting)"),
             &commandes,
-        ),
+        )
+        .annulable(vec![Geste::fichier(SSHD_VANGUARD)]),
     )
 }
 

@@ -124,6 +124,7 @@ pub(super) fn systeme_signe() -> Vec<Constat> {
             tr!("Réactiver la validation des bibliothèques", "Turn library validation back on"),
             &["sudo defaults delete /Library/Preferences/com.apple.security.libraryvalidation DisableLibraryValidation"],
         )
+        .protection()
     } else {
         ok(
             "Protection système",
@@ -234,6 +235,7 @@ pub(super) fn airdrop() -> Option<Constat> {
                 "killall sharingd 2>/dev/null; true",
             ],
         )
+        .annulable(vec![crate::optimiser::Geste::preference("com.apple.sharingd", "DiscoverableMode")])
     } else {
         ok("AirDrop", trf!("AirDrop : {mode}.", "AirDrop: {mode}."))
     })

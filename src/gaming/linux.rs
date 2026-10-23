@@ -7,12 +7,11 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::process::Command;
 
-use super::annulation::Valeur;
 use super::{Element, element, proposer};
-use crate::commande::sh_chaine;
 use crate::machine::linux::natif::present;
 use crate::machine::linux::paquets::{flatpak_installe, installer_flatpak, installes_parmi, noms_installes};
 use crate::machine::linux::{Paquets, natif};
+use crate::optimiser::Geste;
 use crate::ui::*;
 
 /// Fabricant de la carte graphique principale, lu dans /sys (sans lspci).
@@ -386,66 +385,27 @@ fn composants(gestion: Paquets) -> Vec<Element> {
 
 /// Les fichiers de Vanguard, à son nom : jamais 80-gamer.conf ou ntsync.conf, que la personne ou sa distribution ont pu
 /// écrire avant lui et qu'il écraserait sans pouvoir les rendre.
-const SYSCTL_JEUX: &str = "/etc/sysctl.d/80-vanguard-jeux.conf";
-const NTSYNC_CONF: &str = "/etc/modules-load.d/vanguard-ntsync.conf";
-
-/// Les valeurs d'un réglage telles qu'elles sont maintenant : notées avant de l'appliquer, relues après l'avoir remis.
-pub(super) fn valeurs(id: &str) -> Vec<Valeur> {
-    let fichier = |c: &str| (c.to_string(), std::fs::read_to_string(c).ok());
-    match id {
-        "max_map_count" => vec![
-            (
-                "vm.max_map_count".into(),
-                std::fs::read_to_string("/proc/sys/vm/max_map_count")
-                    .ok()
-                    .map(|t| t.trim().to_string()),
-            ),
-            fichier(SYSCTL_JEUX),
-        ],
-        // Chargé maintenant (ou compris dans le noyau), et le fichier qui le charge au démarrage.
-        "ntsync" => vec![
-            (
-                "ntsync".into(),
-                Path::new("/sys/module/ntsync").exists().then(|| "charge".to_string()),
-            ),
-            fichier(NTSYNC_CONF),
-        ],
-        _ => Vec::new(),
-    }
-}
+pub(crate) const SYSCTL_JEUX: &str = "/etc/sysctl.d/80-vanguard-jeux.conf";
+pub(crate) const NTSYNC_CONF: &str = "/etc/modules-load.d/vanguard-ntsync.conf";
 
 /// Un fichier que Vanguard pose dans /etc, noté sous son nom d'aujourd'hui ou sous l'ancien (note écrite avant le
-/// changement de nom, `passage`) : c'est le fichier noté qui se retire ou se remet.
+/// changement de nom, `passage`).
 fn fichier_de_vanguard(nom: &str) -> bool {
     [SYSCTL_JEUX, NTSYNC_CONF]
         .iter()
         .any(|f| crate::passage::les_deux(f).iter().any(|n| n == nom))
 }
 
-/// Les commandes qui remettent les valeurs notées : les fichiers de Vanguard d'abord (retirés, ou rendus à leur
-/// contenu d'avant), puis la valeur du noyau, puis le module s'il n'était pas chargé (refusé tant qu'un jeu
-/// l'utilise : la note reste alors pour réessayer).
-pub(super) fn remettre_commandes(_id: &str, avant: &[Valeur]) -> Vec<String> {
-    let mut fichiers = Vec::new();
-    let mut reste = Vec::new();
-    for (nom, v) in avant {
-        match (nom.as_str(), v) {
-            (n, None) if fichier_de_vanguard(n) => fichiers.push(format!("sudo rm -f {nom}")),
-            (n, Some(contenu)) if fichier_de_vanguard(n) => {
-                fichiers.push(format!(
-                    "printf '%s' {} | sudo tee {nom} >/dev/null",
-                    sh_chaine(contenu)
-                ));
-            }
-            ("vm.max_map_count", Some(n)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => {
-                reste.push(format!("sudo sysctl -w vm.max_map_count={n} >/dev/null"));
-            }
-            ("ntsync", None) => reste.push("sudo modprobe -r ntsync".into()),
-            _ => {}
-        }
-    }
-    fichiers.extend(reste);
-    fichiers
+/// Une valeur notée par jeux.json, dans la forme d'Optimiser : son geste et sa valeur (le contenu d'un fichier, la
+/// valeur du noyau, « charge » pour un module chargé). `None` : un nom que Vanguard n'a jamais noté.
+pub(super) fn convertir(nom: &str, v: Option<&str>) -> Option<(Geste, Option<String>)> {
+    let geste = match nom {
+        "vm.max_map_count" => Geste::sysctl(nom),
+        "ntsync" => Geste::module(nom),
+        n if fichier_de_vanguard(n) => Geste::fichier(n),
+        _ => return None,
+    };
+    Some((geste, v.map(str::to_string)))
 }
 
 fn reglages() -> Vec<Element> {
@@ -471,7 +431,10 @@ fn reglages() -> Vec<Element> {
                 format!("sudo sysctl -p {SYSCTL_JEUX} >/dev/null"),
             ],
         )
-        .annulable("max_map_count", valeurs("max_map_count")),
+        .annulable(
+            "max_map_count",
+            vec![Geste::fichier(SYSCTL_JEUX), Geste::sysctl("vm.max_map_count")],
+        ),
     );
     // ntsync : synchronisation de Wine/Proton faite par le noyau (Linux 6.14 et plus), plus rapide.
     let module_present = module_existe("ntsync").unwrap_or_else(|| reussit("modinfo", &["ntsync"]));
@@ -488,7 +451,7 @@ fn reglages() -> Vec<Element> {
                 "sudo modprobe ntsync".into(),
             ],
         )
-        .annulable("ntsync", valeurs("ntsync")));
+        .annulable("ntsync", vec![Geste::fichier(NTSYNC_CONF), Geste::module("ntsync")]));
     }
     l
 }
@@ -532,7 +495,7 @@ pub(super) fn menu() {
             &reglages(),
             true,
         ),
-        Some("3") => super::remettre(remettre_commandes, |id, _| valeurs(id)),
+        Some("3") => super::remettre(),
         _ => {}
     }
 }
@@ -596,50 +559,21 @@ mod tests {
         assert!(SYSCTL_JEUX.contains("vanguard") && NTSYNC_CONF.contains("vanguard"));
     }
 
-    // Fichier absent avant : retiré ; valeur du noyau remise telle quelle ; module qui n'était pas chargé : retiré.
+    /// Les notes de jeux.json se convertissent en gestes d'Optimiser, sous le nom d'aujourd'hui comme sous l'ancien ;
+    /// un nom jamais noté par Vanguard ne se convertit pas.
     #[test]
-    fn fichier_absent_retire() {
-        let avant = [
-            ("vm.max_map_count".to_string(), Some("1048576".to_string())),
-            (SYSCTL_JEUX.to_string(), None),
-        ];
+    fn notes_d_avant_converties() {
         assert_eq!(
-            remettre_commandes("max_map_count", &avant),
-            [
-                format!("sudo rm -f {SYSCTL_JEUX}"),
-                "sudo sysctl -w vm.max_map_count=1048576 >/dev/null".to_string(),
-            ]
+            convertir("vm.max_map_count", Some("65530")),
+            Some((Geste::sysctl_chemin("vm/max_map_count"), Some("65530".into())))
         );
-        let avant = [("ntsync".to_string(), None), (NTSYNC_CONF.to_string(), None)];
+        assert_eq!(convertir("ntsync", None), Some((Geste::module("ntsync"), None)));
+        let ancien = crate::passage::les_deux(SYSCTL_JEUX)[1].clone();
         assert_eq!(
-            remettre_commandes("ntsync", &avant),
-            [
-                format!("sudo rm -f {NTSYNC_CONF}"),
-                "sudo modprobe -r ntsync".to_string()
-            ]
+            convertir(&ancien, Some("vm.max_map_count = 262144\n")),
+            Some((Geste::fichier(&ancien), Some("vm.max_map_count = 262144\n".into())))
         );
-        // Une valeur qui n'est pas un nombre n'entre jamais dans la commande.
-        let piege = [("vm.max_map_count".to_string(), Some("1; rm -rf ~".to_string()))];
-        assert_eq!(remettre_commandes("max_map_count", &piege), Vec::<String>::new());
-    }
-
-    // Fichier de Vanguard déjà là avant (posé à la main, ou par une autre version) : rendu octet pour octet, apostrophes
-    // et sauts de ligne compris. La commande est jouée pour de vrai, sur une copie dans un dossier jetable.
-    #[test]
-    fn fichier_existant_rendu_tel_quel() {
-        let d = std::env::temp_dir().join(format!("vanguard-jeux-linux-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let copie = d.join("80-vanguard-jeux.conf");
-        let contenu = "# réglé à la main, l'été\nvm.max_map_count = 262144\n";
-        let avant = [(SYSCTL_JEUX.to_string(), Some(contenu.to_string()))];
-        let commandes = remettre_commandes("max_map_count", &avant);
-        assert_eq!(commandes.len(), 1);
-        let jouee = commandes[0]
-            .replace("sudo ", "")
-            .replace(SYSCTL_JEUX, &copie.display().to_string());
-        assert!(Command::new("bash").args(["-c", &jouee]).status().unwrap().success());
-        assert_eq!(std::fs::read_to_string(&copie).unwrap(), contenu);
-        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(convertir("/etc/sysctl.d/99-autre.conf", None), None);
     }
 
     #[test]

@@ -9,6 +9,23 @@ delivered just before it. Only the latest version has its download page; every v
 
 ## Next version
 
+- **Check-up fixes can be undone, one by one.** Before each fix (Linux, Windows, macOS), Vanguard reads the previous
+  state of what it changes (sysctl or sshd file written by Vanguard, kernel settings, service, network time, rights
+  of a personal file, registry value, preference) and notes it, sealed, in reglages.json, like Optimize; each value
+  is checked against a closed list before being put back as administrator. “What Vanguard changed” undoes a fix
+  marked “undoable”, then reads the state back: restored, or not (and why). A fix whose previous state cannot be
+  read is called “not undoable” before it is applied; one that turns a protection back on (firewall, antivirus,
+  BitLocker, UAC, SELinux, Gatekeeper) is never undone. “Put everything back” now undoes check-up fixes, Optimize,
+  Gaming, blocks and public Wi-Fi mode, from the most recent to the oldest, in one administrator request. Gaming
+  settings go through the same mechanism: their notes in jeux.json, which was not sealed, are taken over without
+  loss.
+- **Undoing never reopens what a fix closed.** A note for the sysctl and sshd files Vanguard writes is put back
+  only if it holds the safe values Vanguard writes there (“ptrace_scope = 0”, “PermitRootLogin yes” or an added weak
+  algorithm are refused), and their content is shown before the question; a note aimed at UAC is refused on
+  Windows. jeux.json is taken over only once, never over an adopted reglages.json. Fixes from the same “[a]ll”
+  that touch the same file share one note: undoing one marks them all undone. Two notes on the same target undone
+  together are both put back, without a false ✖. A service enabled but stopped is said not undoable rather than
+  falsely restored, and fixed ~/.ssh rights can be undone.
 - **A problem recognized by its rule and its object, no longer by its translated text.** Open ports, suspicious
   autostarts, browser extensions, forgotten accounts or new administrators, stalkerware, remote control tools,
   outdated software and the VANGUARD key's record now carry a key (“LNX-RES-001|port:8080/tcp:python3”): switching

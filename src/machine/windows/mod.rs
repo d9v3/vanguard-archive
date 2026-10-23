@@ -444,7 +444,8 @@ fn pare_feu() -> Constat {
                 "Turn the Windows firewall back on for every profile"
             ),
             &["Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True"],
-        ),
+        )
+        .protection(),
     }
 }
 
@@ -547,7 +548,8 @@ fn antivirus() -> Vec<Constat> {
                     "Turn real-time protection back on"
                 ),
                 &["Set-MpPreference -DisableRealtimeMonitoring $false"],
-            ),
+            )
+            .protection(),
         );
     } else {
         c.push(ok(
@@ -589,6 +591,7 @@ fn juger_cloud(valeur: Option<&str>) -> Option<Constat> {
             ),
             &["Set-MpPreference -MAPSReporting Advanced"],
         )
+        .protection()
     })
 }
 
@@ -899,7 +902,8 @@ fn juger_bitlocker(etat: Option<&str>) -> Constat {
                 "Resume BitLocker (a BIOS update often suspended it and did not resume it)"
             ),
             &["Resume-BitLocker -MountPoint 'C:'"],
-        ),
+        )
+        .protection(),
         Some("8") => alerte(
             "Chiffrement",
             Niveau::Moyen,
@@ -1270,7 +1274,8 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
                     "Turn off UPnP discovery (SSDP); keep it if you cast to a TV or console"
                 ),
                 &["Stop-Service SSDPSRV -Force", "Set-Service SSDPSRV -StartupType Disabled"],
-            ),
+            )
+            .annulable(vec![crate::optimiser::Geste::service("SSDPSRV")]),
             _ => constat,
         });
     }

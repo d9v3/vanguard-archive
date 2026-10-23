@@ -174,7 +174,8 @@ fn pare_feu() -> Constat {
         .corriger(
             tr!("Activer le pare-feu de macOS", "Turn on the macOS firewall"),
             &[format!("sudo {PARE_FEU} --setglobalstate on")],
-        ),
+        )
+        .protection(),
         None => impossible("Pare-feu", tr!("socketfilterfw illisible", "socketfilterfw unreadable")),
     }
 }
@@ -205,6 +206,7 @@ fn mode_furtif() -> Constat {
         tr!("Activer le mode furtif", "Turn on stealth mode"),
         &[format!("sudo {PARE_FEU} --setstealthmode on")],
     )
+    .protection()
 }
 
 /// Service de partage de macOS derrière un port, et où le couper.
@@ -356,7 +358,8 @@ fn protection_systeme() -> Vec<Constat> {
             .corriger(
                 tr!("Réactiver Gatekeeper", "Turn Gatekeeper back on"),
                 &["sudo spctl --global-enable 2>/dev/null || sudo spctl --master-enable"],
-            ),
+            )
+            .protection(),
         ),
         None => constats.push(impossible("Protection système", tr!("spctl illisible", "spctl unreadable"))),
     }

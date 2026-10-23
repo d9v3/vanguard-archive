@@ -73,6 +73,27 @@ pub enum Changement {
     },
     /// Préférence de Microsoft Defender (voir `defender`). Valeur : « mp:1 » ; `None`, une règle ASR jamais réglée.
     Defender { pref: Pref, cible: u32 },
+    /// Le mode d'alimentation actif (réglage pour jouer) : son GUID, remis par `powercfg /setactive`, sans fenêtre
+    /// administrateur.
+    Alimentation,
+}
+
+/// Les services qu'une correction du bilan désactive et qu'une note peut faire remettre.
+const SERVICES: [&str; 1] = ["SSDPSRV"];
+
+/// Un GUID de mode d'alimentation (« 381b4222-f694-41f0-9685-ff5bb260df2e ») : il entre tel quel dans la commande.
+fn mode_valide(t: &str) -> bool {
+    let parties: Vec<usize> = t.split('-').map(str::len).collect();
+    parties == [8, 4, 4, 4, 12] && t.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// Le mode d'alimentation actif, lu par powercfg ; `None` : illisible.
+fn alimentation_lue() -> Option<String> {
+    let r = crate::commande::lancer(
+        Command::new(crate::commande::systeme32("powercfg")).arg("/getactivescheme"),
+        15,
+    )?;
+    crate::gaming::windows::guid_alimentation(&r.sortie)
 }
 
 /// Liste de serveurs normalisée : « 1.1.1.1,1.0.0.1 », quel que soit le séparateur écrit.
@@ -259,6 +280,83 @@ impl Changement {
                 Some(valeur.map_or_else(String::new, |v| hex(&v.bytes)))
             }
             Changement::Defender { pref, .. } => defender::etat().valeur(*pref),
+            Changement::Alimentation => alimentation_lue(),
+        }
+    }
+
+    /// La valeur d'avant, relevée avant une correction ou un réglage pour jouer : `None` si elle ne se lit pas. Un
+    /// service ou un mode d'alimentation se lit toujours ; une valeur du registre absente est une valeur (retirée
+    /// pour annuler).
+    pub fn relever(&self) -> Option<Valeur> {
+        let v = self.lire();
+        match self {
+            Changement::Service { .. } | Changement::Alimentation if v.is_none() => None,
+            _ => Some(v),
+        }
+    }
+
+    /// Le changement que désigne un geste noté (`annulables::Geste`), s'il vise une cible de la liste fermée : une
+    /// correction native de la table (DWORD sous HKLM), un service de `SERVICES`, une valeur des réglages pour jouer.
+    pub fn depuis_geste(geste: &str) -> Option<Changement> {
+        let mut morceaux = geste.split('|');
+        match (
+            morceaux.next()?,
+            morceaux.next(),
+            morceaux.next(),
+            morceaux.next(),
+            morceaux.next(),
+        ) {
+            ("natif", Some(id), None, None, None) => {
+                let c = crate::machine::windows::corrections::analyser(&format!(
+                    "{}{id}",
+                    crate::machine::windows::corrections::PREFIXE
+                ))?;
+                // Une note qui viserait l'UAC ne vient pas de Vanguard, qui ne la défait jamais : la remettre
+                // l'éteindrait, en administrateur.
+                if crate::machine::windows::corrections::PROTECTIONS.contains(&c.id) {
+                    return None;
+                }
+                match c.geste {
+                    crate::machine::windows::corrections::Geste::Dword { cle, valeur, donnee } => {
+                        Some(Changement::Registre {
+                            racine: Racine::Hklm,
+                            chemin: cle,
+                            nom: valeur,
+                            cible: Val::Dword(donnee),
+                            defaut: None,
+                        })
+                    }
+                    crate::machine::windows::corrections::Geste::PointDeRestauration => None,
+                }
+            }
+            ("service", Some(nom), None, None, None) => {
+                SERVICES.iter().find(|s| **s == nom).map(|nom| Changement::Service {
+                    nom,
+                    cible: 4,
+                    defaut: 3,
+                })
+            }
+            ("registre", Some(ruche), Some(cle), Some(nom), None) => crate::gaming::windows::VALEURS
+                .iter()
+                .find(|v| {
+                    v.2 == cle
+                        && v.3 == nom
+                        && (v.1 == crate::gaming::windows::Ruche::Machine) == (ruche == "hklm")
+                        && matches!(ruche, "hklm" | "hkcu")
+                })
+                .map(|&(_, r, chemin, nom, dw)| Changement::Registre {
+                    racine: if r == crate::gaming::windows::Ruche::Machine {
+                        Racine::Hklm
+                    } else {
+                        Racine::Hkcu
+                    },
+                    chemin,
+                    nom,
+                    cible: if dw { Val::Dword(0) } else { Val::Texte("") },
+                    defaut: None,
+                }),
+            ("alimentation", None, None, None, None) => Some(Changement::Alimentation),
+            _ => None,
         }
     }
 
@@ -273,6 +371,8 @@ impl Changement {
             Changement::Dns { carte, cible } => format!("{carte}\n{}", cible.as_deref().unwrap_or("?")),
             Changement::Demarrage { cible, .. } => cible.clone().unwrap_or_else(|| "?".to_string()),
             Changement::Defender { cible, .. } => format!("mp:{cible}"),
+            // Rebâti pour être annulé seulement.
+            Changement::Alimentation => "?".to_string(),
         })
     }
 
@@ -288,6 +388,8 @@ impl Changement {
             Changement::Demarrage { .. } => Some(String::new()),
             // Defender d'un Windows neuf : coupé.
             Changement::Defender { .. } => Some("mp:0".to_string()),
+            // Pas de « Windows neuf » pour un réglage pour jouer : sans note admise, rien ne se remet.
+            Changement::Alimentation => Some("?".to_string()),
         }
     }
 
@@ -342,10 +444,14 @@ impl Changement {
     /// un texte libre venu d'un fichier que tout programme du compte peut réécrire.
     pub fn valeur_admise(&self, v: Option<&str>) -> bool {
         match self {
-            Changement::Registre { cible, .. } => match (v.map(decoder), cible) {
+            Changement::Registre { cible, racine, .. } => match (v.map(decoder), cible) {
                 (None, _) | (Some(Some(Lue::Dword(_))), Val::Dword(_)) => true,
                 (Some(Some(Lue::Texte(t))), Val::Texte(c)) => {
-                    t == *c || (t.len() <= 64 && t.chars().all(|x| x.is_ascii_alphanumeric() || " ._:-".contains(x)))
+                    t == *c
+                        || (t.len() <= 64 && t.chars().all(|x| x.is_ascii_alphanumeric() || " ._:-".contains(x)))
+                        // Dans le compte, écrit par Vanguard lui-même, sans fenêtre administrateur : un texte
+                        // court sans caractère de contrôle (« VRROptimizeEnable=0; »).
+                        || (*racine == Racine::Hkcu && t.len() <= 256 && !t.chars().any(char::is_control))
                 }
                 _ => false,
             },
@@ -373,6 +479,7 @@ impl Changement {
                     .and_then(|n| n.parse::<u32>().ok())
                     .is_some_and(|n| n <= 6)
             }),
+            Changement::Alimentation => v.is_some_and(mode_valide),
         }
     }
 
@@ -435,6 +542,7 @@ impl Changement {
                 }
             }
             Changement::Defender { pref, .. } => defender::decrire(*pref, v),
+            Changement::Alimentation => format!("powercfg /setactive {}", v.unwrap_or("?")),
         }
     }
 
@@ -447,6 +555,7 @@ impl Changement {
                 ..
             } | Changement::Cle { .. }
                 | Changement::Demarrage { machine: false, .. }
+                | Changement::Alimentation
         )
     }
 
@@ -499,6 +608,14 @@ impl Changement {
                     }
                 }
             }
+            // powercfg, sans droits : seul un GUID de la bonne forme entre dans la commande.
+            Changement::Alimentation => v.filter(|g| mode_valide(g)).is_some_and(|g| {
+                crate::commande::lancer(
+                    Command::new(crate::commande::systeme32("powercfg")).args(["/setactive", g]),
+                    15,
+                )
+                .is_some_and(|r| r.code == Some(0))
+            }),
             Changement::Service { .. }
             | Changement::Dns { .. }
             | Changement::Demarrage { machine: true, .. }
@@ -549,7 +666,7 @@ impl Changement {
                 ))
             }
             // Écrits dans le compte de la personne par Vanguard lui-même (`ecrire_ici`).
-            Changement::Cle { .. } | Changement::Demarrage { machine: false, .. } => None,
+            Changement::Cle { .. } | Changement::Demarrage { machine: false, .. } | Changement::Alimentation => None,
             Changement::Dns { carte, .. } => {
                 let (id, reste) = v?.split_once('\n')?;
                 if id != carte || !guid_valide(carte) {
@@ -666,9 +783,10 @@ pub fn au_demarrage() -> Vec<Programme> {
     l
 }
 
-/// Applique des lots de changements (un lot par réglage) et dit lesquels ont réussi. La fenêtre administrateur passe
-/// d'abord, point de restauration en tête : refusée, rien n'est changé, pas même dans le compte de la personne.
-pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
+/// Applique des lots de changements (un lot par réglage) et dit lesquels ont réussi, puis chaque groupe de `en_plus`
+/// (les commandes d'autres annulations, dans la même fenêtre). La fenêtre administrateur passe d'abord, point de
+/// restauration en tête : refusée, rien n'est changé, pas même dans le compte de la personne.
+pub fn ecrire_avec(lots: &[Vec<(&Changement, Valeur)>], en_plus: &[Vec<String>]) -> (Vec<bool>, Vec<bool>) {
     // Le SID de la personne ne sert (et n'est lu) que pour une stratégie de son compte.
     let sid = lots
         .iter()
@@ -689,17 +807,23 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
         })
         .collect();
     let mut resultats = vec![true; lots.len()];
-    if !admin.is_empty() {
+    let mut plus = vec![true; en_plus.len()];
+    if !admin.is_empty() || !en_plus.is_empty() {
         let point = crate::reparer::point_restauration(tr!("réglages", "settings")).map(|(_, p)| p);
         let mut groupes: Vec<Vec<String>> = point.iter().map(|p| vec![p.clone()]).collect();
         groupes.extend(admin.iter().map(|(_, c)| c.clone()));
+        groupes.extend(en_plus.iter().cloned());
         let mut r = crate::machine::appliquer_chacune(&groupes);
         if point.is_some() && !r.remove(0) {
             // Point de restauration refusé, ou fenêtre administrateur refusée : on ne touche à rien d'autre.
-            return vec![false; lots.len()];
+            return (vec![false; lots.len()], vec![false; en_plus.len()]);
         }
+        let reste = r.split_off(admin.len().min(r.len()));
         for ((i, _), ok) in admin.iter().zip(r) {
             resultats[*i] = ok;
+        }
+        for (p, ok) in plus.iter_mut().zip(reste) {
+            *p = ok;
         }
     }
     for (i, lot) in lots.iter().enumerate() {
@@ -719,7 +843,7 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
     {
         defender::oublier();
     }
-    resultats
+    (resultats, plus)
 }
 
 /// Après coup : l'Explorateur relit ses réglages à son prochain démarrage ; on propose de le relancer.

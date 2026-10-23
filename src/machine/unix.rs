@@ -35,6 +35,7 @@ pub(super) fn secret_expose(mode: u32) -> bool {
 pub(super) fn fichiers_secrets(maison: &Path, dossier_ouvert: &str) -> Vec<Constat> {
     let mut exposes = Vec::new();
     let mut commandes = Vec::new();
+    let mut gestes = Vec::new();
     for nom in SECRETS {
         let chemin = maison.join(nom);
         // Droits du fichier lui-même, pas du lien : un lien symbolique (stow, chezmoi…) a toujours 777,
@@ -45,6 +46,7 @@ pub(super) fn fichiers_secrets(maison: &Path, dossier_ouvert: &str) -> Vec<Const
         if secret_expose(meta.permissions().mode()) {
             exposes.push(format!("~/{nom}"));
             commandes.push(format!("chmod {} ~/{nom}", if meta.is_dir() { "700" } else { "600" }));
+            gestes.push(crate::optimiser::Geste::droits(&chemin));
         }
     }
     let mut constats = Vec::new();
@@ -63,19 +65,24 @@ pub(super) fn fichiers_secrets(maison: &Path, dossier_ouvert: &str) -> Vec<Const
             .corriger(
                 tr!("Réserver ces fichiers à toi seul", "Restrict these files to you only"),
                 &cmds,
-            ),
+            )
+            .annulable(gestes),
         );
     }
     // Le dossier personnel lui-même (macOS le ferme d'origine, droits 750) : ouvert en lecture, il laisse voir tous tes
     // fichiers aux autres comptes.
     if std::fs::metadata(maison).is_ok_and(|m| m.permissions().mode() & 0o007 != 0) {
-        constats.push(alerte("Fichiers secrets", Niveau::Info, dossier_ouvert).corriger(
-            tr!(
-                "Fermer ton dossier personnel aux autres comptes",
-                "Close your home folder to the other accounts"
-            ),
-            &["chmod 750 ~"],
-        ));
+        constats.push(
+            alerte("Fichiers secrets", Niveau::Info, dossier_ouvert)
+                .corriger(
+                    tr!(
+                        "Fermer ton dossier personnel aux autres comptes",
+                        "Close your home folder to the other accounts"
+                    ),
+                    &["chmod 750 ~"],
+                )
+                .annulable(vec![crate::optimiser::Geste::droits(maison)]),
+        );
     }
     if constats.is_empty() {
         constats.push(ok(

@@ -3,7 +3,7 @@
 use super::*;
 
 /// Réglages du noyau posés par Vanguard, gardés au redémarrage.
-pub(super) const SYSCTL_VANGUARD: &str = "/etc/sysctl.d/99-vanguard.conf";
+pub(crate) const SYSCTL_VANGUARD: &str = "/etc/sysctl.d/99-vanguard.conf";
 
 /// Réglages de durcissement du noyau (lisibles sans droits) : (réglage, valeur sûre minimale, rôle en français
 /// et en anglais ; une constante ne peut pas choisir la langue, `reglages_faibles` le fait).
@@ -162,6 +162,30 @@ fn interfaces_ipv6() -> Vec<(String, i64)> {
         .collect()
 }
 
+/// Une clé (« kernel/kptr_restrict ») que la correction du noyau durci peut changer : une note qui en désigne une
+/// autre ne se remet pas.
+pub(crate) fn cle_durcie(cle: &str) -> bool {
+    DURCISSEMENT.iter().any(|(c, _, _)| *c == cle) || INTERDITS.iter().any(|(c, _, _, _)| *c == cle)
+}
+
+/// Une ligne que la correction du noyau écrit dans son fichier : une clé du durcissement à sa valeur sûre, ou les
+/// redirections IPv6 coupées. Une note qui remettrait autre chose dans ce fichier lu en root au démarrage
+/// (« ptrace_scope = 0 ») ne vient pas de Vanguard : elle affaiblirait le noyau au lieu de le remettre.
+pub(crate) fn valeur_durcie(cle: &str, v: i64) -> bool {
+    if let Some((_, min, _)) = DURCISSEMENT.iter().find(|(c, _, _)| *c == cle) {
+        return v >= *min;
+    }
+    if let Some((_, _, sure, _)) = INTERDITS.iter().find(|(c, _, _, _)| *c == cle) {
+        return v == *sure;
+    }
+    let ipv6 = cle == REDIRECTIONS_IPV6
+        || cle
+            .strip_prefix("net/ipv6/conf/")
+            .and_then(|r| r.strip_suffix("/accept_redirects"))
+            .is_some_and(|i| !i.is_empty() && !i.contains('/'));
+    ipv6 && v == 0
+}
+
 /// Réglages trop faibles parmi les valeurs lues : (chemin, valeur lue, valeur sûre, rôle).
 pub(super) fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'static str, i64, i64, &'static str)> {
     let langue = |(fr, en): (&'static str, &'static str)| if crate::langue::anglais() { en } else { fr };
@@ -245,6 +269,27 @@ pub(super) fn durcissement_noyau() -> Constat {
         }))
         .collect::<Vec<_>>(),
     )
+    .annulable(gestes_noyau(&faibles, &interfaces_ipv6()))
+}
+
+/// Ce que la correction du noyau change, pour la défaire : son fichier, chaque réglage faible, et la redirection IPv6
+/// de chaque interface qui la suit (le motif « * » du fichier, une clé par interface au noyau).
+fn gestes_noyau(faibles: &[(&str, i64, i64, &str)], interfaces: &[(String, i64)]) -> Vec<crate::optimiser::Geste> {
+    use crate::optimiser::Geste;
+    let mut g = vec![Geste::fichier(SYSCTL_VANGUARD)];
+    for (cle, ..) in faibles {
+        if *cle == REDIRECTIONS_IPV6 {
+            g.extend(
+                interfaces
+                    .iter()
+                    .filter(|(_, v)| *v == 1)
+                    .map(|(i, _)| Geste::sysctl_chemin(&format!("net/ipv6/conf/{i}/accept_redirects"))),
+            );
+        } else {
+            g.push(Geste::sysctl_chemin(cle));
+        }
+    }
+    g
 }
 
 /// Contenu de 99-vanguard.conf : les réglages déjà présents, mis à jour ou complétés par les nouveaux.
@@ -293,7 +338,8 @@ pub(super) fn module_securite() -> Constat {
             .corriger(
                 tr!("Repasser SELinux en mode strict", "Put SELinux back in enforcing mode"),
                 &["sudo setenforce 1"],
-            ),
+            )
+            .protection(),
             Err(_) => impossible(
                 "AppArmor/SELinux",
                 tr!("état de SELinux illisible", "SELinux state unreadable"),

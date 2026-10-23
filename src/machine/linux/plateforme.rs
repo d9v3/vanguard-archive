@@ -403,6 +403,7 @@ pub(super) fn juger_journal_audit(installe: bool, actif: bool) -> Option<Constat
             tr!("Le lancer, et le garder au démarrage", "Start it, and keep it at boot"),
             &["sudo systemctl enable --now auditd"],
         )
+        .annulable(vec![crate::optimiser::Geste::unite("auditd")])
     })
 }
 

@@ -84,6 +84,7 @@ mod tests {
                 commandes: vec![],
                 automatique: true,
                 bloque: None,
+                defaire: crate::machine::Defaire::Inconnu,
             }),
             verifie,
             regle: "",

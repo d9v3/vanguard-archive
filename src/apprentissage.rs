@@ -475,6 +475,7 @@ mod tests {
                 commandes: vec!["sudo x".into()],
                 automatique: true,
                 bloque: None,
+                defaire: crate::machine::Defaire::Inconnu,
             }),
             verifie: true,
             regle: "",

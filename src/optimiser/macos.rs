@@ -25,7 +25,28 @@ pub enum Changement {
     /// Agent de launchd du compte (outil « Programmes au démarrage ») : « enabled » ou « disabled » pour
     /// `launchctl`. Le nom (label) est vérifié : il entre tel quel dans la commande.
     Demarrage { label: String },
+    /// Préférence de texte de la liste fermée `TEXTES` (une correction du bilan), avec ses valeurs possibles et la
+    /// commande qui la fait prendre.
+    Texte { pref: &'static PrefTexte },
+    /// Droits d'un fichier du dossier personnel (« 0644 »), remis par chmod, sans sudo.
+    Droits { chemin: PathBuf },
 }
+
+/// Une préférence de texte qu'une correction du bilan change, et ce qu'une note peut y remettre.
+pub struct PrefTexte {
+    pub domaine: &'static str,
+    pub cle: &'static str,
+    pub admises: &'static [&'static str],
+    pub apres: &'static str,
+}
+
+/// La liste fermée des préférences de texte que Vanguard sait remettre.
+static TEXTES: [PrefTexte; 1] = [PrefTexte {
+    domaine: "com.apple.sharingd",
+    cle: "DiscoverableMode",
+    admises: &["Contacts Only", "Everyone", "Off"],
+    apres: "killall sharingd 2>/dev/null; true",
+}];
 
 /// Les réglages de launchd pour ce compte (`launchctl print-disabled`), nom → désactivé ; `None` : illisible.
 fn agents_etats() -> Option<std::collections::HashMap<String, bool>> {
@@ -77,6 +98,38 @@ impl Changement {
                     .to_string()
                 })
             }
+            Changement::Texte { pref } => {
+                let r = crate::commande::lancer(Command::new("defaults").args(["read", pref.domaine, pref.cle]), 10)?;
+                (r.code == Some(0)).then(|| r.sortie.trim().to_string())
+            }
+            Changement::Droits { chemin } => super::annulables::droits_lus(chemin),
+        }
+    }
+
+    /// La valeur d'avant, relevée avant une correction : `None` si elle ne se lit pas. Une préférence absente est
+    /// une valeur (retirée pour annuler).
+    pub fn relever(&self) -> Option<Valeur> {
+        match self {
+            Changement::Droits { chemin } => super::annulables::droits_lus(chemin).map(Some),
+            _ => Some(self.lire()),
+        }
+    }
+
+    /// Le changement que désigne un geste noté (`annulables::Geste`), s'il vise une cible de la liste fermée.
+    pub fn depuis_geste(geste: &str) -> Option<Changement> {
+        let (genre, reste) = geste.split_once('|')?;
+        match genre {
+            "preference" => {
+                let (domaine, cle) = reste.split_once('|')?;
+                TEXTES
+                    .iter()
+                    .find(|p| p.domaine == domaine && p.cle == cle)
+                    .map(|pref| Changement::Texte { pref })
+            }
+            "droits" => super::annulables::dans_la_maison(Path::new(reste)).then(|| Changement::Droits {
+                chemin: PathBuf::from(reste),
+            }),
+            _ => None,
         }
     }
 
@@ -88,6 +141,8 @@ impl Changement {
             // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
             Changement::Dns { service, cible } => format!("{service}\n{}", cible.as_deref().unwrap_or("?")),
             Changement::Demarrage { .. } => "disabled".to_string(),
+            // Rebâtis pour être annulés seulement.
+            Changement::Texte { .. } | Changement::Droits { .. } => "?".to_string(),
         })
     }
 
@@ -97,6 +152,8 @@ impl Changement {
             // Les DNS donnés par la box.
             Changement::Dns { service, .. } => Some(format!("{service}\n")),
             Changement::Demarrage { .. } => Some("enabled".to_string()),
+            // Pas de « Mac neuf » pour une correction : sans note admise, rien ne se remet.
+            Changement::Texte { .. } | Changement::Droits { .. } => Some("?".to_string()),
         }
     }
 
@@ -120,10 +177,15 @@ impl Changement {
                 "launchctl {} gui/<uid>/{label}",
                 if v == Some("disabled") { "disable" } else { "enable" }
             ),
+            Changement::Texte { pref } => match v {
+                Some(t) => format!("defaults write {} {} -string \"{t}\"", pref.domaine, pref.cle),
+                None => format!("defaults delete {} {}", pref.domaine, pref.cle),
+            },
+            Changement::Droits { chemin } => format!("chmod {} {}", v.unwrap_or("?"), chemin.display()),
         }
     }
 
-    fn commande(&self, v: Option<&str>) -> Option<String> {
+    pub(super) fn commande(&self, v: Option<&str>) -> Option<String> {
         match self {
             Changement::Preference {
                 domaine, cle, admin, ..
@@ -173,6 +235,29 @@ impl Changement {
                 };
                 Some(format!("launchctl {action} \"gui/$(id -u)/{label}\""))
             }
+            // Chaque valeur repasse par `valeur_admise` : seule une valeur de la liste entre dans la commande.
+            Changement::Texte { pref } => {
+                if !self.valeur_admise(v) {
+                    return None;
+                }
+                Some(match v {
+                    Some(t) => format!(
+                        "defaults write {} {} -string {}; {}",
+                        pref.domaine,
+                        pref.cle,
+                        sh_chaine(t),
+                        pref.apres
+                    ),
+                    None => format!(
+                        "defaults delete {} {} 2>/dev/null; {}",
+                        pref.domaine, pref.cle, pref.apres
+                    ),
+                })
+            }
+            Changement::Droits { chemin } => {
+                let v = v.filter(|v| super::annulables::droits_admis(v))?;
+                Some(format!("chmod {v} {}", sh_chaine(&chemin.display().to_string())))
+            }
         }
     }
 
@@ -187,6 +272,8 @@ impl Changement {
                     .is_some_and(|(id, liste)| id == service && service_valide(id) && super::adresses_ip(liste))
             }),
             Changement::Demarrage { .. } => v.is_none_or(|v| matches!(v, "enabled" | "disabled")),
+            Changement::Texte { pref } => v.is_none_or(|v| pref.admises.contains(&v)),
+            Changement::Droits { .. } => v.is_some_and(super::annulables::droits_admis),
         }
     }
 
@@ -194,7 +281,10 @@ impl Changement {
     pub fn identite_dns(&self) -> Option<&str> {
         match self {
             Changement::Dns { service, .. } => Some(service),
-            Changement::Preference { .. } | Changement::Demarrage { .. } => None,
+            Changement::Preference { .. }
+            | Changement::Demarrage { .. }
+            | Changement::Texte { .. }
+            | Changement::Droits { .. } => None,
         }
     }
 
@@ -286,12 +376,17 @@ pub fn dns_principal(v4: &[&str], v6: &[&str]) -> Result<Changement, String> {
     })
 }
 
-pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
-    let commandes: Vec<Vec<String>> = lots
+/// Applique des lots de changements (un lot par réglage), puis les groupes de `en_plus` (les commandes d'autres
+/// annulations) dans le même passage. Rend la réussite de chaque lot, puis de chaque groupe en plus.
+pub fn ecrire_avec(lots: &[Vec<(&Changement, Valeur)>], en_plus: &[Vec<String>]) -> (Vec<bool>, Vec<bool>) {
+    let mut commandes: Vec<Vec<String>> = lots
         .iter()
         .map(|lot| lot.iter().filter_map(|(c, v)| c.commande(v.as_deref())).collect())
         .collect();
-    crate::machine::appliquer_chacune(&commandes)
+    commandes.extend(en_plus.iter().cloned());
+    let mut resultats = crate::machine::appliquer_chacune(&commandes);
+    let plus = resultats.split_off(lots.len().min(resultats.len()));
+    (resultats, plus)
 }
 
 /// Les programmes lancés à l'ouverture de session de ce compte : ses agents de launchd (~/Library/LaunchAgents) qui

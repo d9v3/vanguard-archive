@@ -44,7 +44,8 @@ pub(crate) const INTEGRITE_SIGNALE: &str = "integrite-signale.json";
 /// d'administrateur.
 pub(crate) const WIFI_PUBLIC: &str = "wifi-public.json";
 
-/// Les valeurs d'avant des réglages d'Optimiser (`optimiser`), remises en administrateur pour annuler : un programme
+/// Les valeurs d'avant des réglages d'Optimiser, des corrections du bilan et des réglages pour jouer (`optimiser`,
+/// `optimiser::annulables`), remises en administrateur pour annuler : un programme
 /// qui y écrirait une valeur à lui la ferait poser avec tous les droits.
 pub(crate) const REGLAGES: &str = "reglages.json";
 
