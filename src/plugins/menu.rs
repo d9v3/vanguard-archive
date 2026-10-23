@@ -16,7 +16,7 @@ fn invite() -> String {
 }
 
 fn attendre() {
-    demander(&trf!(
+    crate::selection::attendre_retour(&trf!(
         "\n{GRIS}Entrée pour revenir…{RESET}",
         "\n{GRIS}Enter to go back…{RESET}"
     ));

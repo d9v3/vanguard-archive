@@ -285,7 +285,7 @@ pub fn menu() {
                 e.date.get(..16).unwrap_or(&e.date)
             );
         }
-        let choix = demander(tr!(
+        let choix = crate::selection::demander_ou_revenir(tr!(
             "\n  Numéro du fichier (Entrée pour revenir) : ",
             "\n  File number (Enter to go back): "
         ));

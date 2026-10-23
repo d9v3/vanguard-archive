@@ -367,7 +367,7 @@ pub(super) fn lancer_ici(c: &Commande) {
             affichable(&erreur)
         ),
     }
-    demander(tr!("\n  Entrée pour revenir : ", "\n  Enter to go back: "));
+    crate::selection::attendre_retour(tr!("\n  Entrée pour revenir : ", "\n  Enter to go back: "));
 }
 
 #[cfg(test)]

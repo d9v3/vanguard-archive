@@ -460,7 +460,7 @@ pub fn menu() {
             );
             return;
         };
-        let reponse = demander(tr!(
+        let reponse = crate::selection::demander_ou_revenir(tr!(
             "\n  [n]ouvelle phrase, [r]etirer la protection, Entrée pour revenir : ",
             "\n  [n]ew passphrase, [r]emove protection, Enter to go back: "
         ));

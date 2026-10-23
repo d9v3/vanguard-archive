@@ -349,7 +349,7 @@ pub fn menu() {
         for l in detail(o) {
             afficher_aligne("  ", &l, 4, "");
         }
-        let reponse = demander(tr!(
+        let reponse = crate::selection::demander_ou_revenir(tr!(
             "\n  [r]enommer, [o]ublier, Entrée pour revenir : ",
             "\n  [r]ename, [f]orget, Enter to go back: "
         ));

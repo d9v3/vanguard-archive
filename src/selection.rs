@@ -416,9 +416,23 @@ impl Drop for ModeClavier {
 }
 
 /// Montre le menu et attend un choix : la touche de la ligne choisie, ce qui a été tapé (raccourci), ou `None` pour
-/// Échap. `invite` : la question quand la réponse se lit ligne par ligne. `depart` : la touche de la ligne en
+/// Échap ou ←. `invite` : la question quand la réponse se lit ligne par ligne. `depart` : la touche de la ligne en
 /// surbrillance au départ (la dernière choisie). `echap` : ce que fait Échap (« revenir », « quitter »).
 pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Option<String> {
+    let choix = choisir_ou(lignes, invite, depart, echap, true);
+    noter_retour(choix.is_none());
+    choix
+}
+
+/// Le menu principal : ← n'y quitte pas Vanguard (un appui de trop en revenant d'un sous-menu le fermerait), Échap
+/// et « q » si.
+pub fn choisir_au_sommet(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Option<String> {
+    let choix = choisir_ou(lignes, invite, depart, echap, false);
+    noter_retour(choix.is_none());
+    choix
+}
+
+fn choisir_ou(lignes: &[Ligne], invite: &str, depart: &str, echap: &str, gauche_revient: bool) -> Option<String> {
     let choix = choisissables(lignes);
     let touches: Vec<&str> = choix.iter().map(|c| c.touche).collect();
     // Les flèches ne parcourent que les lignes affichées ; la recherche, elle, voit aussi les lignes cachées.
@@ -446,17 +460,18 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
     let mut haut = 0;
     // Ce qui est tapé au clavier : un raccourci validé par Entrée, comme avant, ou des mots à chercher.
     let mut tape = String::new();
+    let gauche = if gauche_revient { "/←" } else { "" };
     let aide = trf!(
-        "  {GRIS}↑ ↓ choisir · Entrée lancer · un mot : chercher · Échap {echap}{RESET}",
-        "  {GRIS}↑ ↓ select · Enter run · a word: search · Esc {echap}{RESET}"
+        "  {GRIS}↑ ↓ choisir · Entrée/→ lancer · un mot : chercher · Échap{gauche} {echap}{RESET}",
+        "  {GRIS}↑ ↓ select · Enter/→ run · a word: search · Esc{gauche} {echap}{RESET}"
     );
     let aide_recherche = trf!(
-        "  {GRIS}↑ ↓ choisir · Entrée lancer · Échap effacer la recherche{RESET}",
-        "  {GRIS}↑ ↓ select · Enter run · Esc clear the search{RESET}"
+        "  {GRIS}↑ ↓ choisir · Entrée/→ lancer · Échap/← effacer la recherche{RESET}",
+        "  {GRIS}↑ ↓ select · Enter/→ run · Esc/← clear the search{RESET}"
     );
     let aide_prediction = trf!(
-        "  {GRIS}↑ ↓ choisir · Tab compléter · Entrée lancer · Échap effacer la recherche{RESET}",
-        "  {GRIS}↑ ↓ select · Tab complete · Enter run · Esc clear the search{RESET}"
+        "  {GRIS}↑ ↓ choisir · Tab/→ compléter · Entrée lancer · Échap effacer la recherche{RESET}",
+        "  {GRIS}↑ ↓ select · Tab/→ complete · Enter run · Esc clear the search{RESET}"
     );
     // Les mots du menu, lus à la première recherche seulement.
     let mut vocabulaire: Option<Vocabulaire> = None;
@@ -621,8 +636,10 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
             KeyCode::End | KeyCode::PageDown => Some(derniere),
             _ => None,
         };
-        // Ctrl-J ou Ctrl-M : le saut de ligne que certains terminaux envoient pour Entrée.
-        let entree = k.code == KeyCode::Enter || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')));
+        // Ctrl-J ou Ctrl-M : le saut de ligne que certains terminaux envoient pour Entrée. → entre aussi (quand il ne
+        // complète pas une prédiction, plus haut) et ← revient, comme Échap.
+        let entree =
+            matches!(k.code, KeyCode::Enter | KeyCode::Right) || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')));
         if let Some(i) = deplacement {
             if recherche {
                 en_cours_trouve = i;
@@ -650,9 +667,12 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
             let _ = terminal::disable_raw_mode();
             println!();
             std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });
-        } else if k.code == KeyCode::Esc || (k.code == KeyCode::Backspace && tape.is_empty()) {
+        } else if matches!(k.code, KeyCode::Esc | KeyCode::Left) || (k.code == KeyCode::Backspace && tape.is_empty()) {
             // Retour arrière sans rien de tapé : revient en arrière, comme Échap.
             if tape.is_empty() {
+                if k.code == KeyCode::Left && !gauche_revient {
+                    continue;
+                }
                 let _ = sortie.write_all(b"\r\n");
                 return None;
             }
@@ -674,6 +694,96 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
                 en_cours = i;
             }
         }
+    }
+}
+
+/// Une pause « Entrée pour revenir… » : Entrée, ←, Échap ou Retour arrière reviennent d'un seul appui, comme dans les
+/// menus (une ligne lue au clavier écrivait « ^[[D » pour ←, et il fallait Entrée de plus). Hors d'un terminal, la
+/// ligne est lue comme avant.
+pub fn attendre_retour(question: &str) {
+    let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let mut sortie = std::io::stdout();
+    let _ = write!(sortie, "{}", question_en_lignes(question));
+    let _ = sortie.flush();
+    let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
+        demander("");
+        return;
+    };
+    noter_retour(false);
+    loop {
+        let Ok(Event::Key(k)) = event::read() else {
+            continue;
+        };
+        if k.kind == KeyEventKind::Release {
+            continue;
+        }
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && matches!(k.code, KeyCode::Char('c' | 'd')) {
+            let _ = terminal::disable_raw_mode();
+            println!();
+            std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });
+        }
+        if matches!(
+            k.code,
+            KeyCode::Enter | KeyCode::Left | KeyCode::Esc | KeyCode::Backspace
+        ) || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')))
+        {
+            let _ = sortie.write_all(b"\r\n");
+            return;
+        }
+    }
+}
+
+/// Une question dont la réponse vide revient en arrière (« Choix (Entrée pour revenir) : ») : ← ou Échap, sur une
+/// ligne encore vide, reviennent d'un seul appui, comme Entrée. Le reste se tape comme avant (numéro, lettre, chemin),
+/// corrigé par Retour arrière. Hors d'un terminal, la ligne est lue comme avant.
+pub fn demander_ou_revenir(question: &str) -> String {
+    let reponse = lire_ou_revenir(question);
+    noter_retour(reponse.is_empty());
+    reponse
+}
+
+fn lire_ou_revenir(question: &str) -> String {
+    let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let mut sortie = std::io::stdout();
+    let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
+        return demander(question);
+    };
+    // En mode clavier, le terminal ne revient plus seul au début de la ligne.
+    let _ = write!(sortie, "{}", question_en_lignes(question).replace('\n', "\r\n"));
+    let _ = sortie.flush();
+    let mut tape = String::new();
+    loop {
+        let Ok(Event::Key(k)) = event::read() else {
+            continue;
+        };
+        if k.kind == KeyEventKind::Release {
+            continue;
+        }
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && matches!(k.code, KeyCode::Char('c' | 'd')) {
+            let _ = terminal::disable_raw_mode();
+            println!();
+            std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });
+        }
+        let entree = k.code == KeyCode::Enter || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')));
+        if entree || (tape.is_empty() && matches!(k.code, KeyCode::Left | KeyCode::Esc)) {
+            let _ = sortie.write_all(b"\r\n");
+            return tape.trim().to_string();
+        }
+        match k.code {
+            KeyCode::Backspace => {
+                if tape.pop().is_some() {
+                    let _ = sortie.write_all(b"\x08 \x08");
+                }
+            }
+            KeyCode::Char(c) if !ctrl && !c.is_control() => {
+                tape.push(c);
+                let _ = write!(sortie, "{c}");
+            }
+            _ => continue,
+        }
+        let _ = sortie.flush();
     }
 }
 
@@ -716,6 +826,12 @@ fn rendu_case(n: usize, c: &Case, cochee: bool, colonne: usize, en_cours: bool) 
 /// l'état final des cases, ou `None` pour Échap. Sans terminal, les numéros à inverser se tapent sur une ligne
 /// (« 1 4 », « r »), et un mot cherche. Une case `fixe` garde son état.
 pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
+    let etats = cocher_ou_revenir(titre, cases);
+    noter_retour(etats.is_none());
+    etats
+}
+
+fn cocher_ou_revenir(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
     let mut etats: Vec<bool> = cases.iter().map(|c| c.cochee).collect();
     if cases.is_empty() {
         return Some(etats);
@@ -937,7 +1053,10 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
         } else if let Some(t) = &mut recherche {
             // Entrée ou Échap finissent la recherche : toute la liste revient, la ligne en cours gardée. Entrée ne
             // valide pas la liste ici : on la valide en la voyant entière.
-            if entree || k.code == KeyCode::Esc || (k.code == KeyCode::Backspace && t.is_empty()) {
+            if entree
+                || matches!(k.code, KeyCode::Esc | KeyCode::Left)
+                || (k.code == KeyCode::Backspace && t.is_empty())
+            {
                 recherche = None;
             } else if k.code == KeyCode::Backspace {
                 t.pop();
@@ -960,8 +1079,9 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
                 // Une lettre ou un chiffre commence aussi une recherche ; « r » reste les recommandés (« / » d'abord
                 // pour chercher un mot en r).
                 KeyCode::Char(c) if !ctrl && c.is_alphanumeric() => recherche = Some(c.to_string()),
-                // Retour arrière, sans rien de tapé, revient en arrière comme Échap.
-                KeyCode::Esc | KeyCode::Backspace => {
+                // Retour arrière ou ←, sans rien de tapé, reviennent en arrière comme Échap. → ne valide pas : une
+                // liste à cocher lance souvent des changements (nettoyer, désinstaller), Entrée seule les confirme.
+                KeyCode::Esc | KeyCode::Backspace | KeyCode::Left => {
                     let _ = sortie.write_all(b"\r\n");
                     return None;
                 }
@@ -1148,7 +1268,11 @@ mod tests {
         for aide in aides {
             let texte = format!(
                 "  ↑ ↓{}",
-                aide.split("{RESET}").next().unwrap().replace("{echap}", "xxxxxxxxxx")
+                aide.split("{RESET}")
+                    .next()
+                    .unwrap()
+                    .replace("{echap}", "xxxxxxxxxx")
+                    .replace("{gauche}", "/←")
             );
             assert!(
                 largeur_affichee(&texte) <= LARGEUR,

@@ -179,7 +179,12 @@ pub fn menu() {
         "  2. Restaurer depuis un fichier (ajouté à la base actuelle, rien n'est effacé)",
         "  2. Restore from a file (added to the current database, nothing is erased)"
     );
-    match demander(tr!("\nChoix (Entrée pour revenir) : ", "\nChoice (Enter to go back): ")).as_str() {
+    match crate::selection::demander_ou_revenir(tr!(
+        "\nChoix (Entrée pour revenir) : ",
+        "\nChoice (Enter to go back): "
+    ))
+    .as_str()
+    {
         "1" => {
             let defaut = chemin_par_defaut();
             let saisi = demander(&trf!(

@@ -83,7 +83,7 @@ pub fn choisir() {
             chemin_affichable(chemin)
         );
     }
-    let reponse = demander(tr!(
+    let reponse = crate::selection::demander_ou_revenir(tr!(
         "\n  Numéro, ou chemin d'un dossier (Entrée pour revenir) : ",
         "\n  Number, or path of a folder (Enter to go back): "
     ));

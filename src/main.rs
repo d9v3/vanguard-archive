@@ -55,7 +55,7 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use machine::Audit;
 use reseau::{Options, Rapport};
-use selection::{Ligne, choisir};
+use selection::{Ligne, choisir, choisir_au_sommet};
 use ui::*;
 
 #[derive(Parser)]
@@ -958,7 +958,8 @@ async fn menu() {
     loop {
         print!("\x1b[2J\x1b[H");
         let lignes = lignes_du_menu(etat_du_menu(reseau::surveillance::active()));
-        let Some(choix) = choix_du_menu(&lignes, &dernier, tr!("quitter", "quit")) else {
+        let invite = format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: "));
+        let Some(choix) = choisir_au_sommet(&lignes, &invite, &dernier, tr!("quitter", "quit")) else {
             break;
         };
         let choix = choix.trim().to_lowercase();
@@ -1019,8 +1020,9 @@ fn choix_du_menu(lignes: &[Ligne], dernier: &str, echap: &str) -> Option<String>
 
 /// Après un outil lancé du menu : Entrée pour y revenir, sauf pour ceux qui ont leurs propres écrans.
 fn revenir_au_menu(action: Action) {
-    if action.attendre_apres() {
-        demander(&trf!(
+    // Quitté par « revenir » : l'outil s'est arrêté à ta demande, la pause serait un appui de trop.
+    if action.attendre_apres() && !ui::vient_de_revenir() {
+        crate::selection::attendre_retour(&trf!(
             "\n{GRIS}Entrée pour revenir au menu…{RESET}",
             "\n{GRIS}Enter to go back to the menu…{RESET}"
         ));
@@ -1653,14 +1655,18 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
         dernier = choix.to_string();
         println!();
         executer(s, action).await;
-        demander(&trf!(
-            "\n{GRIS}Entrée pour revenir…{RESET}",
-            "\n{GRIS}Enter to go back…{RESET}"
-        ));
+        if !ui::vient_de_revenir() {
+            crate::selection::attendre_retour(&trf!(
+                "\n{GRIS}Entrée pour revenir…{RESET}",
+                "\n{GRIS}Enter to go back…{RESET}"
+            ));
+        }
     }
 }
 
 async fn executer(s: &mut Session, action: Action) {
+    // Le choix de l'outil dans le menu n'est pas un « revenir » : seul compte ce qui se répond dans l'outil.
+    ui::noter_retour(false);
     match action {
         Action::Complet => s.complet().await,
         Action::Corriger => s.corriger(),
