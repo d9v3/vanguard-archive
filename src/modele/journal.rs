@@ -915,10 +915,20 @@ mod tests {
             .with_timezone(&chrono::Utc)
     }
 
+    /// Un dossier neuf à chaque appel, jamais celui d'un essai d'avant. Le dossier jetable des tests est sous le
+    /// dossier temporaire, que d'autres tests parcourent en même temps (sous Windows, `nettoyer` en mesure la taille :
+    /// une poignée par dossier et par fichier). Sous Wine, effacer un fichier ou un dossier ouvert ailleurs ne fait que
+    /// le marquer « à effacer » : il reste là, illisible, jusqu'à la dernière poignée. Le même nom repris d'un cas de
+    /// proptest au suivant gardait alors la tête du cas d'avant, illisible : la première écriture notait une rupture,
+    /// et le journal neuf se lisait « Incomplet ».
     fn dossier(nom: &str) -> PathBuf {
-        let d = crate::socle::dossier_local().join(format!("essai-journal-{nom}"));
+        static ESSAIS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = ESSAIS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let d = crate::socle::dossier_local().join(format!("essai-journal-{nom}-{n}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
+        // Rien d'avant : un reste se dit ici, pas plus loin comme une rupture du journal.
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 0, "{} pas vide", d.display());
         d
     }
 
@@ -1419,7 +1429,11 @@ mod tests {
             let d = dossier("mutation");
             remplir(&d, 2, "2026-09-30T10:00:00Z");
             remplir(&d, 4, "2026-10-01T10:00:00Z");
-            prop_assert_eq!(lire_dans(&d).lecture, Lecture::Intact);
+            let neuf = lire_dans(&d);
+            // Une rupture dit ce que la tête attendait et ce qui a été trouvé : la cause se lit dans l'échec même.
+            let ruptures: Vec<&Genre> =
+                neuf.evenements.iter().map(|e| &e.quoi).filter(|q| matches!(q, Genre::Rupture { .. })).collect();
+            prop_assert_eq!(neuf.lecture, Lecture::Intact, "{:?}", ruptures);
             if muter(&d, &m) {
                 let lu = lire_dans(&d).lecture;
                 prop_assert!(lu != Lecture::Intact, "{:?} → {:?}", m, lu);
