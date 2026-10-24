@@ -360,7 +360,7 @@ mod tests {
                 .arg(&cert)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
             let adresse: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
@@ -373,8 +373,11 @@ mod tests {
                 }
             }
             let _ = serveur.kill();
-            let _ = serveur.wait();
-            let r = r.expect("s_server n'a pas répondu");
+            // Ce que s_server a dit (groupe inconnu, port pris…) : sans lui, un échec ne disait pas pourquoi.
+            let dit = serveur
+                .wait_with_output()
+                .map(|o| String::from_utf8_lossy(&o.stderr).into_owned());
+            let r = r.unwrap_or_else(|| panic!("s_server n'a pas répondu ({groupes}) : {dit:?}"));
             if attendu {
                 assert_eq!(r, ReponsePq::Accepte, "{groupes}");
             } else {
