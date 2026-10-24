@@ -350,9 +350,10 @@ mod tests {
             let ecoute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = ecoute.local_addr().unwrap().port();
             drop(ecoute);
+            // L'adresse avec le port : un port seul, sous Windows, n'écoute qu'en IPv6 (::), où 127.0.0.1 ne répond pas.
             let mut serveur = Command::new("openssl")
                 .args(["s_server", "-quiet", "-tls1_3", "-groups", groupes, "-accept"])
-                .arg(port.to_string())
+                .arg(format!("127.0.0.1:{port}"))
                 .arg("-key")
                 .arg(&cle)
                 .arg("-cert")
